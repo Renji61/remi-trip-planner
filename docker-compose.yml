@@ -3,26 +3,10 @@ services:
     build: .
     container_name: remi-trip-planner
     ports:
-      - "8080:8080"
+      - "8051:8080"
     volumes:
       - trip_data:/app/data
     restart: unless-stopped
 
-  caddy:
-    image: caddy:2.9-alpine
-    container_name: remi-trip-proxy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
-    restart: unless-stopped
-
 volumes:
   trip_data:
-  caddy_data:
-  caddy_config:
