@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>REMI Trip Planner</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>REMI Trip Planner</h1>
+      <p>Lightweight Wanderlog-style planner for personal trips.</p>
+    </header>
+
+    <section class="card">
+      <h2>Create Trip</h2>
+      <form method="post" action="/trips" class="grid">
+        <label>Trip Name<input type="text" name="name" required></label>
+        <label>Description<input type="text" name="description"></label>
+        <label>Start Date<input type="date" name="start_date"></label>
+        <label>End Date<input type="date" name="end_date"></label>
+        <button type="submit">Create</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Your Trips</h2>
+      {{if .Trips}}
+      <ul class="list">
+        {{range .Trips}}
+        <li>
+          <a href="/trips/{{.ID}}">{{.Name}}</a>
+          <small>{{.StartDate}} - {{.EndDate}}</small>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p>No trips yet.</p>
+      {{end}}
+    </section>
+  </main>
+</body>
+</html>

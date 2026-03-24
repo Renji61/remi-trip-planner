@@ -1,0 +1,9 @@
+{
+  "name": "REMI Trip Planner",
+  "short_name": "REMI Trips",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#2563eb",
+  "icons": []
+}

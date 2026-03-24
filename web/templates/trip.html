@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Details.Trip.Name}} | REMI Trip Planner</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <main class="container">
+    <a href="/">Back to trips</a>
+    <header>
+      <h1>{{.Details.Trip.Name}}</h1>
+      <p>{{.Details.Trip.Description}}</p>
+    </header>
+
+    <section class="two-col">
+      <article class="card">
+        <h2>Add Itinerary Item</h2>
+        <form method="post" action="/trips/{{.Details.Trip.ID}}/itinerary" class="grid">
+          <label>Title<input type="text" name="title" required></label>
+          <label>Day<input type="number" min="1" name="day_number" value="1"></label>
+          <label>Order<input type="number" min="0" name="order_index" value="0"></label>
+          <label>Location<input type="text" name="location"></label>
+          <label>Latitude<input type="number" step="any" name="latitude"></label>
+          <label>Longitude<input type="number" step="any" name="longitude"></label>
+          <label>Start<input type="time" name="start_time"></label>
+          <label>End<input type="time" name="end_time"></label>
+          <label>Estimated Cost<input type="number" step="0.01" name="est_cost"></label>
+          <label>Notes<input type="text" name="notes"></label>
+          <button type="submit">Add Item</button>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Map</h2>
+        <div id="map" class="map"></div>
+      </article>
+    </section>
+
+    <section class="two-col">
+      <article class="card">
+        <h2>Itinerary</h2>
+        {{if .Details.Itinerary}}
+          <ul class="list">
+            {{range .Details.Itinerary}}
+              <li data-lat="{{.Latitude}}" data-lng="{{.Longitude}}" data-title="{{.Title}}" data-location="{{.Location}}">
+                <strong>Day {{.DayNumber}}:</strong> {{.Title}} ({{.StartTime}}-{{.EndTime}})
+                <div>{{.Location}} | Est. ${{printf "%.2f" .EstCost}}</div>
+                <small>{{.Notes}}</small>
+              </li>
+            {{end}}
+          </ul>
+        {{else}}
+          <p>No itinerary items yet.</p>
+        {{end}}
+      </article>
+
+      <article class="card">
+        <h2>Budget</h2>
+        <p>Total Spent: <strong>${{printf "%.2f" .TotalExpense}}</strong></p>
+        <form method="post" action="/trips/{{.Details.Trip.ID}}/expenses" class="grid">
+          <label>Category<input type="text" name="category" placeholder="food"></label>
+          <label>Amount<input type="number" step="0.01" name="amount" required></label>
+          <label>Date<input type="date" name="spent_on"></label>
+          <label>Notes<input type="text" name="notes"></label>
+          <button type="submit">Add Expense</button>
+        </form>
+        {{if .Details.Expenses}}
+        <ul class="list">
+          {{range .Details.Expenses}}
+          <li>{{.Category}}: ${{printf "%.2f" .Amount}} <small>{{.SpentOn}} {{.Notes}}</small></li>
+          {{end}}
+        </ul>
+        {{end}}
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>Packing / Checklist</h2>
+      <form method="post" action="/trips/{{.Details.Trip.ID}}/checklist" class="inline-form">
+        <input type="text" name="text" placeholder="Add checklist item" required>
+        <button type="submit">Add</button>
+      </form>
+      {{if .Details.Checklist}}
+      <ul class="list">
+        {{range .Details.Checklist}}
+        <li>
+          <form method="post" action="/checklist/{{.ID}}/toggle" class="inline-form">
+            <input type="hidden" name="done" value="{{if .Done}}false{{else}}true{{end}}">
+            <button type="submit">{{if .Done}}Undo{{else}}Done{{end}}</button>
+          </form>
+          <span class="{{if .Done}}done{{end}}">{{.Text}}</span>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p>No checklist items yet.</p>
+      {{end}}
+    </section>
+  </main>
+</body>
+</html>

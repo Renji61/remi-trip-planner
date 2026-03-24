@@ -1,0 +1,58 @@
+CREATE TABLE IF NOT EXISTS trips (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  start_date TEXT NOT NULL DEFAULT '',
+  end_date TEXT NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS itinerary_items (
+  id TEXT PRIMARY KEY,
+  trip_id TEXT NOT NULL,
+  day_number INTEGER NOT NULL DEFAULT 1,
+  order_index INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  latitude REAL NOT NULL DEFAULT 0,
+  longitude REAL NOT NULL DEFAULT 0,
+  est_cost REAL NOT NULL DEFAULT 0,
+  start_time TEXT NOT NULL DEFAULT '',
+  end_time TEXT NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY,
+  trip_id TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'general',
+  amount REAL NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  spent_on TEXT NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS checklist_items (
+  id TEXT PRIMARY KEY,
+  trip_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  done BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at DATETIME NOT NULL,
+  FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS change_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trip_id TEXT NOT NULL,
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  changed_at DATETIME NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}',
+  FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+);

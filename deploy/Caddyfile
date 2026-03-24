@@ -1,0 +1,5 @@
+# Replace trip.example.com with your domain before deploying.
+trip.example.com {
+  encode zstd gzip
+  reverse_proxy app:8080
+}
