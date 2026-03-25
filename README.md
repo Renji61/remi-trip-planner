@@ -27,7 +27,7 @@ A lightweight, Dockerized, Wanderlog-style trip planner focused on low-end hardw
 docker compose up --build
 ```
 
-Open `http://localhost:8080`.
+Open `http://localhost:8051`.
 
 ## Remote Access
 

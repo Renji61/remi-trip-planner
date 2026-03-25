@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>
+    (function () {
+      try {
+        var k = "remi-theme";
+        var s = localStorage.getItem(k);
+        var dark = s === "dark" || (s !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("theme-dark", dark);
+      } catch (e) {}
+    })();
+  </script>
+  <title>Vehicle Rental | {{.Details.Trip.Name}} | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </div>
+      <ul class="nav-list">
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined">luggage</span>Trip Details</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined">hotel</span>Accommodation</a></li>
+        <li class="nav-item active"><a href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined">car_rental</span>Vehicle Rental</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined">flight</span>Flights</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined">payments</span>Expense Analysis</a></li>
+        <li class="nav-item"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
+      </ul>
+      <div class="sidebar-bottom">
+        <a class="btn" href="/">Back to Dashboard</a>
+        <a class="support-link" href="/">Support</a>
+      </div>
+    </aside>
+
+    <section class="main vehicle-redesign">
+      <header class="topbar">
+        <div class="title-group">
+          <h2>Vehicle Rental</h2>
+          <p>Manage your mobility with ease.</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">
+          <button type="button" class="icon-btn" data-theme-toggle aria-label="Toggle light or dark mode">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="vehicle-layout">
+        <section class="vehicle-form-panel">
+          <div class="vehicle-section-head">
+            <div class="vehicle-section-icon"><span class="material-symbols-outlined">add_road</span></div>
+            <h3>New Rental Booking</h3>
+          </div>
+          {{if .Details.Trip.IsArchived}}
+          <p class="muted">Trip is archived. Vehicle rental entries are disabled.</p>
+          {{else}}
+          <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid vehicle-form-grid" enctype="multipart/form-data">
+            <label class="full">Vehicle Name & Type<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
+            <label>Pick-up Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required></label>
+            <label>Booking Confirmation #<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
+            <label>Pick-up Date & Time<input type="datetime-local" name="pick_up_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
+            <label>Drop-off Date & Time<input type="datetime-local" name="drop_off_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
+            <label>Rental Cost<input type="number" step="0.01" name="cost" placeholder="0.00"></label>
+            <label>Insurance Cost<input type="number" step="0.01" name="insurance_cost" placeholder="0.00"></label>
+            <label class="checkbox-inline full"><input type="checkbox" name="pay_at_pick_up" value="true">Pay at Pick Up</label>
+            <label class="full">Attach Vehicle Image<input type="file" name="vehicle_image" accept="image/*"></label>
+            <label class="full">Additional Notes<input type="text" name="notes" placeholder="Notes about insurance coverage, keys, etc."></label>
+            <button class="full vehicle-submit-btn" type="submit">Save Rental Booking</button>
+          </form>
+          {{end}}
+        </section>
+
+        <section class="vehicle-list-panel">
+          <div class="vehicle-list-head">
+            <h3>Saved Vehicle Rentals</h3>
+          </div>
+          {{if .Details.Vehicles}}
+          <ul class="list vehicle-card-list">
+            {{range .Details.Vehicles}}
+            <li class="vehicle-rental-item vehicle-rental-card">
+              <div id="vehicle-rental-view-{{.ID}}" class="item-view">
+                <div class="vehicle-card-content">
+                  <div class="vehicle-media">
+                    {{if .VehicleImagePath}}
+                    <a href="{{.VehicleImagePath}}" target="_blank" rel="noreferrer">
+                      <img class="vehicle-card-image" src="{{.VehicleImagePath}}" alt="Vehicle image">
+                    </a>
+                    {{else}}
+                    <div class="vehicle-card-image vehicle-card-image--placeholder">
+                      <span class="material-symbols-outlined">directions_car</span>
+                    </div>
+                    {{end}}
+                  </div>
+                  <div class="vehicle-main">
+                    <div class="vehicle-main-top">
+                      <div>
+                        <h4>{{if .VehicleDetail}}{{.VehicleDetail}}{{else}}Vehicle Rental{{end}}</h4>
+                        <p>{{.PickUpLocation}}</p>
+                      </div>
+                      <div class="vehicle-cost-block">
+                        <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}}</strong>
+                        <small>Total Rental</small>
+                      </div>
+                    </div>
+                    <div class="vehicle-meta-grid">
+                      <div><span class="material-symbols-outlined">calendar_today</span><div><strong>{{formatDateTime .PickUpAt}}</strong><small>Pick Up</small></div></div>
+                      <div><span class="material-symbols-outlined">event</span><div><strong>{{formatDateTime .DropOffAt}}</strong><small>Drop Off</small></div></div>
+                      <div><span class="material-symbols-outlined">shield</span><div><strong>{{$.CurrencySymbol}}{{printf "%.2f" .InsuranceCost}}</strong><small>Insurance</small></div></div>
+                      <div><span class="material-symbols-outlined">confirmation_number</span><div><strong>{{if .BookingConfirmation}}{{.BookingConfirmation}}{{else}}-{{end}}</strong><small>Confirmation</small></div></div>
+                    </div>
+                    {{if .Notes}}<p class="vehicle-note">{{.Notes}}</p>{{end}}
+                    {{if not $.Details.Trip.IsArchived}}
+                    <div class="vehicle-actions-row">
+                      <button type="button" class="secondary-btn" data-inline-edit-open="vehicle-rental-edit-{{.ID}}">Edit Details</button>
+                      <form method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/delete" onsubmit="return confirm('Delete this vehicle rental entry?');">
+                        <button type="submit" class="item-action-btn danger">Delete</button>
+                      </form>
+                    </div>
+                    {{end}}
+                  </div>
+                </div>
+              </div>
+              {{if not $.Details.Trip.IsArchived}}
+              <form id="vehicle-rental-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/update" class="form-grid item-edit hidden full vehicle-edit-form" enctype="multipart/form-data">
+                <div class="full vehicle-edit-head">
+                  <h5>Edit Rental Details</h5>
+                  <p>Update details here and it will sync to itinerary and expenses.</p>
+                </div>
+                <label class="full">Vehicle Name & Type<input type="text" name="vehicle_detail" value="{{.VehicleDetail}}"></label>
+                <label class="full">Pick-up Location<input type="text" name="pick_up_location" value="{{.PickUpLocation}}" required></label>
+                <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}"></label>
+                <label>Pick-up Date & Time<input type="datetime-local" name="pick_up_at" value="{{.PickUpAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                <label>Drop-off Date & Time<input type="datetime-local" name="drop_off_at" value="{{.DropOffAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                <label>Rental Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Cost}}"></label>
+                <label>Insurance Cost<input type="number" step="0.01" name="insurance_cost" value="{{printf "%.2f" .InsuranceCost}}"></label>
+                <label class="checkbox-inline full"><input type="checkbox" name="pay_at_pick_up" value="true" {{if .PayAtPickUp}}checked{{end}}>Pay at Pick Up</label>
+                <input type="hidden" name="current_vehicle_image_path" value="{{.VehicleImagePath}}">
+                {{if .VehicleImagePath}}
+                <label class="full vehicle-thumb-form-row">
+                  <span>Current Vehicle Image</span>
+                  <a href="{{.VehicleImagePath}}" target="_blank" rel="noreferrer">
+                    <img class="vehicle-thumb" src="{{.VehicleImagePath}}" alt="Vehicle image">
+                  </a>
+                </label>
+                {{end}}
+                <label class="full">Replace Vehicle Image<input type="file" name="vehicle_image" accept="image/*"></label>
+                <label class="full">Image Action
+                  <select name="remove_vehicle_image">
+                    <option value="false" selected>Keep existing image</option>
+                    <option value="true">Delete existing image</option>
+                  </select>
+                </label>
+                <label class="full">Additional Notes<input type="text" name="notes" value="{{.Notes}}"></label>
+                <div class="full vehicle-edit-actions">
+                  <button type="submit">Save Changes</button>
+                  <button type="button" class="secondary-btn" data-inline-edit-cancel="vehicle-rental-edit-{{.ID}}">Cancel</button>
+                </div>
+              </form>
+              {{end}}
+            </li>
+            {{end}}
+          </ul>
+          {{else}}
+          <div class="vehicle-empty-state">
+            <div class="vehicle-empty-icon"><span class="material-symbols-outlined">directions_car</span></div>
+            <p>Discover more options</p>
+            <small>Need a convertible for the coast or a van for the crew?</small>
+          </div>
+          {{end}}
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

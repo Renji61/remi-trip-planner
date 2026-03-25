@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>
+    (function () {
+      try {
+        var k = "remi-theme";
+        var s = localStorage.getItem(k);
+        var dark = s === "dark" || (s !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("theme-dark", dark);
+      } catch (e) {}
+    })();
+  </script>
+  <title>Accommodation | {{.Details.Trip.Name}} | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </div>
+      <ul class="nav-list">
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined">luggage</span>Trip Details</a></li>
+        <li class="nav-item active"><a href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined">hotel</span>Accommodation</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined">car_rental</span>Vehicle Rental</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined">flight</span>Flights</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined">payments</span>Expense Analysis</a></li>
+        <li class="nav-item"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
+      </ul>
+      <div class="sidebar-bottom">
+        <a class="btn" href="/">Back to Dashboard</a>
+        <a class="support-link" href="/">Support</a>
+      </div>
+    </aside>
+
+    <section class="main accommodation-redesign">
+      <header class="topbar">
+        <div class="title-group">
+          <h2>Accommodation</h2>
+          <p>Manage your stays with ease.</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">
+          <button type="button" class="icon-btn" data-theme-toggle aria-label="Toggle light or dark mode">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="accommodation-layout">
+        <section class="accommodation-form-panel">
+          <div class="accommodation-form-head">
+            <div class="accommodation-form-icon"><span class="material-symbols-outlined">add_business</span></div>
+            <h3>New Stay Booking</h3>
+          </div>
+          {{if .Details.Trip.IsArchived}}
+          <p class="muted">Trip is archived. New accommodation entries are disabled.</p>
+          {{else}}
+          <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form>
+            <label class="full">Hotel or Residence Name<input type="text" name="name" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
+            <label class="full">Address<input type="text" name="address" placeholder="Full street address" required data-accommodation-address></label>
+            <p class="full location-hint" data-accommodation-status>We will try to auto-fill address from the name you enter.</p>
+            <label>Check-in Date/Time<input type="datetime-local" name="check_in_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
+            <label>Check-out Date/Time<input type="datetime-local" name="check_out_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
+            <label class="full">Cost<input type="number" step="0.01" name="cost" placeholder="0.00"></label>
+            <label class="full">Booking Confirmation #<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
+            <label class="full">Notes<input type="text" name="notes" placeholder="Breakfast included, high floor requested..."></label>
+            <label class="full">Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
+            <button class="full accommodation-save-btn" type="submit">Save Stay Booking</button>
+          </form>
+          {{end}}
+        </section>
+
+        <section class="accommodation-list-panel">
+          <div class="accommodation-list-head">
+            <h3>Saved Accommodations</h3>
+          </div>
+          {{if .Details.Lodgings}}
+            <ul class="list accommodation-card-list">
+              {{range .Details.Lodgings}}
+              <li class="accommodation-card-wrap">
+                  <div id="accommodation-view-{{.ID}}" class="item-view accommodation-card-view">
+                    <div class="accommodation-media">
+                      {{if .AttachmentPath}}
+                      <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">
+                        <img class="accommodation-cover" src="{{.AttachmentPath}}" alt="Accommodation attachment">
+                      </a>
+                      {{else}}
+                      <div class="accommodation-cover accommodation-cover--placeholder">
+                        <span class="material-symbols-outlined">hotel</span>
+                      </div>
+                      {{end}}
+                    </div>
+                    <div class="accommodation-main">
+                      <div class="accommodation-main-head">
+                        <h4>{{.Name}}{{if .BookingConfirmation}} | Booking #{{.BookingConfirmation}}{{end}}</h4>
+                        <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}}</strong>
+                      </div>
+                      <p class="accommodation-main-address"><span class="material-symbols-outlined">location_on</span>{{if .Address}}{{.Address}}{{else}}-{{end}}</p>
+                      <div class="accommodation-meta-pills">
+                        <span><span class="material-symbols-outlined">calendar_today</span>{{formatDateTime .CheckInAt}}</span>
+                        <span><span class="material-symbols-outlined">event</span>{{formatDateTime .CheckOutAt}}</span>
+                      </div>
+                      <div class="accommodation-footer">
+                        {{if .AttachmentPath}}
+                        <a class="attachment-btn" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">Open Attachment</a>
+                        {{end}}
+                        {{if .Notes}}<p class="accommodation-note">{{.Notes}}</p>{{end}}
+                        {{if not $.Details.Trip.IsArchived}}
+                        <div class="accommodation-actions">
+                          <button type="button" class="secondary-btn" data-inline-edit-open="accommodation-edit-{{.ID}}">Edit Details</button>
+                          <form method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/delete" onsubmit="return confirm('Delete this accommodation entry?');">
+                            <button type="submit" class="item-action-btn danger">Delete</button>
+                          </form>
+                        </div>
+                        {{end}}
+                      </div>
+                    </div>
+                  </div>
+
+                  {{if not $.Details.Trip.IsArchived}}
+                  <form id="accommodation-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/update" class="form-grid item-edit hidden full accommodation-edit-form" enctype="multipart/form-data">
+                    <div class="full accommodation-edit-head">
+                      <h5>Edit Stay</h5>
+                      <p>Update details here and it will sync to itinerary and expenses.</p>
+                    </div>
+                    <label class="full">Hotel or Residence Name<input type="text" name="name" value="{{.Name}}" required></label>
+                    <label class="full">Address<input type="text" name="address" value="{{.Address}}" required></label>
+                    <label>Check-in Date/Time<input type="datetime-local" name="check_in_at" value="{{.CheckInAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                    <label>Check-out Date/Time<input type="datetime-local" name="check_out_at" value="{{.CheckOutAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                    <label>Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Cost}}"></label>
+                    <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}"></label>
+                    <input type="hidden" name="current_attachment_path" value="{{.AttachmentPath}}">
+                    <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}"></label>
+                    <label class="full">Replace Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
+                    <label class="full">Attachment Action
+                      <select name="remove_attachment">
+                        <option value="false" selected>Keep existing attachment</option>
+                        <option value="true">Delete existing attachment</option>
+                      </select>
+                    </label>
+                    <div class="full accommodation-edit-actions">
+                      <button type="submit">Save Changes</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="accommodation-edit-{{.ID}}">Cancel</button>
+                    </div>
+                  </form>
+                  {{end}}
+              </li>
+              {{end}}
+            </ul>
+          {{else}}
+          <div class="accommodation-empty">
+            <div><span class="material-symbols-outlined">hotel</span></div>
+            <h4>Add Next Destination</h4>
+            <p>Keep your journey organized by adding another stay.</p>
+          </div>
+          {{end}}
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

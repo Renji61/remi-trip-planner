@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>
+    (function () {
+      try {
+        var k = "remi-theme";
+        var s = localStorage.getItem(k);
+        var dark = s === "dark" || (s !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("theme-dark", dark);
+      } catch (e) {}
+    })();
+  </script>
+  <title>Expense Analysis | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </div>
+      <ul class="nav-list">
+        <li class="nav-item"><a href="/trips/{{.Trip.ID}}"><span class="material-symbols-outlined">luggage</span>Trip Details</a></li>
+        <li class="nav-item"><a href="/trips/{{.Trip.ID}}/accommodation"><span class="material-symbols-outlined">hotel</span>Accommodation</a></li>
+        <li class="nav-item"><a href="/trips/{{.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined">car_rental</span>Vehicle Rental</a></li>
+        <li class="nav-item"><a href="/trips/{{.Trip.ID}}/flights"><span class="material-symbols-outlined">flight</span>Flights</a></li>
+        <li class="nav-item active"><a href="/trips/{{.Trip.ID}}/budget"><span class="material-symbols-outlined">payments</span>Expense Analysis</a></li>
+        <li class="nav-item"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
+      </ul>
+      <div class="sidebar-bottom">
+        <a class="btn" href="/trips/{{.Trip.ID}}">Back to Trip</a>
+        <a class="support-link" href="/">Support</a>
+        <a class="logout-link" href="/">Logout</a>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar budget-topbar">
+        <div class="title-group">
+          <h2>Expense Analysis</h2>
+          <p>{{formatUIDate .Trip.StartDate}} – {{formatUIDate .Trip.EndDate}}</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">
+          <div class="trip-actions-links">
+            <form method="get" action="/trips/{{.Trip.ID}}/budget/export" class="budget-export-form">
+              <input type="hidden" name="format" value="csv">
+              <button type="submit" class="secondary-btn">Export Report</button>
+            </form>
+            <a class="btn" href="#add-expense">Add Expense</a>
+          </div>
+          <div class="avatar-row">
+            <button type="button" class="icon-btn" data-theme-toggle aria-label="Toggle light or dark mode">
+              <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+            </button>
+            <span class="avatar-dot"></span>
+            <span class="avatar">A</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="budget-summary-grid">
+        <section class="budget-metric-card">
+          <div class="budget-metric-head">
+            <span class="budget-metric-title">Total Spent</span>
+            <span class="budget-metric-icon budget-metric-icon--primary">
+              <span class="material-symbols-outlined">account_balance_wallet</span>
+            </span>
+          </div>
+          <div class="budget-metric-value">{{.CurrencySymbol}}{{printf "%.2f" .TotalSpent}}</div>
+          <div class="budget-metric-sub">{{printf "%.0f" .BudgetProgress}}% of budget used</div>
+        </section>
+
+        <section class="budget-metric-card">
+          <div class="budget-metric-head">
+            <span class="budget-metric-title">Remaining</span>
+            <span class="budget-metric-icon budget-metric-icon--secondary">
+              <span class="material-symbols-outlined">savings</span>
+            </span>
+          </div>
+          <div class="budget-metric-value">{{.CurrencySymbol}}{{printf "%.2f" .Remaining}}</div>
+          <div class="budget-metric-sub">{{.RemainingPercentInt}}% left</div>
+        </section>
+
+        <section class="budget-metric-card">
+          <div class="budget-metric-head">
+            <span class="budget-metric-title">Daily Avg</span>
+            <span class="budget-metric-icon budget-metric-icon--tertiary">
+              <span class="material-symbols-outlined">monitoring</span>
+            </span>
+          </div>
+          <div class="budget-metric-value">{{.CurrencySymbol}}{{printf "%.2f" .DailyAvgSpent}}</div>
+          <div class="budget-metric-sub budget-daily-delta">
+            <span class="budget-trend {{.DailyTrendClass}}">
+              <span class="material-symbols-outlined">{{.DailyTrendIcon}}</span>
+              {{.DailyDeltaPctAbsInt}}%
+            </span>
+            <span>budget target: {{.CurrencySymbol}}{{printf "%.2f" .BudgetTargetPerDay}}/day</span>
+          </div>
+        </section>
+      </div>
+
+      <div class="card budget-analytics-card">
+        <div class="budget-analytics-grid">
+          <div class="budget-donut-wrapper">
+            <div class="budget-donut">
+              <svg class="budget-donut-svg" viewBox="0 0 36 36" role="img" aria-label="Expenses by category">
+                <g transform="rotate(-90 18 18)">
+                  <circle cx="18" cy="18" r="16" class="budget-donut-bg"></circle>
+                  {{range .BudgetGroups}}
+                  {{if gt .DonutDashArrayA 0}}
+                  <circle cx="18" cy="18" r="16" class="budget-donut-segment budget-donut-segment--{{.DonutStyle}}" fill="transparent" style="stroke: {{.DonutStroke}};"
+                          stroke-dasharray="{{.DonutDashArrayA}} {{.DonutDashArrayB}}" stroke-dashoffset="{{.DonutDashOffset}}">
+                    <title>{{.Name}} - {{.PercentInt}}% - {{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</title>
+                  </circle>
+                  {{end}}
+                  {{end}}
+                </g>
+              </svg>
+              <div class="budget-donut-center">
+                <span class="budget-donut-center-label">Total</span>
+                <span class="budget-donut-center-value">{{.CurrencySymbol}}{{printf "%.0f" .TotalSpent}}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="budget-legend-grid">
+            {{range .BudgetGroups}}
+            <div class="budget-legend-item">
+              <div class="budget-legend-left">
+                <span class="budget-legend-expense-icon expense-cat-icon expense-cat-icon--{{.IconStyle}}">
+                  <span class="material-symbols-outlined">{{.Icon}}</span>
+                </span>
+                <div class="budget-legend-text">
+                  <p class="budget-legend-name">{{.Name}}</p>
+                  <p class="budget-legend-sub">{{.ExpenseCount}} expenses</p>
+                </div>
+              </div>
+              <div class="budget-legend-right">
+                <p class="budget-legend-amount">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</p>
+                <p class="budget-legend-percent">{{.PercentInt}}%</p>
+              </div>
+            </div>
+            {{end}}
+          </div>
+        </div>
+      </div>
+
+      <section class="card budget-transaction-card">
+        <div class="budget-transaction-head">
+          <h3>Transaction History</h3>
+          <div class="budget-transaction-actions">
+            <span class="budget-transaction-spacer" aria-hidden="true"></span>
+          </div>
+        </div>
+
+        <div class="budget-table-wrap">
+          <table class="budget-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Description</th>
+                <th>Method</th>
+                <th class="budget-table-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="budget-transactions-tbody">
+              {{if .HasTransactions}}
+              {{range .Transactions}}
+              <tr>
+                <td class="budget-table-date">{{if .DateLabel}}{{.DateLabel}}{{else}}--{{end}}</td>
+                <td class="budget-table-category">
+                  <div class="budget-table-cat">
+                    <span class="budget-table-icon expense-cat-icon expense-cat-icon--{{.CategoryStyle}}">
+                      <span class="material-symbols-outlined">{{.CategoryIcon}}</span>
+                    </span>
+                    <div class="budget-table-cat-text">
+                      <strong>{{.CategoryName}}</strong>
+                    </div>
+                  </div>
+                </td>
+                <td class="budget-table-description">{{if .Description}}{{.Description}}{{else}}--{{end}}</td>
+                <td class="budget-table-method">{{.Method}}</td>
+                <td class="budget-table-amount budget-table-right">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</td>
+              </tr>
+              {{end}}
+              {{else}}
+              <tr>
+                <td colspan="5">
+                  <div class="budget-empty">No transactions yet.</div>
+                </td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="budget-transaction-footer">
+          {{if .CanShowAllTransactions}}
+          <button
+            type="button"
+            class="link-btn budget-view-all-btn"
+            id="budget-view-all-btn"
+            hx-get="/trips/{{.Trip.ID}}/budget/transactions?offset={{.BudgetInitialLimit}}&limit=9999"
+            hx-target="#budget-transactions-tbody"
+            hx-swap="beforeend"
+            hx-trigger="click once"
+            hx-on:htmx:after-request="this.disabled = true; this.classList.add('budget-view-all-disabled'); this.textContent = 'All transactions shown';"
+          >
+            View All Transactions
+          </button>
+          {{else}}
+          <span class="budget-view-all-disabled">All transactions shown</span>
+          {{end}}
+        </div>
+      </section>
+
+      <section id="add-expense" class="card budget-add-expense-card">
+        <h3>Add Expense</h3>
+        {{if .Trip.IsArchived}}
+        <p class="muted">Trip is archived. New expenses are disabled.</p>
+        {{else}}
+        <form method="post" action="/trips/{{.Trip.ID}}/expenses" class="form-grid">
+          <input type="hidden" name="return_to" value="/trips/{{.Trip.ID}}/budget">
+          <label class="full">Category
+            <select name="category" required>
+              <option value="" disabled selected>Select category</option>
+              {{range .ExpenseCategories}}
+              <option value="{{.}}">{{.}}</option>
+              {{end}}
+            </select>
+          </label>
+          <label>Amount<input type="number" step="0.01" name="amount" placeholder="0.00" required></label>
+          <label>Date<input type="date" name="spent_on"></label>
+          <label>Payment Method
+            <select name="payment_method" required>
+              <option value="" disabled selected>Select payment method</option>
+              <option value="Cash">Cash</option>
+              <option value="Credit Card">Credit Card</option>
+              <option value="Crypto">Crypto</option>
+              <option value="Debit Card">Debit Card</option>
+              <option value="Digital Wallet">Digital Wallet</option>
+              <option value="Mobile Payment">Mobile Payment</option>
+            </select>
+          </label>
+          <label class="full">Notes<input type="text" name="notes" placeholder="Optional notes"></label>
+          <button class="full" type="submit">Add Expense</button>
+        </form>
+        {{end}}
+      </section>
+      <div class="budget-spacer"></div>
+    </section>
+  </main>
+</body>
+</html>
+

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>
+    (function () {
+      try {
+        var k = "remi-theme";
+        var s = localStorage.getItem(k);
+        var dark = s === "dark" || (s !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("theme-dark", dark);
+      } catch (e) {}
+    })();
+  </script>
+  <title>Settings | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </div>
+      <ul class="nav-list">
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">luggage</span>Trips</a></li>
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">explore</span>Discover</a></li>
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">payments</span>Expense Analysis</a></li>
+        <li class="nav-item active"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
+      </ul>
+      <div class="sidebar-bottom">
+        <a class="btn" href="/">Back to Trips</a>
+        <a class="support-link" href="/">Support</a>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <div class="title-group">
+          <h2>Settings</h2>
+          <p>Configure defaults and map behavior for the app.</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">
+          <button type="button" class="icon-btn" data-theme-toggle aria-label="Toggle light or dark mode">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="settings-grid">
+        <section class="card">
+          <h3>General</h3>
+          {{if .Saved}}
+          <p class="settings-success">Settings saved successfully.</p>
+          {{end}}
+          <form method="post" action="/settings" class="form-grid">
+            <label class="full">Application Title
+              <input type="text" name="app_title" value="{{.Settings.AppTitle}}" required>
+            </label>
+            <label>Default Currency Name
+              <input type="text" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}" required>
+            </label>
+            <label>Default Currency Symbol
+              <input type="text" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}" required>
+            </label>
+            <label>Map Center Latitude
+              <input type="number" step="any" name="map_default_latitude" value="{{.Settings.MapDefaultLatitude}}">
+            </label>
+            <label>Map Center Longitude
+              <input type="number" step="any" name="map_default_longitude" value="{{.Settings.MapDefaultLongitude}}">
+            </label>
+            <label>Map Default Zoom
+              <input type="number" min="1" max="20" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}">
+            </label>
+            <label class="full">Location Lookup
+              <select name="enable_location_lookup">
+                <option value="true" {{if .Settings.EnableLocationLookup}}selected{{end}}>Enabled</option>
+                <option value="false" {{if not .Settings.EnableLocationLookup}}selected{{end}}>Disabled</option>
+              </select>
+            </label>
+            <button class="full" type="submit">Save Settings</button>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

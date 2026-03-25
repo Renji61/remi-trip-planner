@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"remi-trip-planner/internal/trips"
@@ -25,9 +26,9 @@ func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) error {
 	}
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO trips (id, name, description, start_date, end_date, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, now, now,
+		INSERT INTO trips (id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.IsArchived, now, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, t.ID, "trip", t.ID, "create", map[string]any{"name": t.Name})
@@ -37,7 +38,7 @@ func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) error {
 
 func (r *Repository) ListTrips(ctx context.Context) ([]trips.Trip, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, description, start_date, end_date, created_at, updated_at
+		SELECT id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived, created_at, updated_at
 		FROM trips ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -46,7 +47,7 @@ func (r *Repository) ListTrips(ctx context.Context) ([]trips.Trip, error) {
 	out := []trips.Trip{}
 	for rows.Next() {
 		var t trips.Trip
-		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.IsArchived, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -57,10 +58,46 @@ func (r *Repository) ListTrips(ctx context.Context) ([]trips.Trip, error) {
 func (r *Repository) GetTrip(ctx context.Context, tripID string) (trips.Trip, error) {
 	var t trips.Trip
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, description, start_date, end_date, created_at, updated_at
+		SELECT id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived, created_at, updated_at
 		FROM trips WHERE id = ?`, tripID).
-		Scan(&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CreatedAt, &t.UpdatedAt)
+		Scan(&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.IsArchived, &t.CreatedAt, &t.UpdatedAt)
 	return t, err
+}
+
+func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE trips
+		SET name = ?, description = ?, start_date = ?, end_date = ?, cover_image_url = ?, currency_name = ?, currency_symbol = ?, updated_at = ?
+		WHERE id = ?`,
+		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, now, t.ID,
+	)
+	if err == nil {
+		_ = r.logChange(ctx, t.ID, "trip", t.ID, "update", map[string]any{
+			"name": t.Name, "start_date": t.StartDate, "end_date": t.EndDate, "cover_image_url": t.CoverImage, "currency_name": t.CurrencyName, "currency_symbol": t.CurrencySymbol,
+		})
+	}
+	return err
+}
+
+func (r *Repository) ArchiveTrip(ctx context.Context, tripID string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE trips SET is_archived = TRUE, updated_at = ? WHERE id = ?`,
+		now, tripID,
+	)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "trip", tripID, "archive", map[string]any{"is_archived": true})
+	}
+	return err
+}
+
+func (r *Repository) DeleteTrip(ctx context.Context, tripID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM trips WHERE id = ?`, tripID)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "trip", tripID, "delete", map[string]any{})
+	}
+	return err
 }
 
 func (r *Repository) AddItineraryItem(ctx context.Context, item trips.ItineraryItem) error {
@@ -70,9 +107,9 @@ func (r *Repository) AddItineraryItem(ctx context.Context, item trips.ItineraryI
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO itinerary_items
-		(id, trip_id, day_number, order_index, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.DayNumber, item.OrderIndex, item.Title, item.Notes, item.Location, item.Latitude, item.Longitude, item.EstCost, item.StartTime, item.EndTime, now, now,
+		(id, trip_id, day_number, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.DayNumber, item.Title, item.Notes, item.Location, item.Latitude, item.Longitude, item.EstCost, item.StartTime, item.EndTime, now, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, item.TripID, "itinerary_item", item.ID, "create", map[string]any{
@@ -82,11 +119,43 @@ func (r *Repository) AddItineraryItem(ctx context.Context, item trips.ItineraryI
 	return err
 }
 
+func (r *Repository) UpdateItineraryItem(ctx context.Context, item trips.ItineraryItem) (int64, error) {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE itinerary_items
+		SET day_number = ?, title = ?, notes = ?, location = ?, est_cost = ?, start_time = ?, end_time = ?, updated_at = ?
+		WHERE id = ? AND trip_id = ?`,
+		item.DayNumber, item.Title, item.Notes, item.Location, item.EstCost, item.StartTime, item.EndTime, now,
+		item.ID, item.TripID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		_ = r.logChange(ctx, item.TripID, "itinerary_item", item.ID, "update", map[string]any{
+			"title": item.Title, "day_number": item.DayNumber,
+		})
+	}
+	return n, nil
+}
+
+func (r *Repository) DeleteItineraryItem(ctx context.Context, tripID, itemID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM itinerary_items WHERE id = ? AND trip_id = ?`, itemID, tripID)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "itinerary_item", itemID, "delete", map[string]any{})
+	}
+	return err
+}
+
 func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]trips.ItineraryItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, day_number, order_index, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at
+		SELECT id, trip_id, day_number, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at
 		FROM itinerary_items WHERE trip_id = ?
-		ORDER BY day_number ASC, order_index ASC, created_at ASC`, tripID)
+		ORDER BY day_number ASC, created_at ASC`, tripID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +163,7 @@ func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]t
 	out := []trips.ItineraryItem{}
 	for rows.Next() {
 		var i trips.ItineraryItem
-		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.OrderIndex, &i.Title, &i.Notes, &i.Location, &i.Latitude, &i.Longitude, &i.EstCost, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.Latitude, &i.Longitude, &i.EstCost, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -106,11 +175,14 @@ func (r *Repository) AddExpense(ctx context.Context, e trips.Expense) error {
 	if e.ID == "" {
 		e.ID = uuid.NewString()
 	}
+	if strings.TrimSpace(e.PaymentMethod) == "" {
+		e.PaymentMethod = "Cash"
+	}
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO expenses (id, trip_id, category, amount, notes, spent_on, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.TripID, e.Category, e.Amount, e.Notes, e.SpentOn, now,
+		INSERT INTO expenses (id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.TripID, e.Category, e.Amount, e.Notes, e.SpentOn, e.PaymentMethod, e.LodgingID, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, e.TripID, "expense", e.ID, "create", map[string]any{"amount": e.Amount, "category": e.Category})
@@ -118,9 +190,64 @@ func (r *Repository) AddExpense(ctx context.Context, e trips.Expense) error {
 	return err
 }
 
+func (r *Repository) UpdateExpense(ctx context.Context, e trips.Expense) error {
+	if strings.TrimSpace(e.PaymentMethod) == "" {
+		e.PaymentMethod = "Cash"
+	}
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE expenses
+		SET category = ?, amount = ?, notes = ?, spent_on = ?, payment_method = ?, lodging_id = ?
+		WHERE id = ? AND trip_id = ?`,
+		e.Category, e.Amount, e.Notes, e.SpentOn, e.PaymentMethod, e.LodgingID, e.ID, e.TripID,
+	)
+	if err == nil {
+		_ = r.logChange(ctx, e.TripID, "expense", e.ID, "update", map[string]any{
+			"amount": e.Amount, "category": e.Category,
+		})
+	}
+	return err
+}
+
+func (r *Repository) DeleteExpense(ctx context.Context, tripID, expenseID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM expenses WHERE id = ? AND trip_id = ?`, expenseID, tripID)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "expense", expenseID, "delete", map[string]any{})
+	}
+	return err
+}
+
+func (r *Repository) GetExpense(ctx context.Context, tripID, expenseID string) (trips.Expense, error) {
+	var e trips.Expense
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, created_at
+		FROM expenses WHERE id = ? AND trip_id = ?`, expenseID, tripID,
+	).Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &e.CreatedAt)
+	return e, err
+}
+
+func (r *Repository) GetExpenseByLodgingID(ctx context.Context, tripID, lodgingID string) (trips.Expense, error) {
+	var e trips.Expense
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, created_at
+		FROM expenses WHERE trip_id = ? AND lodging_id = ?`, tripID, lodgingID,
+	).Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &e.CreatedAt)
+	return e, err
+}
+
+func (r *Repository) DeleteExpenseByLodgingID(ctx context.Context, tripID, lodgingID string) error {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM expenses WHERE trip_id = ? AND lodging_id = ?`, tripID, lodgingID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		_ = r.logChange(ctx, tripID, "expense", lodgingID, "delete", map[string]any{"by_lodging": true})
+	}
+	return nil
+}
+
 func (r *Repository) ListExpenses(ctx context.Context, tripID string) ([]trips.Expense, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, category, amount, notes, spent_on, created_at
+		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, created_at
 		FROM expenses WHERE trip_id = ? ORDER BY created_at DESC`, tripID)
 	if err != nil {
 		return nil, err
@@ -129,7 +256,7 @@ func (r *Repository) ListExpenses(ctx context.Context, tripID string) ([]trips.E
 	out := []trips.Expense{}
 	for rows.Next() {
 		var e trips.Expense
-		if err := rows.Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -143,12 +270,46 @@ func (r *Repository) AddChecklistItem(ctx context.Context, item trips.ChecklistI
 	}
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO checklist_items (id, trip_id, text, done, created_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.Text, item.Done, now,
+		INSERT INTO checklist_items (id, trip_id, category, text, done, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.Category, item.Text, item.Done, now,
 	)
 	if err == nil {
-		_ = r.logChange(ctx, item.TripID, "checklist_item", item.ID, "create", map[string]any{"text": item.Text})
+		_ = r.logChange(ctx, item.TripID, "checklist_item", item.ID, "create", map[string]any{"text": item.Text, "category": item.Category})
+	}
+	return err
+}
+
+func (r *Repository) GetChecklistItem(ctx context.Context, itemID string) (trips.ChecklistItem, error) {
+	var i trips.ChecklistItem
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, trip_id, category, text, done, created_at
+		FROM checklist_items WHERE id = ?`, itemID).
+		Scan(&i.ID, &i.TripID, &i.Category, &i.Text, &i.Done, &i.CreatedAt)
+	return i, err
+}
+
+func (r *Repository) UpdateChecklistItem(ctx context.Context, item trips.ChecklistItem) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE checklist_items
+		SET category = ?, text = ?
+		WHERE id = ?`,
+		item.Category, item.Text, item.ID,
+	)
+	if err == nil {
+		_ = r.logChange(ctx, item.TripID, "checklist_item", item.ID, "update", map[string]any{
+			"text": item.Text, "category": item.Category,
+		})
+	}
+	return err
+}
+
+func (r *Repository) DeleteChecklistItem(ctx context.Context, itemID string) error {
+	var tripID string
+	_ = r.db.QueryRowContext(ctx, `SELECT trip_id FROM checklist_items WHERE id = ?`, itemID).Scan(&tripID)
+	_, err := r.db.ExecContext(ctx, `DELETE FROM checklist_items WHERE id = ?`, itemID)
+	if err == nil && tripID != "" {
+		_ = r.logChange(ctx, tripID, "checklist_item", itemID, "delete", map[string]any{})
 	}
 	return err
 }
@@ -156,16 +317,28 @@ func (r *Repository) AddChecklistItem(ctx context.Context, item trips.ChecklistI
 func (r *Repository) ToggleChecklistItem(ctx context.Context, itemID string, done bool) error {
 	var tripID string
 	_ = r.db.QueryRowContext(ctx, `SELECT trip_id FROM checklist_items WHERE id = ?`, itemID).Scan(&tripID)
-	_, err := r.db.ExecContext(ctx, `UPDATE checklist_items SET done = ? WHERE id = ?`, done, itemID)
-	if err == nil && tripID != "" {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE checklist_items
+		SET done = ?
+		WHERE id = ? AND trip_id IN (SELECT id FROM trips WHERE is_archived = FALSE)`,
+		done, itemID,
+	)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return nil
+	}
+	if tripID != "" {
 		_ = r.logChange(ctx, tripID, "checklist_item", itemID, "update", map[string]any{"done": done})
 	}
-	return err
+	return nil
 }
 
 func (r *Repository) ListChecklistItems(ctx context.Context, tripID string) ([]trips.ChecklistItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, text, done, created_at
+		SELECT id, trip_id, category, text, done, created_at
 		FROM checklist_items WHERE trip_id = ? ORDER BY created_at DESC`, tripID)
 	if err != nil {
 		return nil, err
@@ -174,10 +347,205 @@ func (r *Repository) ListChecklistItems(ctx context.Context, tripID string) ([]t
 	out := []trips.ChecklistItem{}
 	for rows.Next() {
 		var i trips.ChecklistItem
-		if err := rows.Scan(&i.ID, &i.TripID, &i.Text, &i.Done, &i.CreatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.TripID, &i.Category, &i.Text, &i.Done, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) AddLodging(ctx context.Context, item trips.Lodging) error {
+	if item.ID == "" {
+		item.ID = uuid.NewString()
+	}
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO lodging_entries
+		(id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, check_in_itinerary_id, check_out_itinerary_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.Name, item.Address, item.CheckInAt, item.CheckOutAt, item.BookingConfirmation, item.Cost, item.Notes, item.AttachmentPath,
+		item.CheckInItineraryID, item.CheckOutItineraryID, now,
+	)
+	return err
+}
+
+func (r *Repository) GetLodging(ctx context.Context, tripID, lodgingID string) (trips.Lodging, error) {
+	var l trips.Lodging
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, check_in_itinerary_id, check_out_itinerary_id, created_at
+		FROM lodging_entries WHERE id = ? AND trip_id = ?`,
+		lodgingID, tripID,
+	).Scan(&l.ID, &l.TripID, &l.Name, &l.Address, &l.CheckInAt, &l.CheckOutAt, &l.BookingConfirmation, &l.Cost, &l.Notes, &l.AttachmentPath,
+		&l.CheckInItineraryID, &l.CheckOutItineraryID, &l.CreatedAt)
+	return l, err
+}
+
+func (r *Repository) UpdateLodging(ctx context.Context, item trips.Lodging) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE lodging_entries
+		SET name = ?, address = ?, check_in_at = ?, check_out_at = ?, booking_confirmation = ?, cost = ?, notes = ?, attachment_path = ?, check_in_itinerary_id = ?, check_out_itinerary_id = ?
+		WHERE id = ? AND trip_id = ?`,
+		item.Name, item.Address, item.CheckInAt, item.CheckOutAt, item.BookingConfirmation, item.Cost, item.Notes, item.AttachmentPath,
+		item.CheckInItineraryID, item.CheckOutItineraryID,
+		item.ID, item.TripID,
+	)
+	return err
+}
+
+func (r *Repository) DeleteLodging(ctx context.Context, tripID, lodgingID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM lodging_entries WHERE id = ? AND trip_id = ?`, lodgingID, tripID)
+	return err
+}
+
+func (r *Repository) ListLodgings(ctx context.Context, tripID string) ([]trips.Lodging, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, check_in_itinerary_id, check_out_itinerary_id, created_at
+		FROM lodging_entries
+		WHERE trip_id = ?
+		ORDER BY check_in_at ASC, created_at ASC`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []trips.Lodging{}
+	for rows.Next() {
+		var l trips.Lodging
+		if err := rows.Scan(&l.ID, &l.TripID, &l.Name, &l.Address, &l.CheckInAt, &l.CheckOutAt, &l.BookingConfirmation, &l.Cost, &l.Notes, &l.AttachmentPath,
+			&l.CheckInItineraryID, &l.CheckOutItineraryID, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) AddVehicleRental(ctx context.Context, item trips.VehicleRental) error {
+	if item.ID == "" {
+		item.ID = uuid.NewString()
+	}
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO vehicle_rentals
+		(id, trip_id, pick_up_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.PickUpLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
+		item.PickUpItineraryID, item.DropOffItineraryID, item.RentalExpenseID, item.InsuranceExpenseID, now,
+	)
+	return err
+}
+
+func (r *Repository) GetVehicleRental(ctx context.Context, tripID, rentalID string) (trips.VehicleRental, error) {
+	var v trips.VehicleRental
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, trip_id, pick_up_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
+		FROM vehicle_rentals WHERE id = ? AND trip_id = ?`,
+		rentalID, tripID,
+	).Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
+		&v.PickUpItineraryID, &v.DropOffItineraryID, &v.RentalExpenseID, &v.InsuranceExpenseID, &v.CreatedAt)
+	return v, err
+}
+
+func (r *Repository) UpdateVehicleRental(ctx context.Context, item trips.VehicleRental) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE vehicle_rentals
+		SET pick_up_location = ?, vehicle_detail = ?, pick_up_at = ?, drop_off_at = ?, booking_confirmation = ?, notes = ?, vehicle_image_path = ?, cost = ?, insurance_cost = ?, pay_at_pick_up = ?, pick_up_itinerary_id = ?, drop_off_itinerary_id = ?, rental_expense_id = ?, insurance_expense_id = ?
+		WHERE id = ? AND trip_id = ?`,
+		item.PickUpLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
+		item.PickUpItineraryID, item.DropOffItineraryID, item.RentalExpenseID, item.InsuranceExpenseID,
+		item.ID, item.TripID,
+	)
+	return err
+}
+
+func (r *Repository) DeleteVehicleRental(ctx context.Context, tripID, rentalID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM vehicle_rentals WHERE id = ? AND trip_id = ?`, rentalID, tripID)
+	return err
+}
+
+func (r *Repository) ListVehicleRentals(ctx context.Context, tripID string) ([]trips.VehicleRental, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, trip_id, pick_up_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
+		FROM vehicle_rentals
+		WHERE trip_id = ?
+		ORDER BY pick_up_at ASC, created_at ASC`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []trips.VehicleRental{}
+	for rows.Next() {
+		var v trips.VehicleRental
+		if err := rows.Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
+			&v.PickUpItineraryID, &v.DropOffItineraryID, &v.RentalExpenseID, &v.InsuranceExpenseID, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) AddFlight(ctx context.Context, item trips.Flight) error {
+	if item.ID == "" {
+		item.ID = uuid.NewString()
+	}
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO flight_entries
+		(id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.FlightName, item.FlightNumber, item.DepartAirport, item.ArriveAirport, item.DepartAt, item.ArriveAt, item.BookingConfirmation, item.Notes, item.DocumentPath, item.Cost, item.DepartItineraryID, item.ArriveItineraryID, item.ExpenseID, now,
+	)
+	return err
+}
+
+func (r *Repository) GetFlight(ctx context.Context, tripID, flightID string) (trips.Flight, error) {
+	var f trips.Flight
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at
+		FROM flight_entries WHERE id = ? AND trip_id = ?`,
+		flightID, tripID,
+	).Scan(
+		&f.ID, &f.TripID, &f.FlightName, &f.FlightNumber, &f.DepartAirport, &f.ArriveAirport, &f.DepartAt, &f.ArriveAt, &f.BookingConfirmation, &f.Notes, &f.DocumentPath, &f.Cost, &f.DepartItineraryID, &f.ArriveItineraryID, &f.ExpenseID, &f.CreatedAt,
+	)
+	return f, err
+}
+
+func (r *Repository) UpdateFlight(ctx context.Context, item trips.Flight) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE flight_entries
+		SET flight_name = ?, flight_number = ?, depart_airport = ?, arrive_airport = ?, depart_at = ?, arrive_at = ?, booking_confirmation = ?, notes = ?, document_path = ?, cost = ?, depart_itinerary_id = ?, arrive_itinerary_id = ?, expense_id = ?
+		WHERE id = ? AND trip_id = ?`,
+		item.FlightName, item.FlightNumber, item.DepartAirport, item.ArriveAirport, item.DepartAt, item.ArriveAt, item.BookingConfirmation, item.Notes, item.DocumentPath, item.Cost, item.DepartItineraryID, item.ArriveItineraryID, item.ExpenseID,
+		item.ID, item.TripID,
+	)
+	return err
+}
+
+func (r *Repository) DeleteFlight(ctx context.Context, tripID, flightID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM flight_entries WHERE id = ? AND trip_id = ?`, flightID, tripID)
+	return err
+}
+
+func (r *Repository) ListFlights(ctx context.Context, tripID string) ([]trips.Flight, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at
+		FROM flight_entries
+		WHERE trip_id = ?
+		ORDER BY depart_at ASC, created_at ASC`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []trips.Flight{}
+	for rows.Next() {
+		var f trips.Flight
+		if err := rows.Scan(
+			&f.ID, &f.TripID, &f.FlightName, &f.FlightNumber, &f.DepartAirport, &f.ArriveAirport, &f.DepartAt, &f.ArriveAt, &f.BookingConfirmation, &f.Notes, &f.DocumentPath, &f.Cost, &f.DepartItineraryID, &f.ArriveItineraryID, &f.ExpenseID, &f.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
 	}
 	return out, rows.Err()
 }
@@ -215,6 +583,52 @@ func (r *Repository) logChange(ctx context.Context, tripID, entity, entityID, op
 		INSERT INTO change_log (trip_id, entity, entity_id, operation, changed_at, payload)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		tripID, entity, entityID, operation, time.Now().UTC(), string(b),
+	)
+	return err
+}
+
+func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, error) {
+	var settings trips.AppSettings
+	err := r.db.QueryRowContext(ctx, `
+		SELECT app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup
+		FROM app_settings
+		WHERE id = 1`).
+		Scan(
+			&settings.AppTitle,
+			&settings.DefaultCurrencyName,
+			&settings.DefaultCurrencySymbol,
+			&settings.MapDefaultLatitude,
+			&settings.MapDefaultLongitude,
+			&settings.MapDefaultZoom,
+			&settings.EnableLocationLookup,
+		)
+	return settings, err
+}
+
+func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSettings) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO app_settings
+			(id, app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup, updated_at)
+		VALUES
+			(1, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			app_title = excluded.app_title,
+			default_currency_name = excluded.default_currency_name,
+			default_currency_symbol = excluded.default_currency_symbol,
+			map_default_latitude = excluded.map_default_latitude,
+			map_default_longitude = excluded.map_default_longitude,
+			map_default_zoom = excluded.map_default_zoom,
+			enable_location_lookup = excluded.enable_location_lookup,
+			updated_at = excluded.updated_at
+	`,
+		settings.AppTitle,
+		settings.DefaultCurrencyName,
+		settings.DefaultCurrencySymbol,
+		settings.MapDefaultLatitude,
+		settings.MapDefaultLongitude,
+		settings.MapDefaultZoom,
+		settings.EnableLocationLookup,
+		time.Now().UTC(),
 	)
 	return err
 }

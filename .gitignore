@@ -1,0 +1,13 @@
+bin/
+data/
+server.exe
+
+# IDE / local agent artifacts
+.cursor/
+
+# Runtime-generated uploads
+web/static/uploads/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

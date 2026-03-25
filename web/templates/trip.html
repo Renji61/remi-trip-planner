@@ -3,7 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{.Details.Trip.Name}} | REMI Trip Planner</title>
+  <script>
+    (function () {
+      try {
+        var k = "remi-theme";
+        var s = localStorage.getItem(k);
+        var dark = s === "dark" || (s !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("theme-dark", dark);
+      } catch (e) {}
+    })();
+  </script>
+  <title>{{.Details.Trip.Name}} | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -12,97 +26,646 @@
   <script defer src="/static/app.js"></script>
 </head>
 <body>
-  <main class="container">
-    <a href="/">Back to trips</a>
-    <header>
-      <h1>{{.Details.Trip.Name}}</h1>
-      <p>{{.Details.Trip.Description}}</p>
-    </header>
-
-    <section class="two-col">
-      <article class="card">
-        <h2>Add Itinerary Item</h2>
-        <form method="post" action="/trips/{{.Details.Trip.ID}}/itinerary" class="grid">
-          <label>Title<input type="text" name="title" required></label>
-          <label>Day<input type="number" min="1" name="day_number" value="1"></label>
-          <label>Order<input type="number" min="0" name="order_index" value="0"></label>
-          <label>Location<input type="text" name="location"></label>
-          <label>Latitude<input type="number" step="any" name="latitude"></label>
-          <label>Longitude<input type="number" step="any" name="longitude"></label>
-          <label>Start<input type="time" name="start_time"></label>
-          <label>End<input type="time" name="end_time"></label>
-          <label>Estimated Cost<input type="number" step="0.01" name="est_cost"></label>
-          <label>Notes<input type="text" name="notes"></label>
-          <button type="submit">Add Item</button>
-        </form>
-      </article>
-
-      <article class="card">
-        <h2>Map</h2>
-        <div id="map" class="map"></div>
-      </article>
-    </section>
-
-    <section class="two-col">
-      <article class="card">
-        <h2>Itinerary</h2>
-        {{if .Details.Itinerary}}
-          <ul class="list">
-            {{range .Details.Itinerary}}
-              <li data-lat="{{.Latitude}}" data-lng="{{.Longitude}}" data-title="{{.Title}}" data-location="{{.Location}}">
-                <strong>Day {{.DayNumber}}:</strong> {{.Title}} ({{.StartTime}}-{{.EndTime}})
-                <div>{{.Location}} | Est. ${{printf "%.2f" .EstCost}}</div>
-                <small>{{.Notes}}</small>
-              </li>
-            {{end}}
-          </ul>
-        {{else}}
-          <p>No itinerary items yet.</p>
-        {{end}}
-      </article>
-
-      <article class="card">
-        <h2>Budget</h2>
-        <p>Total Spent: <strong>${{printf "%.2f" .TotalExpense}}</strong></p>
-        <form method="post" action="/trips/{{.Details.Trip.ID}}/expenses" class="grid">
-          <label>Category<input type="text" name="category" placeholder="food"></label>
-          <label>Amount<input type="number" step="0.01" name="amount" required></label>
-          <label>Date<input type="date" name="spent_on"></label>
-          <label>Notes<input type="text" name="notes"></label>
-          <button type="submit">Add Expense</button>
-        </form>
-        {{if .Details.Expenses}}
-        <ul class="list">
-          {{range .Details.Expenses}}
-          <li>{{.Category}}: ${{printf "%.2f" .Amount}} <small>{{.SpentOn}} {{.Notes}}</small></li>
-          {{end}}
-        </ul>
-        {{end}}
-      </article>
-    </section>
-
-    <section class="card">
-      <h2>Packing / Checklist</h2>
-      <form method="post" action="/trips/{{.Details.Trip.ID}}/checklist" class="inline-form">
-        <input type="text" name="text" placeholder="Add checklist item" required>
-        <button type="submit">Add</button>
-      </form>
-      {{if .Details.Checklist}}
-      <ul class="list">
-        {{range .Details.Checklist}}
-        <li>
-          <form method="post" action="/checklist/{{.ID}}/toggle" class="inline-form">
-            <input type="hidden" name="done" value="{{if .Done}}false{{else}}true{{end}}">
-            <button type="submit">{{if .Done}}Undo{{else}}Done{{end}}</button>
-          </form>
-          <span class="{{if .Done}}done{{end}}">{{.Text}}</span>
-        </li>
-        {{end}}
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </div>
+      <ul class="nav-list">
+        <li class="nav-item active"><a href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined">luggage</span>Trip Details</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined">hotel</span>Accommodation</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined">car_rental</span>Vehicle Rental</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined">flight</span>Flights</a></li>
+        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined">payments</span>Expense Analysis</a></li>
+        <li class="nav-item"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
       </ul>
-      {{else}}
-      <p>No checklist items yet.</p>
-      {{end}}
+      <div class="sidebar-bottom">
+        <a class="btn" href="/">Back to Dashboard</a>
+        <a class="support-link" href="/">Support</a>
+        <a class="logout-link" href="/">Logout</a>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <div class="title-group">
+          <div class="title-row">
+            <h2>{{.Details.Trip.Name}}</h2>
+            <div class="trip-actions-links">
+              {{if not .Details.Trip.IsArchived}}
+              <button type="button" class="link-btn" data-edit-toggle="open">Edit</button>
+              <form method="post" action="/trips/{{.Details.Trip.ID}}/archive" onsubmit="return confirm('Archive this trip? Archived trips are read-only.');">
+                <button type="submit" class="link-btn">Archive</button>
+              </form>
+              {{end}}
+              <form method="post" action="/trips/{{.Details.Trip.ID}}/delete" onsubmit="return confirm('Delete this trip permanently? This cannot be undone.');">
+                <button type="submit" class="link-btn danger">Delete</button>
+              </form>
+            </div>
+          </div>
+          <p>{{formatUIDate .Details.Trip.StartDate}} – {{formatUIDate .Details.Trip.EndDate}}</p>
+          {{if .Details.Trip.IsArchived}}<p class="archived-note">Archived trip: this trip is read-only.</p>{{end}}
+        </div>
+        <div class="topbar-right">
+          <input type="search" placeholder="Search itinerary..." data-itinerary-search aria-label="Search itinerary" autocomplete="off">
+          <div class="avatar-row">
+            <button type="button" class="icon-btn" data-theme-toggle aria-label="Toggle light or dark mode">
+              <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+            </button>
+            <span class="avatar-dot"></span>
+            <span class="avatar">A</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="layout-two">
+        <div class="stack">
+          <section class="hero-map {{if .Details.Trip.CoverImage}}has-cover{{end}}" {{if .Details.Trip.CoverImage}}style="background-image: linear-gradient(130deg, rgba(0, 32, 70, 0.55), rgba(27, 54, 93, 0.55)), url('{{.Details.Trip.CoverImage}}');"{{end}}>
+            <div class="chip">
+              <small>Current stop</small>
+              <strong>{{if .Details.Trip.Description}}{{.Details.Trip.Description}}{{else}}Plan your route and moments{{end}}</strong>
+            </div>
+          </section>
+
+          <section class="card hidden trip-edit-panel" id="edit-trip" data-edit-panel>
+            <h3>Edit Trip Details</h3>
+            {{if .Details.Trip.IsArchived}}
+            <p class="muted">Archived trips are read-only. Delete is still available from the trip header.</p>
+            {{else}}
+            <form method="post" action="/trips/{{.Details.Trip.ID}}/update" class="form-grid">
+              <label class="full">Trip Name<input type="text" name="name" value="{{.Details.Trip.Name}}" required></label>
+              <label class="full">Description<input type="text" name="description" value="{{.Details.Trip.Description}}" placeholder="Short trip summary"></label>
+              <label>Start Date<input type="date" name="start_date" value="{{.Details.Trip.StartDate}}"></label>
+              <label>End Date<input type="date" name="end_date" value="{{.Details.Trip.EndDate}}"></label>
+              <label>Currency Name<input type="text" name="currency_name" value="{{.CurrencyName}}" placeholder="e.g. PHP"></label>
+              <label>Currency Symbol<input type="text" name="currency_symbol" value="{{.CurrencySymbol}}" placeholder="e.g. ₱"></label>
+              <label class="full">Trip Cover Image URL<input type="url" name="cover_image_url" value="{{.Details.Trip.CoverImage}}" placeholder="https://..."></label>
+              <button class="full" type="submit">Save Trip Changes</button>
+              <button class="full secondary-btn" type="button" data-edit-toggle="close">Cancel</button>
+            </form>
+            {{end}}
+          </section>
+
+          <section class="card map-card">
+            <h3>Trip Map</h3>
+            <div id="map" class="map" data-map-lat="{{.Settings.MapDefaultLatitude}}" data-map-lng="{{.Settings.MapDefaultLongitude}}" data-map-zoom="{{.Settings.MapDefaultZoom}}"></div>
+          </section>
+
+          <section class="card" data-itinerary-search-root>
+            <h3>{{.Details.Trip.Name}} Itinerary</h3>
+            {{if .DayGroups}}
+            <div class="day-groups">
+              {{range $idx, $group := .DayGroups}}
+              <details class="day-group" {{if eq $idx 0}}open{{end}}>
+                <summary>Day {{$group.DayNumber}}{{if $group.DateLabel}} – {{formatUIDate $group.DateLabel}}{{end}}</summary>
+                <ul class="list timeline day-items">
+                  {{range $group.Items}}
+                  <li class="timeline-item" data-itinerary-item data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
+                    {{if not $.Details.Trip.IsArchived}}
+                    <div class="item-actions">
+                      <button
+                        type="button"
+                        class="item-action-btn"
+                        data-inline-edit-open="{{if ne .Lodging.ID ""}}accommodation-itinerary-edit-{{.Item.ID}}{{else if ne .Vehicle.ID ""}}vehicle-rental-itinerary-edit-{{.Item.ID}}{{else if ne .Flight.ID ""}}flight-itinerary-edit-{{.Item.ID}}{{else}}itinerary-edit-{{.Item.ID}}{{end}}"
+                      >Edit</button>
+                      {{if and (eq .Lodging.ID "") (eq .Vehicle.ID "") (eq .Flight.ID "")}}
+                      <form method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/delete" onsubmit="return confirm('Delete this itinerary item?');">
+                        <button type="submit" class="item-action-btn danger">Delete</button>
+                      </form>
+                      {{end}}
+                    </div>
+                    {{end}}
+                    <div class="timeline-dot"></div>
+                    <div id="itinerary-view-{{.Item.ID}}" class="item-view itinerary-item-view {{if ne .Vehicle.ID ""}}itinerary-vehicle-view{{end}}">
+                      <div class="itinerary-vehicle-main">
+                      <strong>{{.Item.Title}}</strong>
+                      {{if ne .Lodging.ID ""}}
+                      <div class="meta">{{if .Item.StartTime}}{{.Item.StartTime}}{{else}}--:--{{end}}</div>
+                      {{else if ne .Vehicle.ID ""}}
+                      <div class="meta">{{if .Item.StartTime}}{{.Item.StartTime}}{{else}}--:--{{end}}</div>
+                      {{else if ne .Flight.ID ""}}
+                      <div class="meta">{{if .Item.StartTime}}{{.Item.StartTime}}{{else}}--:--{{end}}</div>
+                      {{else}}
+                      <div class="meta">{{if .Item.StartTime}}{{.Item.StartTime}}{{else}}--:--{{end}} - {{if .Item.EndTime}}{{.Item.EndTime}}{{else}}--:--{{end}}</div>
+                      {{end}}
+                      {{if and (ne .Vehicle.ID "") .Vehicle.VehicleDetail}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Vehicle Name/Type</span>
+                        <span class="itinerary-value">{{.Vehicle.VehicleDetail}}</span>
+                      </div>
+                      {{end}}
+                      <div class="itinerary-field">
+                        {{if ne .Lodging.ID ""}}
+                        <span class="itinerary-label">Address</span>
+                        <span class="itinerary-value">{{if .Lodging.Address}}{{.Lodging.Address}}{{else if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        {{else if ne .Vehicle.ID ""}}
+                        <span class="itinerary-label">Pick Up Location</span>
+                        <span class="itinerary-value">{{if .Vehicle.PickUpLocation}}{{.Vehicle.PickUpLocation}}{{else if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        {{else if ne .Flight.ID ""}}
+                        <span class="itinerary-label">{{if eq .Item.ID .Flight.DepartItineraryID}}Depart Airport{{else}}Arrive Airport{{end}}</span>
+                        <span class="itinerary-value">{{if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        {{else}}
+                        <span class="itinerary-label">Location</span>
+                        <span class="itinerary-value">{{if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        {{end}}
+                      </div>
+                      {{if ne .Flight.ID ""}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Flight</span>
+                        <span class="itinerary-value">{{if .Flight.FlightName}}{{.Flight.FlightName}}{{else}}<span class="muted">—</span>{{end}}</span>
+                      </div>
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Flight Number</span>
+                        <span class="itinerary-value">{{if .Flight.FlightNumber}}{{.Flight.FlightNumber}}{{else}}<span class="muted">—</span>{{end}}</span>
+                      </div>
+                      {{end}}
+                      {{if ne .Lodging.ID ""}}
+                      {{if ne .Lodging.Cost 0.0}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Cost</span>
+                        <span class="itinerary-value">{{$.CurrencySymbol}}{{printf "%.2f" .Lodging.Cost}}</span>
+                      </div>
+                      {{end}}
+                      {{else if ne .Vehicle.ID ""}}
+                      {{if or (ne .Vehicle.Cost 0.0) (ne .Vehicle.InsuranceCost 0.0)}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Total Cost</span>
+                        <span class="itinerary-value">{{$.CurrencySymbol}}{{printf "%.2f" .Vehicle.Cost}} + {{$.CurrencySymbol}}{{printf "%.2f" .Vehicle.InsuranceCost}} insurance</span>
+                      </div>
+                      {{end}}
+                      {{else if ne .Flight.ID ""}}
+                      {{if ne .Flight.Cost 0.0}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Cost</span>
+                        <span class="itinerary-value">{{$.CurrencySymbol}}{{printf "%.2f" .Flight.Cost}}</span>
+                      </div>
+                      {{end}}
+                      {{else}}
+                      {{if ne .Item.EstCost 0.0}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Cost</span>
+                        <span class="itinerary-value">{{$.CurrencySymbol}}{{printf "%.2f" .Item.EstCost}}</span>
+                      </div>
+                      {{end}}
+                      {{end}}
+                      {{if and (ne .Vehicle.ID "") .Vehicle.Notes}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Notes</span>
+                        <span class="itinerary-value">{{.Vehicle.Notes}}</span>
+                      </div>
+                      {{else if and (ne .Flight.ID "") .Flight.Notes}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Notes</span>
+                        <span class="itinerary-value">{{.Flight.Notes}}</span>
+                      </div>
+                      {{else if .Item.Notes}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Notes</span>
+                        <span class="itinerary-value">{{.Item.Notes}}</span>
+                      </div>
+                      {{end}}
+                      {{if ne .Lodging.ID ""}}
+                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/accommodation">Accommodation</a>.</p>
+                      {{else if ne .Vehicle.ID ""}}
+                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/vehicle-rental">Vehicle Rental</a>.</p>
+                      {{else if ne .Flight.ID ""}}
+                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/flights">Flights</a>.</p>
+                      {{end}}
+                      </div>
+                      {{if and (ne .Vehicle.ID "") (.Vehicle.VehicleImagePath)}}
+                      <a class="vehicle-itinerary-thumb-link" href="{{.Vehicle.VehicleImagePath}}" target="_blank" rel="noreferrer">
+                        <img class="vehicle-thumb" src="{{.Vehicle.VehicleImagePath}}" alt="Vehicle image">
+                      </a>
+                      {{end}}
+                    </div>
+                    {{if not $.Details.Trip.IsArchived}}
+                    {{if ne .Lodging.ID ""}}
+                    <form id="accommodation-itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.Lodging.ID}}/update" class="form-grid item-edit hidden full" enctype="multipart/form-data" data-accommodation-form>
+                      <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+                      <label class="full">Hotel or Residence Name<input type="text" name="name" value="{{.Lodging.Name}}" required data-accommodation-name></label>
+                      <label class="full">Address<input type="text" name="address" value="{{.Lodging.Address}}" required data-accommodation-address></label>
+                      <p class="full location-hint" data-accommodation-status>We will try to auto-fill address from the name you enter.</p>
+                      <label>Check-in Date/Time<input type="datetime-local" name="check_in_at" value="{{.Lodging.CheckInAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                      <label>Check-out Date/Time<input type="datetime-local" name="check_out_at" value="{{.Lodging.CheckOutAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                      <label>Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Lodging.Cost}}"></label>
+                      <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.Lodging.BookingConfirmation}}"></label>
+                      <input type="hidden" name="current_attachment_path" value="{{.Lodging.AttachmentPath}}">
+                      <label class="full">Notes<input type="text" name="notes" value="{{.Lodging.Notes}}"></label>
+                      <label class="full">Replace Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
+                      <label class="full">Attachment Action
+                        <select name="remove_attachment">
+                          <option value="false" selected>Keep existing attachment</option>
+                          <option value="true">Delete existing attachment</option>
+                        </select>
+                      </label>
+                      <button type="submit">Save</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="accommodation-itinerary-edit-{{.Item.ID}}">Cancel</button>
+                    </form>
+                    {{else if ne .Vehicle.ID ""}}
+                    <form id="vehicle-rental-itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.Vehicle.ID}}/update" class="form-grid item-edit hidden full" enctype="multipart/form-data">
+                      <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+                      <label class="full">Vehicle Name & Type<input type="text" name="vehicle_detail" value="{{.Vehicle.VehicleDetail}}"></label>
+                      <label class="full">Pick-up Location<input type="text" name="pick_up_location" value="{{.Vehicle.PickUpLocation}}" required></label>
+                      <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.Vehicle.BookingConfirmation}}"></label>
+                      <label>Pick-up Date & Time<input type="datetime-local" name="pick_up_at" value="{{.Vehicle.PickUpAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                      <label>Drop-off Date & Time<input type="datetime-local" name="drop_off_at" value="{{.Vehicle.DropOffAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                      <label>Rental Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Vehicle.Cost}}"></label>
+                      <label>Insurance Cost<input type="number" step="0.01" name="insurance_cost" value="{{printf "%.2f" .Vehicle.InsuranceCost}}"></label>
+                      <label class="checkbox-inline full"><input type="checkbox" name="pay_at_pick_up" value="true" {{if .Vehicle.PayAtPickUp}}checked{{end}}>Pay at Pick Up</label>
+                      <input type="hidden" name="current_vehicle_image_path" value="{{.Vehicle.VehicleImagePath}}">
+                      {{if .Vehicle.VehicleImagePath}}
+                      <label class="full vehicle-thumb-form-row">
+                        <span>Current Vehicle Image</span>
+                        <a href="{{.Vehicle.VehicleImagePath}}" target="_blank" rel="noreferrer">
+                          <img class="vehicle-thumb" src="{{.Vehicle.VehicleImagePath}}" alt="Vehicle image">
+                        </a>
+                      </label>
+                      {{end}}
+                      <label class="full">Replace Vehicle Image<input type="file" name="vehicle_image" accept="image/*"></label>
+                      <label class="full">Image Action
+                        <select name="remove_vehicle_image">
+                          <option value="false" selected>Keep existing image</option>
+                          <option value="true">Delete existing image</option>
+                        </select>
+                      </label>
+                      <label class="full">Additional Notes<input type="text" name="notes" value="{{.Vehicle.Notes}}"></label>
+                      <button type="submit">Save</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="vehicle-rental-itinerary-edit-{{.Item.ID}}">Cancel</button>
+                    </form>
+                    {{else if ne .Flight.ID ""}}
+                    <form id="flight-itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{.Flight.ID}}/update" class="form-grid item-edit hidden full" enctype="multipart/form-data">
+                      <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+                      <label class="full">Flight Name<input type="text" name="flight_name" value="{{.Flight.FlightName}}" required></label>
+                      <label class="full">Flight Number<input type="text" name="flight_number" value="{{.Flight.FlightNumber}}"></label>
+                      <label class="full">Depart Airport<input type="text" name="depart_airport" value="{{.Flight.DepartAirport}}" required></label>
+                      <label>Depart Date and Time<input type="datetime-local" name="depart_at" value="{{.Flight.DepartAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                      <label class="full">Arrive Airport<input type="text" name="arrive_airport" value="{{.Flight.ArriveAirport}}" required></label>
+                      <label>Arrive Date and Time<input type="datetime-local" name="arrive_at" value="{{.Flight.ArriveAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                      <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.Flight.BookingConfirmation}}"></label>
+                      <label>Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Flight.Cost}}"></label>
+                      <input type="hidden" name="current_document_path" value="{{.Flight.DocumentPath}}">
+                      <label class="full">Replace Flight Document<input type="file" name="flight_document" accept=".pdf,image/*"></label>
+                      <label class="full">Document Action
+                        <select name="remove_document">
+                          <option value="false" selected>Keep existing document</option>
+                          <option value="true">Delete existing document</option>
+                        </select>
+                      </label>
+                      <label class="full">Notes<input type="text" name="notes" value="{{.Flight.Notes}}"></label>
+                      <button type="submit">Save</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="flight-itinerary-edit-{{.Item.ID}}">Cancel</button>
+                    </form>
+                    {{else}}
+                    <form id="itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/update" class="form-grid item-edit hidden">
+                      <label class="full">Location Name<input type="text" name="location" value="{{.Item.Location}}"></label>
+                      <label class="full">Title<input type="text" name="title" value="{{.Item.Title}}" required></label>
+                      <label>Date<input type="date" name="itinerary_date" value="{{$group.DateLabel}}" min="{{$.Details.Trip.StartDate}}" max="{{$.Details.Trip.EndDate}}" required></label>
+                      <label>Cost<input type="number" step="0.01" name="est_cost" value="{{printf "%.2f" .Item.EstCost}}"></label>
+                      <label>Start<input type="time" name="start_time" value="{{.Item.StartTime}}"></label>
+                      <label>End<input type="time" name="end_time" value="{{.Item.EndTime}}"></label>
+                      <label class="full">Notes<input type="text" name="notes" value="{{.Item.Notes}}"></label>
+                      <button type="submit">Save</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="itinerary-edit-{{.Item.ID}}">Cancel</button>
+                    </form>
+                    {{end}}
+                    {{end}}
+                  </li>
+                  {{end}}
+                </ul>
+              </details>
+              {{end}}
+            </div>
+            {{else}}
+            <p class="muted">No itinerary items yet.</p>
+            {{end}}
+          </section>
+
+          <section class="card">
+            <h3>{{.Details.Trip.Name}} Expenses</h3>
+            {{if .ExpenseGroups}}
+            <div class="day-groups">
+              {{range $idx, $group := .ExpenseGroups}}
+              <details class="day-group" {{if eq $idx 0}}open{{end}}>
+                <summary>{{if gt $group.DayNumber 0}}Day {{$group.DayNumber}}{{else}}Unscheduled{{end}}{{if $group.DateLabel}} – {{formatUIDate $group.DateLabel}}{{end}}</summary>
+                <ul class="list expense-items">
+                  {{range $group.Items}}
+                  <li class="list-item expense-item">
+                    <div id="expense-view-{{.ID}}" class="item-view expense-view expense-view-with-icon{{if and (not .Notes) (eq .LodgingID "")}} expense-view--no-notes{{end}}">
+                      <span class="expense-cat-icon expense-cat-icon--{{expenseCategoryStyle .Category}}" aria-hidden="true">
+                        <span class="material-symbols-outlined">{{expenseCategoryIcon .Category}}</span>
+                      </span>
+                      <div class="expense-view-cols">
+                        <strong class="expense-view-title">{{if .Category}}{{.Category}}{{else}}General{{end}}</strong>
+                        <span class="expense-view-amount">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</span>
+                        {{if and (not $.Details.Trip.IsArchived) (eq .LodgingID "") (not (index $.VehicleExpenseLocked .ID)) (not (index $.FlightExpenseLocked .ID))}}
+                        <div class="expense-inline-actions">
+                          <button
+                            type="button"
+                            class="item-action-btn"
+                            data-inline-edit-open="expense-edit-{{.ID}}"
+                          >Edit</button>
+                          <form method="post" action="/trips/{{$.Details.Trip.ID}}/expenses/{{.ID}}/delete" onsubmit="return confirm('Delete this expense item?');">
+                            <button type="submit" class="item-action-btn danger">Delete</button>
+                          </form>
+                        </div>
+                        {{end}}
+                        {{if .Notes}}<span class="muted expense-view-notes">{{.Notes}}</span>{{end}}
+                        {{if ne .LodgingID ""}}
+                        <p class="itinerary-hint expense-view-hint">From <a href="/trips/{{$.Details.Trip.ID}}/accommodation">Accommodation</a>; edit the booking there.</p>
+                        {{else if (index $.VehicleExpenseLocked .ID)}}
+                        <p class="itinerary-hint expense-view-hint">From <a href="/trips/{{$.Details.Trip.ID}}/vehicle-rental">Vehicle Rental</a>; edit the booking there.</p>
+                        {{else if (index $.FlightExpenseLocked .ID)}}
+                        <p class="itinerary-hint expense-view-hint">From <a href="/trips/{{$.Details.Trip.ID}}/flights">Flights</a>; edit the booking there.</p>
+                        {{end}}
+                      </div>
+                    </div>
+                    {{if and (not $.Details.Trip.IsArchived) (eq .LodgingID "") (not (index $.VehicleExpenseLocked .ID)) (not (index $.FlightExpenseLocked .ID))}}
+                    <form id="expense-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/expenses/{{.ID}}/update" class="form-grid item-edit hidden full">
+                      {{$curCat := .Category}}
+                      {{$curMethod := .PaymentMethod}}
+                      <label>Category
+                        <select name="category" required>
+                          {{range $.ExpenseCategories}}
+                          <option value="{{.}}" {{if eq . $curCat}}selected{{end}}>{{.}}</option>
+                          {{end}}
+                          {{if and $curCat (not (listContains $.ExpenseCategories $curCat))}}
+                          <option value="{{$curCat}}" selected>{{$curCat}}</option>
+                          {{end}}
+                        </select>
+                      </label>
+                      <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" .Amount}}" required></label>
+                      <label>Date<input type="date" name="spent_on" value="{{.SpentOn}}"></label>
+                      <label>Payment Method
+                        <select name="payment_method" required>
+                          <option value="Cash" {{if or (eq $curMethod "") (eq $curMethod "Cash")}}selected{{end}}>Cash</option>
+                          <option value="Credit Card" {{if eq $curMethod "Credit Card"}}selected{{end}}>Credit Card</option>
+                          <option value="Crypto" {{if eq $curMethod "Crypto"}}selected{{end}}>Crypto</option>
+                          <option value="Debit Card" {{if eq $curMethod "Debit Card"}}selected{{end}}>Debit Card</option>
+                          <option value="Digital Wallet" {{if eq $curMethod "Digital Wallet"}}selected{{end}}>Digital Wallet</option>
+                          <option value="Mobile Payment" {{if eq $curMethod "Mobile Payment"}}selected{{end}}>Mobile Payment</option>
+                        </select>
+                      </label>
+                      <label>Notes<input type="text" name="notes" value="{{.Notes}}"></label>
+                      <button type="submit">Save</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="expense-edit-{{.ID}}">Cancel</button>
+                    </form>
+                    {{end}}
+                  </li>
+                  {{end}}
+                </ul>
+              </details>
+              {{end}}
+            </div>
+            {{else}}
+            <p class="muted">No expenses yet.</p>
+            {{end}}
+          </section>
+
+          <section class="card">
+            <h3>Reminder Checklist</h3>
+            {{if .ChecklistGroups}}
+            <div class="reminder-checklist-grid">
+              {{range .ChecklistGroups}}
+              <article class="reminder-checklist-card">
+                <h4>{{.Category}}</h4>
+                <ul class="list reminder-checklist-list">
+                  {{range .Items}}
+                  <li class="list-item reminder-checklist-item">
+                    <div id="checklist-view-{{.ID}}" class="item-view checklist-view">
+                      <form method="post" action="/checklist/{{.ID}}/toggle" class="inline-form check-row">
+                        <input type="hidden" name="done" value="{{if .Done}}false{{else}}true{{end}}">
+                        <button type="submit" class="check-btn" {{if $.Details.Trip.IsArchived}}disabled{{end}}><span class="material-symbols-outlined">{{if .Done}}check{{else}}circle{{end}}</span></button>
+                      </form>
+                      <span class="{{if .Done}}done{{end}}">{{.Text}}</span>
+                      {{if not $.Details.Trip.IsArchived}}
+                      <div class="checklist-inline-actions">
+                        <button
+                          type="button"
+                          class="item-action-btn"
+                          data-inline-edit-open="checklist-edit-{{.ID}}"
+                        >Edit</button>
+                        <form method="post" action="/checklist/{{.ID}}/delete" onsubmit="return confirm('Delete this checklist item?');">
+                          <button type="submit" class="item-action-btn danger">Delete</button>
+                        </form>
+                      </div>
+                      {{end}}
+                    </div>
+                    {{if not $.Details.Trip.IsArchived}}
+                    <form id="checklist-edit-{{.ID}}" method="post" action="/checklist/{{.ID}}/update" class="form-grid item-edit hidden full">
+                      {{$curCat := .Category}}
+                      <label class="full">Category
+                        <select name="category" required>
+                          {{range $.ChecklistCategories}}
+                          <option value="{{.}}" {{if eq . $curCat}}selected{{end}}>{{.}}</option>
+                          {{end}}
+                          {{if and $curCat (not (listContains $.ChecklistCategories $curCat))}}
+                          <option value="{{$curCat}}" selected>{{$curCat}}</option>
+                          {{end}}
+                        </select>
+                      </label>
+                      <label class="full">Item<input type="text" name="text" value="{{.Text}}" required></label>
+                      <button type="submit">Save</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="checklist-edit-{{.ID}}">Cancel</button>
+                    </form>
+                    {{end}}
+                  </li>
+                  {{end}}
+                </ul>
+              </article>
+              {{end}}
+            </div>
+            {{else}}
+            <p class="muted">No reminder checklist items yet.</p>
+            {{end}}
+          </section>
+
+          <section class="card">
+            <h3>Flights</h3>
+            {{if .Details.Flights}}
+            <ul class="list flight-card-list">
+              {{range .Details.Flights}}
+              <li class="flight-card">
+                {{if not $.Details.Trip.IsArchived}}
+                <div class="item-actions flight-card-actions">
+                  <button type="button" class="item-action-btn" data-inline-edit-open="flight-edit-{{.ID}}">Edit</button>
+                  <form method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{.ID}}/delete" onsubmit="return confirm('Delete this flight entry?');">
+                    <button type="submit" class="item-action-btn danger">Delete</button>
+                  </form>
+                </div>
+                {{end}}
+                <div id="flight-view-{{.ID}}" class="item-view flight-view">
+                  <div class="flight-main-head">
+                    <div>
+                      <h4>{{if .FlightName}}{{.FlightName}}{{else}}Flight{{end}}</h4>
+                      <p>{{if .FlightNumber}}{{.FlightNumber}}{{else}}Flight Number Not Set{{end}}</p>
+                    </div>
+                    <div class="flight-cost-block">
+                      <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}}</strong>
+                      <small>Total Cost</small>
+                    </div>
+                  </div>
+                  <div class="flight-meta-grid">
+                    <div><span class="material-symbols-outlined">flight_takeoff</span><div><strong>{{.DepartAirport}}</strong><small>{{formatDateTime .DepartAt}}</small></div></div>
+                    <div><span class="material-symbols-outlined">flight_land</span><div><strong>{{.ArriveAirport}}</strong><small>{{formatDateTime .ArriveAt}}</small></div></div>
+                    <div><span class="material-symbols-outlined">confirmation_number</span><div><strong>{{if .BookingConfirmation}}{{.BookingConfirmation}}{{else}}-{{end}}</strong><small>Confirmation</small></div></div>
+                    <div><span class="material-symbols-outlined">description</span><div>{{if .DocumentPath}}<a class="flight-doc-link" href="{{.DocumentPath}}" target="_blank" rel="noreferrer">Open Document</a>{{else}}<strong>Not uploaded</strong>{{end}}<small>Document</small></div></div>
+                    {{if .Notes}}
+                    <div class="flight-meta-notes"><span class="material-symbols-outlined">sticky_note_2</span><div><strong>{{.Notes}}</strong><small>Notes</small></div></div>
+                    {{end}}
+                  </div>
+                </div>
+                {{if not $.Details.Trip.IsArchived}}
+                <form id="flight-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{.ID}}/update" class="form-grid item-edit hidden full flight-edit-form" enctype="multipart/form-data">
+                  <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+                  <div class="full flight-edit-head">
+                    <h5>Edit Flight Details</h5>
+                    <p>Update details here and it will sync to itinerary and expenses.</p>
+                  </div>
+                  <label class="full">Flight Name<input type="text" name="flight_name" value="{{.FlightName}}" required></label>
+                  <label class="full">Flight Number<input type="text" name="flight_number" value="{{.FlightNumber}}"></label>
+                  <label class="full">Depart Airport<input type="text" name="depart_airport" value="{{.DepartAirport}}" required></label>
+                  <label>Depart Date and Time<input type="datetime-local" name="depart_at" value="{{.DepartAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                  <label class="full">Arrive Airport<input type="text" name="arrive_airport" value="{{.ArriveAirport}}" required></label>
+                  <label>Arrive Date and Time<input type="datetime-local" name="arrive_at" value="{{.ArriveAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                  <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}"></label>
+                  <label>Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Cost}}"></label>
+                  <input type="hidden" name="current_document_path" value="{{.DocumentPath}}">
+                  <label class="full">Replace Flight Document<input type="file" name="flight_document" accept=".pdf,image/*"></label>
+                  <label class="full">Document Action
+                    <select name="remove_document">
+                      <option value="false" selected>Keep existing document</option>
+                      <option value="true">Delete existing document</option>
+                    </select>
+                  </label>
+                  <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}"></label>
+                  <div class="full flight-edit-actions">
+                    <button type="submit">Save Changes</button>
+                    <button type="button" class="secondary-btn" data-inline-edit-cancel="flight-edit-{{.ID}}">Cancel</button>
+                  </div>
+                </form>
+                {{end}}
+              </li>
+              {{end}}
+            </ul>
+            {{else}}
+            <p class="muted">No flights yet.</p>
+            {{end}}
+          </section>
+        </div>
+
+        <aside class="right-col">
+          <section class="card">
+            <h3>Add New Stop</h3>
+            {{if .Details.Trip.IsArchived}}
+            <p class="muted">Trip is archived. New itinerary stops are disabled.</p>
+            {{else}}
+            <form method="post" action="/trips/{{.Details.Trip.ID}}/itinerary" class="form-grid" data-itinerary-form data-location-lookup-enabled="{{.Settings.EnableLocationLookup}}" data-trip-start="{{.Details.Trip.StartDate}}" data-trip-end="{{.Details.Trip.EndDate}}" data-trip-start-label="{{formatUIDate .Details.Trip.StartDate}}" data-trip-end-label="{{formatUIDate .Details.Trip.EndDate}}">
+              <label class="full">Location Name<input type="text" name="location" placeholder="e.g. Coron Island" data-location-input autocomplete="off"></label>
+              <p class="full location-hint" data-location-status>Type a location and coordinates will be fetched automatically.</p>
+              <div class="full location-suggestions hidden" data-location-suggestions></div>
+              <label class="full">Title<input type="text" name="title" placeholder="Kayaking Big Lagoon" required></label>
+              <label>Date<input type="date" name="itinerary_date" value="{{.Details.Trip.StartDate}}" min="{{.Details.Trip.StartDate}}" max="{{.Details.Trip.EndDate}}" required></label>
+              <label>Cost<input type="number" step="0.01" name="est_cost" placeholder="0.00"></label>
+              <label>Start<input type="time" name="start_time"></label>
+              <label>End<input type="time" name="end_time"></label>
+              <input type="hidden" name="latitude" data-latitude-input>
+              <input type="hidden" name="longitude" data-longitude-input>
+              <p class="full location-hint" data-date-status></p>
+              <label class="full">Notes<input type="text" name="notes" placeholder="Optional details"></label>
+              <button class="full" type="submit">Add to Itinerary</button>
+            </form>
+            {{end}}
+          </section>
+
+          <section class="budget-tile">
+            <div class="budget-overlay">
+              <div>
+                <div class="meta">Total Budgeted Cost</div>
+                <div class="amount">{{.CurrencySymbol}}{{printf "%.2f" .TotalBudgeted}}</div>
+              </div>
+              <div class="budget-spent-chip">
+                <div class="meta">Total Budget Spent</div>
+                <div class="chip-amount">{{.CurrencySymbol}}{{printf "%.2f" .TotalExpense}}</div>
+              </div>
+            </div>
+            <div class="progress">
+              <div class="progress-fill" style="width: {{printf "%.2f" .BudgetProgress}}%;"></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <h3>Quick Expense</h3>
+            {{if .Details.Trip.IsArchived}}
+            <p class="muted">Trip is archived. New expenses are disabled.</p>
+            {{else}}
+            <form method="post" action="/trips/{{.Details.Trip.ID}}/expenses" class="form-grid">
+              <label>Category
+                <select name="category" required>
+                  <option value="" disabled selected>Select category</option>
+                  {{range .ExpenseCategories}}
+                  <option value="{{.}}">{{.}}</option>
+                  {{end}}
+                </select>
+              </label>
+              <label>Payment Method
+                <select name="payment_method" required>
+                  <option value="" disabled selected>Select payment method</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Credit Card">Credit Card</option>
+                  <option value="Crypto">Crypto</option>
+                  <option value="Debit Card">Debit Card</option>
+                  <option value="Digital Wallet">Digital Wallet</option>
+                  <option value="Mobile Payment">Mobile Payment</option>
+                </select>
+              </label>
+              <label>Amount<input type="number" step="0.01" name="amount" placeholder="0.00" required></label>
+              <label>Date<input type="date" name="spent_on"></label>
+              <label class="full">Notes<input type="text" name="notes" placeholder="Boat transfer"></label>
+              <button class="full" type="submit">Add Expense</button>
+            </form>
+            {{end}}
+          </section>
+
+          <section class="card">
+            <h3>Add to Checklist</h3>
+            {{if .Details.Trip.IsArchived}}
+            <p class="muted">Trip is archived. Checklist editing is disabled.</p>
+            {{else}}
+            <form method="post" action="/trips/{{.Details.Trip.ID}}/checklist" class="form-grid" data-checklist-builder>
+              <label class="full">Category
+                <select name="category" required>
+                  <option value="" disabled selected>Select category</option>
+                  {{range .ChecklistCategories}}
+                  <option value="{{.}}">{{.}}</option>
+                  {{end}}
+                </select>
+              </label>
+              <div class="inline-form full">
+                <input type="text" data-checklist-item-input placeholder="Add item..." autocomplete="off">
+                <button type="button" data-checklist-add-btn>Add</button>
+              </div>
+              <p class="muted full checklist-builder-empty" data-checklist-draft-empty>No items added yet.</p>
+              <ul class="list full checklist-draft-list hidden" data-checklist-draft-list></ul>
+              <input type="hidden" name="items_json" value="[]" data-checklist-items-json>
+              <p class="location-hint full" data-checklist-builder-status></p>
+              <button class="full" type="submit">Save</button>
+            </form>
+            {{end}}
+          </section>
+        </aside>
+      </div>
     </section>
   </main>
+
+  <nav class="bottom-nav">
+    <a class="active" href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined">map</span><span>Trips</span></a>
+    <a href="/"><span class="material-symbols-outlined">explore</span><span>Explore</span></a>
+    <a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined">payments</span><span>Expense Analysis</span></a>
+    <a href="/"><span class="material-symbols-outlined">person</span><span>Profile</span></a>
+  </nav>
 </body>
 </html>

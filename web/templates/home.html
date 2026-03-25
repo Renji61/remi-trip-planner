@@ -3,45 +3,125 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>REMI Trip Planner</title>
+  <script>
+    (function () {
+      try {
+        var k = "remi-theme";
+        var s = localStorage.getItem(k);
+        var dark = s === "dark" || (s !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("theme-dark", dark);
+      } catch (e) {}
+    })();
+  </script>
+  <title>Trip Dashboard | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script defer src="/static/app.js"></script>
 </head>
 <body>
-  <main class="container">
-    <header>
-      <h1>REMI Trip Planner</h1>
-      <p>Lightweight Wanderlog-style planner for personal trips.</p>
-    </header>
-
-    <section class="card">
-      <h2>Create Trip</h2>
-      <form method="post" action="/trips" class="grid">
-        <label>Trip Name<input type="text" name="name" required></label>
-        <label>Description<input type="text" name="description"></label>
-        <label>Start Date<input type="date" name="start_date"></label>
-        <label>End Date<input type="date" name="end_date"></label>
-        <button type="submit">Create</button>
-      </form>
-    </section>
-
-    <section class="card">
-      <h2>Your Trips</h2>
-      {{if .Trips}}
-      <ul class="list">
-        {{range .Trips}}
-        <li>
-          <a href="/trips/{{.ID}}">{{.Name}}</a>
-          <small>{{.StartDate}} - {{.EndDate}}</small>
-        </li>
-        {{end}}
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </div>
+      <ul class="nav-list">
+        <li class="nav-item active"><a href="/"><span class="material-symbols-outlined">luggage</span>Trips</a></li>
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">explore</span>Discover</a></li>
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">payments</span>Expense Analysis</a></li>
+        <li class="nav-item"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
       </ul>
-      {{else}}
-      <p>No trips yet.</p>
-      {{end}}
+      <div class="sidebar-bottom">
+        <a class="btn" href="/">Plan New Trip</a>
+        <a class="support-link" href="/">Support</a>
+        <a class="logout-link" href="/">Logout</a>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <div class="title-group">
+          <h2>Trip Dashboard</h2>
+          <p>Plan, track, and organize all your upcoming journeys.</p>
+        </div>
+        <div class="topbar-right">
+          <input type="text" placeholder="Search trips...">
+          <div class="avatar-row">
+            <button type="button" class="icon-btn" data-theme-toggle aria-label="Toggle light or dark mode">
+              <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+            </button>
+            <span class="avatar-dot"></span>
+            <span class="avatar">A</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="layout-two">
+        <div class="stack">
+          <section class="hero-map">
+            <div class="chip">
+              <small>Current focus</small>
+              <strong>Where to next? Start your next serene voyage.</strong>
+            </div>
+          </section>
+
+          <section>
+            <h3 class="section-title">Your Trips</h3>
+            {{if .Trips}}
+            <div class="trip-grid">
+              {{range .Trips}}
+              <article class="trip-card">
+                <div class="trip-head">
+                  <h3>{{.Name}}</h3>
+                  <span class="trip-pill">{{if .IsArchived}}Archived{{else}}Active{{end}}</span>
+                </div>
+                <p class="muted">{{.Description}}</p>
+                <small>{{formatUIDate .StartDate}} – {{formatUIDate .EndDate}}</small>
+                <div class="actions">
+                  <a class="btn" href="/trips/{{.ID}}">Open Trip</a>
+                </div>
+              </article>
+              {{end}}
+            </div>
+            {{else}}
+            <article class="card">
+              <p class="muted">No trips yet. Create your first trip from the panel on the right.</p>
+            </article>
+            {{end}}
+          </section>
+        </div>
+
+        <aside class="right-col">
+          <section class="card dashboard-create-card">
+            <h3>Create New Trip</h3>
+            <form method="post" action="/trips" class="form-grid">
+              <label class="full">Trip Name<input type="text" name="name" placeholder="e.g. Philippines" required></label>
+              <label class="full">Description<input type="text" name="description" placeholder="What is this trip about?"></label>
+              <label>Start Date<input type="date" name="start_date"></label>
+              <label>End Date<input type="date" name="end_date"></label>
+              <label>Currency Name<input type="text" name="currency_name" placeholder="e.g. PHP" value="{{.Settings.DefaultCurrencyName}}"></label>
+              <label>Currency Symbol<input type="text" name="currency_symbol" placeholder="e.g. ₱" value="{{.Settings.DefaultCurrencySymbol}}"></label>
+              <button class="full" type="submit">Create Trip</button>
+            </form>
+          </section>
+        </aside>
+      </div>
     </section>
   </main>
+
+  <nav class="bottom-nav">
+    <a class="active" href="/"><span class="material-symbols-outlined">map</span><span>Trips</span></a>
+    <a href="/"><span class="material-symbols-outlined">explore</span><span>Explore</span></a>
+    <a href="/"><span class="material-symbols-outlined">payments</span><span>Expense Analysis</span></a>
+    <a href="/"><span class="material-symbols-outlined">person</span><span>Profile</span></a>
+  </nav>
 </body>
 </html>

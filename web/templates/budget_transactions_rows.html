@@ -1,0 +1,19 @@
+{{range .Transactions}}
+<tr>
+  <td class="budget-table-date">{{if .DateLabel}}{{.DateLabel}}{{else}}--{{end}}</td>
+  <td class="budget-table-category">
+    <div class="budget-table-cat">
+      <span class="budget-table-icon expense-cat-icon expense-cat-icon--{{.CategoryStyle}}">
+        <span class="material-symbols-outlined">{{.CategoryIcon}}</span>
+      </span>
+      <div class="budget-table-cat-text">
+        <strong>{{.CategoryName}}</strong>
+      </div>
+    </div>
+  </td>
+  <td class="budget-table-description">{{if .Description}}{{.Description}}{{else}}--{{end}}</td>
+  <td class="budget-table-method">{{.Method}}</td>
+  <td class="budget-table-amount budget-table-right">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</td>
+</tr>
+{{end}}
+
