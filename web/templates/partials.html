@@ -1,0 +1,29 @@
+{{define "themeHeadScript"}}
+  <script>
+    (function () {
+      try {
+        var pref = "{{.Settings.ThemePreference}}";
+        try {
+          document.documentElement.setAttribute("data-theme-pref", pref);
+        } catch (e0) {}
+        function applyTheme() {
+          var p = document.documentElement.getAttribute("data-theme-pref") || pref;
+          var dark;
+          if (p === "dark") dark = true;
+          else if (p === "light") dark = false;
+          else dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.classList.toggle("theme-dark", dark);
+        }
+        applyTheme();
+        if (pref === "system") {
+          var mq = window.matchMedia("(prefers-color-scheme: dark)");
+          mq.addEventListener("change", function () {
+            var p = document.documentElement.getAttribute("data-theme-pref") || "system";
+            if (p !== "system") return;
+            document.documentElement.classList.toggle("theme-dark", mq.matches);
+          });
+        }
+      } catch (e) {}
+    })();
+  </script>
+{{end}}

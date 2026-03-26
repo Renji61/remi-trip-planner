@@ -20,34 +20,73 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) error {
+func sqliteBool(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+const tripSelectCols = `id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived,
+		ui_show_stay, ui_show_vehicle, ui_show_flights, ui_show_spends,
+		ui_itinerary_expand, ui_spends_expand, ui_time_format,
+		ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends,
+		ui_main_section_order, ui_sidebar_widget_order,
+		created_at, updated_at`
+
+func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
+	var t trips.Trip
+	var ss, sv, sf, sp int
+	err := scan(
+		&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.IsArchived,
+		&ss, &sv, &sf, &sp,
+		&t.UIItineraryExpand, &t.UISpendsExpand, &t.UITimeFormat,
+		&t.UILabelStay, &t.UILabelVehicle, &t.UILabelFlights, &t.UILabelSpends,
+		&t.UIMainSectionOrder, &t.UISidebarWidgetOrder,
+		&t.CreatedAt, &t.UpdatedAt,
+	)
+	if err != nil {
+		return t, err
+	}
+	t.UIShowStay = ss != 0
+	t.UIShowVehicle = sv != 0
+	t.UIShowFlights = sf != 0
+	t.UIShowSpends = sp != 0
+	return t, nil
+}
+
+func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) (string, error) {
 	if t.ID == "" {
 		t.ID = uuid.NewString()
 	}
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO trips (id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO trips (
+			id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived,
+			ui_show_stay, ui_show_vehicle, ui_show_flights, ui_show_spends,
+			ui_itinerary_expand, ui_spends_expand, ui_time_format,
+			ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends,
+			ui_main_section_order, ui_sidebar_widget_order,
+			created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 'first', 'first', '12h', '', '', '', '', '', '', ?, ?)`,
 		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.IsArchived, now, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, t.ID, "trip", t.ID, "create", map[string]any{"name": t.Name})
 	}
-	return err
+	return t.ID, err
 }
 
 func (r *Repository) ListTrips(ctx context.Context) ([]trips.Trip, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived, created_at, updated_at
-		FROM trips ORDER BY created_at DESC`)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+tripSelectCols+` FROM trips ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []trips.Trip{}
 	for rows.Next() {
-		var t trips.Trip
-		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.IsArchived, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		t, err := scanTrip(rows.Scan)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -56,21 +95,27 @@ func (r *Repository) ListTrips(ctx context.Context) ([]trips.Trip, error) {
 }
 
 func (r *Repository) GetTrip(ctx context.Context, tripID string) (trips.Trip, error) {
-	var t trips.Trip
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived, created_at, updated_at
-		FROM trips WHERE id = ?`, tripID).
-		Scan(&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.IsArchived, &t.CreatedAt, &t.UpdatedAt)
-	return t, err
+	row := r.db.QueryRowContext(ctx, `SELECT `+tripSelectCols+` FROM trips WHERE id = ?`, tripID)
+	return scanTrip(row.Scan)
 }
 
 func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE trips
-		SET name = ?, description = ?, start_date = ?, end_date = ?, cover_image_url = ?, currency_name = ?, currency_symbol = ?, updated_at = ?
+		SET name = ?, description = ?, start_date = ?, end_date = ?, cover_image_url = ?, currency_name = ?, currency_symbol = ?,
+		    ui_show_stay = ?, ui_show_vehicle = ?, ui_show_flights = ?, ui_show_spends = ?,
+		    ui_itinerary_expand = ?, ui_spends_expand = ?, ui_time_format = ?,
+		    ui_label_stay = ?, ui_label_vehicle = ?, ui_label_flights = ?, ui_label_spends = ?,
+		    ui_main_section_order = ?, ui_sidebar_widget_order = ?,
+		    updated_at = ?
 		WHERE id = ?`,
-		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, now, t.ID,
+		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol,
+		sqliteBool(t.UIShowStay), sqliteBool(t.UIShowVehicle), sqliteBool(t.UIShowFlights), sqliteBool(t.UIShowSpends),
+		t.UIItineraryExpand, t.UISpendsExpand, t.UITimeFormat,
+		t.UILabelStay, t.UILabelVehicle, t.UILabelFlights, t.UILabelSpends,
+		t.UIMainSectionOrder, t.UISidebarWidgetOrder,
+		now, t.ID,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, t.ID, "trip", t.ID, "update", map[string]any{
@@ -156,6 +201,26 @@ func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]t
 		SELECT id, trip_id, day_number, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at
 		FROM itinerary_items WHERE trip_id = ?
 		ORDER BY day_number ASC, created_at ASC`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []trips.ItineraryItem{}
+	for rows.Next() {
+		var i trips.ItineraryItem
+		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.Latitude, &i.Longitude, &i.EstCost, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ListAllItineraryItems(ctx context.Context) ([]trips.ItineraryItem, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, trip_id, day_number, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at
+		FROM itinerary_items
+		ORDER BY trip_id, day_number ASC, start_time ASC, created_at ASC, id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -260,6 +325,25 @@ func (r *Repository) ListExpenses(ctx context.Context, tripID string) ([]trips.E
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SumExpensesByTrip(ctx context.Context) (map[string]float64, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT trip_id, COALESCE(SUM(amount), 0) FROM expenses GROUP BY trip_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]float64)
+	for rows.Next() {
+		var tripID string
+		var sum float64
+		if err := rows.Scan(&tripID, &sum); err != nil {
+			return nil, err
+		}
+		out[tripID] = sum
 	}
 	return out, rows.Err()
 }
@@ -590,7 +674,9 @@ func (r *Repository) logChange(ctx context.Context, tripID, entity, entityID, op
 func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, error) {
 	var settings trips.AppSettings
 	err := r.db.QueryRowContext(ctx, `
-		SELECT app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup
+		SELECT app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
+		       COALESCE(theme_preference, 'system'), COALESCE(dashboard_trip_layout, 'grid'), COALESCE(dashboard_trip_sort, 'name'), COALESCE(dashboard_hero_background, 'default'),
+		       COALESCE(NULLIF(TRIM(trip_dashboard_heading), ''), 'Trip Dashboard')
 		FROM app_settings
 		WHERE id = 1`).
 		Scan(
@@ -601,6 +687,11 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 			&settings.MapDefaultLongitude,
 			&settings.MapDefaultZoom,
 			&settings.EnableLocationLookup,
+			&settings.ThemePreference,
+			&settings.DashboardTripLayout,
+			&settings.DashboardTripSort,
+			&settings.DashboardHeroBackground,
+			&settings.TripDashboardHeading,
 		)
 	return settings, err
 }
@@ -608,9 +699,10 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSettings) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO app_settings
-			(id, app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup, updated_at)
+			(id, app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
+			 theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background, trip_dashboard_heading, updated_at)
 		VALUES
-			(1, ?, ?, ?, ?, ?, ?, ?, ?)
+			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			app_title = excluded.app_title,
 			default_currency_name = excluded.default_currency_name,
@@ -619,6 +711,11 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 			map_default_longitude = excluded.map_default_longitude,
 			map_default_zoom = excluded.map_default_zoom,
 			enable_location_lookup = excluded.enable_location_lookup,
+			theme_preference = excluded.theme_preference,
+			dashboard_trip_layout = excluded.dashboard_trip_layout,
+			dashboard_trip_sort = excluded.dashboard_trip_sort,
+			dashboard_hero_background = excluded.dashboard_hero_background,
+			trip_dashboard_heading = excluded.trip_dashboard_heading,
 			updated_at = excluded.updated_at
 	`,
 		settings.AppTitle,
@@ -628,7 +725,52 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 		settings.MapDefaultLongitude,
 		settings.MapDefaultZoom,
 		settings.EnableLocationLookup,
+		settings.ThemePreference,
+		settings.DashboardTripLayout,
+		settings.DashboardTripSort,
+		settings.DashboardHeroBackground,
+		settings.TripDashboardHeading,
 		time.Now().UTC(),
+	)
+	return err
+}
+
+func (r *Repository) GetTripDayLabels(ctx context.Context, tripID string) (map[int]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT day_number, label
+		FROM trip_day_labels
+		WHERE trip_id = ?`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int]string{}
+	for rows.Next() {
+		var dayNumber int
+		var label string
+		if err := rows.Scan(&dayNumber, &label); err != nil {
+			return nil, err
+		}
+		out[dayNumber] = label
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SaveTripDayLabel(ctx context.Context, tripID string, dayNumber int, label string) error {
+	trimmed := strings.TrimSpace(label)
+	if trimmed == "" {
+		_, err := r.db.ExecContext(ctx, `
+			DELETE FROM trip_day_labels
+			WHERE trip_id = ? AND day_number = ?`, tripID, dayNumber)
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO trip_day_labels (trip_id, day_number, label, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(trip_id, day_number) DO UPDATE SET
+			label = excluded.label,
+			updated_at = excluded.updated_at`,
+		tripID, dayNumber, trimmed, time.Now().UTC(),
 	)
 	return err
 }

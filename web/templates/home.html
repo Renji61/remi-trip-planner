@@ -1,24 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <script>
-    (function () {
-      try {
-        var k = "remi-theme";
-        var s = localStorage.getItem(k);
-        var dark = s === "dark" || (s !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.toggle("theme-dark", dark);
-      } catch (e) {}
-    })();
-  </script>
-  <title>Trip Dashboard | {{.Settings.AppTitle}}</title>
+  {{template "themeHeadScript" .}}
+  <title>{{.Settings.TripDashboardHeading}} | {{.Settings.AppTitle}}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v=24">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script defer src="/static/app.js"></script>
@@ -34,9 +25,9 @@
         </div>
       </div>
       <ul class="nav-list">
-        <li class="nav-item active"><a href="/"><span class="material-symbols-outlined">luggage</span>Trips</a></li>
+        <li class="nav-item active"><a href="/"><span class="material-symbols-outlined">luggage</span>My Trip</a></li>
         <li class="nav-item"><a href="/"><span class="material-symbols-outlined">explore</span>Discover</a></li>
-        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">payments</span>Expense Analysis</a></li>
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">payments</span>Spends</a></li>
         <li class="nav-item"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
       </ul>
       <div class="sidebar-bottom">
@@ -49,13 +40,16 @@
     <section class="main">
       <header class="topbar">
         <div class="title-group">
-          <h2>Trip Dashboard</h2>
+          <h2>{{.Settings.TripDashboardHeading}}</h2>
           <p>Plan, track, and organize all your upcoming journeys.</p>
         </div>
         <div class="topbar-right">
-          <input type="text" placeholder="Search trips...">
+          <input type="search" name="trip_search" placeholder="Search trips..." autocomplete="off" aria-label="Search trips" aria-controls="dashboard-trip-lists" data-dashboard-trip-search>
           <div class="avatar-row">
-            <button type="button" class="icon-btn" data-theme-toggle aria-label="Toggle light or dark mode">
+            <a href="/" class="icon-btn" aria-label="Go to dashboard">
+              <span class="material-symbols-outlined" aria-hidden="true">home</span>
+            </a>
+            <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
               <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
             </button>
             <span class="avatar-dot"></span>
@@ -64,64 +58,263 @@
         </div>
       </header>
 
-      <div class="layout-two">
-        <div class="stack">
-          <section class="hero-map">
-            <div class="chip">
-              <small>Current focus</small>
-              <strong>Where to next? Start your next serene voyage.</strong>
+      <div class="stack">
+          <section class="dashboard-hero-adventure {{.HeroPatternClass}}" aria-labelledby="dashboard-hero-adventure-title"{{if .HeroImageURL}} style="--dashboard-hero-bg-image: url('{{.HeroImageURL}}');"{{end}}>
+            <div class="dashboard-hero-adventure__inner">
+              <div class="dashboard-hero-adventure__copy">
+                <h2 id="dashboard-hero-adventure-title" class="dashboard-hero-adventure__headline">
+                  Where to <span class="dashboard-hero-adventure__accent">next?</span>
+                </h2>
+                <p class="dashboard-hero-adventure__sub">
+                  Escape the ordinary. Start planning your next editorial-worthy journey with {{.Settings.AppTitle}}&rsquo;s intuitive serenity.
+                </p>
+              </div>
+              <div class="dashboard-hero-glass">
+                <div class="dashboard-hero-glass__head">
+                  <span class="material-symbols-outlined dashboard-hero-glass__spark" aria-hidden="true">auto_awesome</span>
+                  <span class="dashboard-hero-glass__title">Start a New Adventure</span>
+                </div>
+                <form method="post" action="/trips" class="hero-adventure-form form-grid">
+                  <label class="full hero-adventure-label">Trip Name
+                    <input type="text" name="name" placeholder="e.g. Philippines" required autocomplete="off">
+                  </label>
+                  <label class="full hero-adventure-label">Description
+                    <input type="text" name="description" placeholder="What is this trip about?">
+                  </label>
+                  <div class="hero-adventure-dates">
+                    <label class="hero-adventure-label">Start Date
+                      <input type="date" name="start_date" class="hero-adventure-date-input">
+                    </label>
+                    <label class="hero-adventure-label">End Date
+                      <input type="date" name="end_date" class="hero-adventure-date-input">
+                    </label>
+                  </div>
+                  <div class="hero-adventure-currency">
+                    <label class="hero-adventure-label">Currency Name
+                      <input type="text" name="currency_name" placeholder="e.g. PHP" value="{{.Settings.DefaultCurrencyName}}">
+                    </label>
+                    <label class="hero-adventure-label">Currency Symbol
+                      <input type="text" name="currency_symbol" placeholder="e.g. ₱" value="{{.Settings.DefaultCurrencySymbol}}">
+                    </label>
+                  </div>
+                  <button type="submit" class="hero-adventure-submit full">
+                    Create Trip <span class="hero-adventure-submit-arrow" aria-hidden="true">→</span>
+                  </button>
+                </form>
+              </div>
             </div>
           </section>
 
-          <section>
-            <h3 class="section-title">Your Trips</h3>
-            {{if .Trips}}
-            <div class="trip-grid">
-              {{range .Trips}}
-              <article class="trip-card">
-                <div class="trip-head">
-                  <h3>{{.Name}}</h3>
-                  <span class="trip-pill">{{if .IsArchived}}Archived{{else}}Active{{end}}</span>
-                </div>
-                <p class="muted">{{.Description}}</p>
-                <small>{{formatUIDate .StartDate}} – {{formatUIDate .EndDate}}</small>
-                <div class="actions">
-                  <a class="btn" href="/trips/{{.ID}}">Open Trip</a>
-                </div>
-              </article>
+          <p class="muted dashboard-search-active-hint" aria-live="polite">Clear the search field above to bring back <strong>Start a New Adventure</strong>.</p>
+
+          <div id="dashboard-trip-lists" class="dashboard-trip-lists" data-dashboard-trip-lists role="region" aria-label="Trip collections">
+            <p class="muted dashboard-trip-search-none" data-trip-search-none hidden>No trips match your search.</p>
+
+            <section class="dashboard-trips-section" data-dashboard-trips-section aria-labelledby="dash-section-active">
+            <h3 id="dash-section-active" class="section-title">{{if eq (len .ActiveTripCards) 1}}Your Trip{{else}}Your Trips{{end}}</h3>
+            {{if .ActiveTripCards}}
+            <div class="{{if $.DashboardListLayout}}trip-list-scroll{{end}}">
+              {{if $.DashboardListLayout}}
+              <div class="trip-list-head" aria-hidden="true">
+                <span class="trip-list-head__cell trip-list-head__cell--dest">Trip destination</span>
+                <span class="trip-list-head__cell">Schedule</span>
+                <span class="trip-list-head__cell">Status</span>
+                <span class="trip-list-head__cell">Budget allocation</span>
+                <span class="trip-list-head__cell trip-list-head__cell--party">Party</span>
+              </div>
               {{end}}
+              <div class="trip-grid{{if $.DashboardListLayout}} trip-grid--list{{end}}" role="list">
+              {{range .ActiveTripCards}}{{template "dashboardTripCard" .}}{{end}}
+              </div>
             </div>
+            {{else if or .DraftTripCards .ArchivedTripCards}}
+            <p class="muted dashboard-trip-empty-active" data-trip-search-hide-when-query>No scheduled trips yet. Set start and end dates on a draft, or create a new trip.</p>
             {{else}}
-            <article class="card">
-              <p class="muted">No trips yet. Create your first trip from the panel on the right.</p>
+            <article class="card" data-trip-search-hide-when-query>
+              <p class="muted">No trips yet. Create your first trip using the form above.</p>
             </article>
             {{end}}
-          </section>
-        </div>
+            </section>
 
-        <aside class="right-col">
-          <section class="card dashboard-create-card">
-            <h3>Create New Trip</h3>
-            <form method="post" action="/trips" class="form-grid">
-              <label class="full">Trip Name<input type="text" name="name" placeholder="e.g. Philippines" required></label>
-              <label class="full">Description<input type="text" name="description" placeholder="What is this trip about?"></label>
-              <label>Start Date<input type="date" name="start_date"></label>
-              <label>End Date<input type="date" name="end_date"></label>
-              <label>Currency Name<input type="text" name="currency_name" placeholder="e.g. PHP" value="{{.Settings.DefaultCurrencyName}}"></label>
-              <label>Currency Symbol<input type="text" name="currency_symbol" placeholder="e.g. ₱" value="{{.Settings.DefaultCurrencySymbol}}"></label>
-              <button class="full" type="submit">Create Trip</button>
-            </form>
+            {{if .DraftTripCards}}
+            <section class="dashboard-trip-section dashboard-trip-section--draft dashboard-trips-section" data-dashboard-trips-section aria-labelledby="dash-section-draft">
+            <h3 id="dash-section-draft" class="section-title">{{if eq (len .DraftTripCards) 1}}Draft Trip{{else}}Draft Trips{{end}}</h3>
+            <div class="{{if $.DashboardListLayout}}trip-list-scroll{{end}}">
+              {{if $.DashboardListLayout}}
+              <div class="trip-list-head" aria-hidden="true">
+                <span class="trip-list-head__cell trip-list-head__cell--dest">Trip destination</span>
+                <span class="trip-list-head__cell">Schedule</span>
+                <span class="trip-list-head__cell">Status</span>
+                <span class="trip-list-head__cell">Budget allocation</span>
+                <span class="trip-list-head__cell trip-list-head__cell--party">Party</span>
+              </div>
+              {{end}}
+              <div class="trip-grid{{if $.DashboardListLayout}} trip-grid--list{{end}}" role="list">
+              {{range .DraftTripCards}}{{template "dashboardTripCard" .}}{{end}}
+              </div>
+            </div>
+            </section>
+            {{end}}
+
+            {{if .ArchivedTripCards}}
+            <section class="dashboard-trip-section dashboard-trip-section--archived dashboard-trips-section" data-dashboard-trips-section aria-labelledby="dash-section-archived">
+            <h3 id="dash-section-archived" class="section-title">{{if eq (len .ArchivedTripCards) 1}}Archived Trip{{else}}Archived Trips{{end}}</h3>
+            <div class="{{if $.DashboardListLayout}}trip-list-scroll{{end}}">
+              {{if $.DashboardListLayout}}
+              <div class="trip-list-head" aria-hidden="true">
+                <span class="trip-list-head__cell trip-list-head__cell--dest">Trip destination</span>
+                <span class="trip-list-head__cell">Schedule</span>
+                <span class="trip-list-head__cell">Status</span>
+                <span class="trip-list-head__cell">Budget allocation</span>
+                <span class="trip-list-head__cell trip-list-head__cell--party">Party</span>
+              </div>
+              {{end}}
+              <div class="trip-grid{{if $.DashboardListLayout}} trip-grid--list{{end}}" role="list">
+              {{range .ArchivedTripCards}}{{template "dashboardTripCard" .}}{{end}}
+              </div>
+            </div>
+            </section>
+            {{end}}
+          </div>
+
+          <section class="travel-stats-card" aria-labelledby="travel-stats-heading" role="region" aria-label="Travel statistics summary">
+            <div class="travel-stats-inner">
+              <header class="travel-stats-header">
+                <h3 id="travel-stats-heading">Travel Statistics</h3>
+                <p class="travel-stats-sub">Your year in exploration and memories.</p>
+              </header>
+              <div class="travel-stats-metrics">
+                <div class="travel-stats-metric">
+                  <span class="travel-stats-value">{{.TravelStats.CountriesVisited}}</span>
+                  <span class="travel-stats-label">Countries visited</span>
+                </div>
+                <div class="travel-stats-metric">
+                  <span class="travel-stats-value">{{.TravelStats.DaysTraveled}}</span>
+                  <span class="travel-stats-label">Days traveled</span>
+                </div>
+                <div class="travel-stats-metric">
+                  <span class="travel-stats-value">{{.TravelStats.MilesDisplay}}</span>
+                  <span class="travel-stats-label">Miles logged</span>
+                </div>
+              </div>
+              <span class="travel-stats-globe material-symbols-outlined" aria-hidden="true">public</span>
+            </div>
           </section>
-        </aside>
       </div>
     </section>
   </main>
 
   <nav class="bottom-nav">
-    <a class="active" href="/"><span class="material-symbols-outlined">map</span><span>Trips</span></a>
+    <a class="active" href="/"><span class="material-symbols-outlined">map</span><span>My Trip</span></a>
     <a href="/"><span class="material-symbols-outlined">explore</span><span>Explore</span></a>
-    <a href="/"><span class="material-symbols-outlined">payments</span><span>Expense Analysis</span></a>
-    <a href="/"><span class="material-symbols-outlined">person</span><span>Profile</span></a>
+    <a href="/"><span class="material-symbols-outlined">payments</span><span>Spends</span></a>
+    <a href="/settings"><span class="material-symbols-outlined">settings</span><span>Settings</span></a>
   </nav>
+
+{{define "dashboardTripCard"}}
+              {{if .DashboardListLayout}}
+              <article class="trip-card trip-card--list-row" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{formatTripDateRange .StartDate .EndDate}} {{.StatusLabel}} {{.TripSubtitle}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}">
+                <div class="trip-list-row-desktop">
+                <div class="trip-list-col trip-list-col--dest">
+                  <a class="trip-list-dest-link" href="/trips/{{.ID}}" aria-label="View details for {{.Name}}">
+                    {{if .CoverImage}}
+                    <div class="trip-list-thumb" style="background-image: linear-gradient(160deg, rgba(0, 32, 70, 0.15), rgba(0, 105, 112, 0.1)), url('{{.CoverImage}}');" role="img" aria-hidden="true"></div>
+                    {{else}}
+                    <div class="trip-list-thumb trip-list-thumb--placeholder" aria-hidden="true">
+                      <span class="material-symbols-outlined" aria-hidden="true">travel_explore</span>
+                    </div>
+                    {{end}}
+                    <div class="trip-list-dest-text">
+                      <h3 id="trip-card-title-{{.ID}}">{{.Name}}</h3>
+                      <p class="trip-list-sub muted">{{.TripSubtitle}}</p>
+                    </div>
+                  </a>
+                </div>
+                <div class="trip-list-col trip-list-col--schedule">
+                  {{if .HasValidSchedule}}
+                  <span class="trip-list-schedule-dates">{{formatTripDateRange .StartDate .EndDate}}</span>
+                  <span class="trip-list-schedule-meta">{{.ScheduleDurationLabel}}</span>
+                  {{else}}
+                  <span class="trip-list-schedule-dates">Not set</span>
+                  {{if eq .StatusSlug "draft"}}
+                  <span class="trip-list-schedule-meta trip-list-schedule-meta--draft">Draft</span>
+                  {{end}}
+                  {{end}}
+                </div>
+                <div class="trip-list-col trip-list-col--status">
+                  <span id="trip-card-status-{{.ID}}" class="trip-status-badge trip-status-badge--{{.StatusSlug}}">{{.StatusLabel}}</span>
+                </div>
+                <div class="trip-list-col trip-list-col--budget">
+                  <div class="trip-list-budget-line">
+                    <span class="trip-list-budget-spent">{{.CurrencySymbol}}{{formatTripMoney .BudgetTotal}}</span>
+                    <span class="trip-list-budget-pct">{{.BudgetPercent}}%</span>
+                  </div>
+                  <div class="trip-list-budget-bar" role="progressbar" aria-valuenow="{{.BudgetPercent}}" aria-valuemin="0" aria-valuemax="100" aria-label="Budget used: {{.BudgetPercent}} percent"><span class="trip-list-budget-bar-fill trip-list-budget-bar-fill--{{.StatusSlug}}" style="width: {{.BudgetPercent}}%"></span></div>
+                </div>
+                <div class="trip-list-col trip-list-col--party">
+                  <a class="trip-list-party-add" href="/trips/{{.ID}}" title="Open trip" aria-label="Open trip {{.Name}}"><span class="material-symbols-outlined" aria-hidden="true">add</span></a>
+                </div>
+                </div>
+                <div class="trip-list-row-mobile">
+                  <a class="trip-list-mobile-card-link" href="/trips/{{.ID}}" aria-label="Open trip {{.Name}}, {{.StatusLabel}}">
+                    {{if .CoverImage}}
+                    <div class="trip-list-mobile-thumb" style="background-image: linear-gradient(160deg, rgba(0, 32, 70, 0.15), rgba(0, 105, 112, 0.1)), url('{{.CoverImage}}');"></div>
+                    {{else}}
+                    <div class="trip-list-mobile-thumb trip-list-mobile-thumb--placeholder">
+                      <span class="material-symbols-outlined" aria-hidden="true">travel_explore</span>
+                    </div>
+                    {{end}}
+                    <div class="trip-list-mobile-body">
+                      <div class="trip-list-mobile-top">
+                        <span class="trip-status-badge trip-status-badge--{{.StatusSlug}} trip-status-badge--mobile-list">{{if eq .StatusSlug "draft"}}Planning{{else}}{{.StatusLabel}}{{end}}</span>
+                        <span class="trip-list-mobile-dates muted">{{if .HasValidSchedule}}{{formatTripDateShort .StartDate .EndDate}}{{else}}—{{end}}</span>
+                      </div>
+                      <h3 class="trip-list-mobile-title">{{.Name}}</h3>
+                      <p class="trip-list-mobile-sub muted">{{.TripSubtitle}}</p>
+                      <p class="trip-list-mobile-budget-line">Budget <span class="trip-list-mobile-budget-amt">{{.CurrencySymbol}}{{formatTripMoney .BudgetTotal}}</span></p>
+                      <div class="trip-list-mobile-progress" aria-hidden="true">
+                        <span class="trip-list-mobile-pct">{{.BudgetPercent}}%</span>
+                        <div class="trip-list-budget-bar trip-list-budget-bar--mobile">
+                          <span class="trip-list-budget-bar-fill trip-list-budget-bar-fill--{{.StatusSlug}}" style="width: {{.BudgetPercent}}%"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </a>
+                </div>
+              </article>
+              {{else}}
+              <article class="trip-card" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{formatTripDateRange .StartDate .EndDate}} {{.StatusLabel}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}" aria-labelledby="trip-card-title-{{.ID}} trip-card-status-{{.ID}}">
+                <a class="trip-card-cover-link trip-card-cover-wrap" href="/trips/{{.ID}}" aria-label="View details for {{.Name}}">
+                  <span id="trip-card-status-{{.ID}}" class="trip-status-badge trip-status-badge--{{.StatusSlug}}">{{.StatusLabel}}</span>
+                  {{if .CoverImage}}
+                  <div class="trip-card-cover" style="background-image: linear-gradient(160deg, rgba(0, 32, 70, 0.22), rgba(0, 105, 112, 0.12)), url('{{.CoverImage}}');" role="img" aria-label="Cover image for {{.Name}}"></div>
+                  {{else}}
+                  <div class="trip-card-cover trip-card-cover--placeholder" aria-hidden="true">
+                    <span class="material-symbols-outlined" aria-hidden="true">travel_explore</span>
+                  </div>
+                  {{end}}
+                </a>
+                <div class="trip-card-body">
+                  <div class="trip-head trip-head--dashboard">
+                    <h3 id="trip-card-title-{{.ID}}">{{.Name}}</h3>
+                    <div class="trip-budget-block">
+                      <span class="trip-budget-label">Budget</span>
+                      <span class="trip-budget-value">{{.CurrencySymbol}}{{formatTripMoney .BudgetTotal}}</span>
+                    </div>
+                  </div>
+                  <div class="trip-date-row">
+                    <span class="material-symbols-outlined trip-date-icon" aria-hidden="true">calendar_today</span>
+                    <span class="trip-date-text">{{formatTripDateRange .StartDate .EndDate}}</span>
+                  </div>
+                  {{if .Description}}
+                  <p class="muted trip-card-desc">{{.Description}}</p>
+                  {{end}}
+                  <div class="trip-card-open-wrap">
+                    <a class="btn trip-card-open-btn" href="/trips/{{.ID}}" aria-label="Open trip {{.Name}}">Open Trip</a>
+                  </div>
+                </div>
+              </article>
+              {{end}}
+{{end}}
 </body>
 </html>

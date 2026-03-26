@@ -1,0 +1,25 @@
+# Copy to .github/workflows/ci.yml and commit, or enable GitHub Actions via the web UI.
+# If `git push` fails with "refusing to allow an OAuth App to create or update workflow",
+# use a Personal Access Token with the `workflow` scope, or paste this file in the repository on GitHub.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Go fmt check
+        run: test -z "$(gofmt -l .)"
+      - name: Vet and test
+        run: go vet ./... && go test ./...

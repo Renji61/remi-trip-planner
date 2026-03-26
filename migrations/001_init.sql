@@ -137,3 +137,12 @@ CREATE TABLE IF NOT EXISTS flight_entries (
   created_at DATETIME NOT NULL,
   FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS trip_day_labels (
+  trip_id TEXT NOT NULL,
+  day_number INTEGER NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (trip_id, day_number),
+  FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+);

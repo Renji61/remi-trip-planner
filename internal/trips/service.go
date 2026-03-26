@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +25,25 @@ type Trip struct {
 	IsArchived     bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// Per-trip UI: section visibility on trip page and nav (default all enabled).
+	UIShowStay    bool
+	UIShowVehicle bool
+	UIShowFlights bool
+	UIShowSpends  bool
+	// UIItineraryExpand: first | all | none — default expanded state for itinerary day groups.
+	UIItineraryExpand string
+	// UISpendsExpand: first | all | none — for spends-by-day on trip page.
+	UISpendsExpand string
+	// UITimeFormat: 12h | 24h for displayed datetimes and clock times.
+	UITimeFormat   string
+	UILabelStay    string
+	UILabelVehicle string
+	UILabelFlights string
+	UILabelSpends  string
+	// Comma-separated section keys (map,itinerary,...); empty means default order.
+	UIMainSectionOrder string
+	// Comma-separated sidebar widget keys (add_stop,budget,...); empty means default.
+	UISidebarWidgetOrder string
 }
 
 type ItineraryItem struct {
@@ -42,15 +63,15 @@ type ItineraryItem struct {
 }
 
 type Expense struct {
-	ID        string
-	TripID    string
-	Category  string
-	Amount    float64
-	Notes     string
-	SpentOn   string
+	ID            string
+	TripID        string
+	Category      string
+	Amount        float64
+	Notes         string
+	SpentOn       string
 	PaymentMethod string
-	LodgingID string
-	CreatedAt time.Time
+	LodgingID     string
+	CreatedAt     time.Time
 }
 
 // ExpenseCategoryAccommodation is used for accommodation-synced expenses and matches the Accommodation quick-expense option.
@@ -152,6 +173,8 @@ type Lodging struct {
 	TripID              string
 	Name                string
 	Address             string
+	Latitude            float64
+	Longitude           float64
 	CheckInAt           string
 	CheckOutAt          string
 	BookingConfirmation string
@@ -213,13 +236,18 @@ type Change struct {
 }
 
 type AppSettings struct {
-	AppTitle              string
-	DefaultCurrencyName   string
-	DefaultCurrencySymbol string
-	MapDefaultLatitude    float64
-	MapDefaultLongitude   float64
-	MapDefaultZoom        int
-	EnableLocationLookup  bool
+	AppTitle                string
+	TripDashboardHeading    string // main heading on the home dashboard (e.g. "Trip Dashboard")
+	DefaultCurrencyName     string
+	DefaultCurrencySymbol   string
+	MapDefaultLatitude      float64
+	MapDefaultLongitude     float64
+	MapDefaultZoom          int
+	EnableLocationLookup    bool
+	ThemePreference         string // light, dark, system
+	DashboardTripLayout     string // grid, list
+	DashboardTripSort       string // name, start_date, updated, status
+	DashboardHeroBackground string // default, pattern:*, or https image URL
 }
 
 type TripDetails struct {
@@ -232,8 +260,16 @@ type TripDetails struct {
 	Flights   []Flight
 }
 
+// TravelStats aggregates dashboard metrics across all trips for the app (single-tenant).
+type TravelStats struct {
+	CountriesVisited int
+	DaysTraveled     int
+	MilesLogged      float64
+	MilesDisplay     string
+}
+
 type Repository interface {
-	CreateTrip(ctx context.Context, t Trip) error
+	CreateTrip(ctx context.Context, t Trip) (tripID string, err error)
 	ListTrips(ctx context.Context) ([]Trip, error)
 	GetTrip(ctx context.Context, tripID string) (Trip, error)
 	UpdateTrip(ctx context.Context, t Trip) error
@@ -243,6 +279,7 @@ type Repository interface {
 	UpdateItineraryItem(ctx context.Context, item ItineraryItem) (rowsAffected int64, err error)
 	DeleteItineraryItem(ctx context.Context, tripID, itemID string) error
 	ListItineraryItems(ctx context.Context, tripID string) ([]ItineraryItem, error)
+	ListAllItineraryItems(ctx context.Context) ([]ItineraryItem, error)
 	AddExpense(ctx context.Context, expense Expense) error
 	UpdateExpense(ctx context.Context, expense Expense) error
 	DeleteExpense(ctx context.Context, tripID, expenseID string) error
@@ -250,6 +287,7 @@ type Repository interface {
 	GetExpenseByLodgingID(ctx context.Context, tripID, lodgingID string) (Expense, error)
 	DeleteExpenseByLodgingID(ctx context.Context, tripID, lodgingID string) error
 	ListExpenses(ctx context.Context, tripID string) ([]Expense, error)
+	SumExpensesByTrip(ctx context.Context) (map[string]float64, error)
 	AddChecklistItem(ctx context.Context, item ChecklistItem) error
 	GetChecklistItem(ctx context.Context, itemID string) (ChecklistItem, error)
 	UpdateChecklistItem(ctx context.Context, item ChecklistItem) error
@@ -274,6 +312,8 @@ type Repository interface {
 	ListChanges(ctx context.Context, tripID, since string) ([]Change, error)
 	GetAppSettings(ctx context.Context) (AppSettings, error)
 	SaveAppSettings(ctx context.Context, settings AppSettings) error
+	GetTripDayLabels(ctx context.Context, tripID string) (map[int]string, error)
+	SaveTripDayLabel(ctx context.Context, tripID string, dayNumber int, label string) error
 }
 
 type Service struct {
@@ -284,15 +324,147 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) CreateTrip(ctx context.Context, t Trip) error {
+func (s *Service) CreateTrip(ctx context.Context, t Trip) (tripID string, err error) {
 	if t.Name == "" {
-		return errors.New("trip name is required")
+		return "", errors.New("trip name is required")
 	}
 	return s.repo.CreateTrip(ctx, t)
 }
 
 func (s *Service) ListTrips(ctx context.Context) ([]Trip, error) {
 	return s.repo.ListTrips(ctx)
+}
+
+// SumExpensesByTrip returns total recorded spend per trip id (expense ledger only).
+func (s *Service) SumExpensesByTrip(ctx context.Context) (map[string]float64, error) {
+	return s.repo.SumExpensesByTrip(ctx)
+}
+
+// ComputeTravelStats derives countries from structured locations (comma-separated, typical of geocoder output),
+// sums inclusive trip day spans from each trip’s start/end dates, and estimates miles from itinerary leg distances.
+func (s *Service) ComputeTravelStats(ctx context.Context, tripsList []Trip) (TravelStats, error) {
+	items, err := s.repo.ListAllItineraryItems(ctx)
+	if err != nil {
+		return TravelStats{}, err
+	}
+	return buildTravelStats(tripsList, items), nil
+}
+
+func buildTravelStats(tripsList []Trip, items []ItineraryItem) TravelStats {
+	var out TravelStats
+	for _, t := range tripsList {
+		out.DaysTraveled += tripInclusiveDays(t.StartDate, t.EndDate)
+	}
+
+	countries := make(map[string]struct{})
+	for _, it := range items {
+		c := countryHintFromLocation(it.Location)
+		if c != "" {
+			countries[c] = struct{}{}
+		}
+	}
+	out.CountriesVisited = len(countries)
+
+	byTrip := make(map[string][]ItineraryItem)
+	for _, it := range items {
+		byTrip[it.TripID] = append(byTrip[it.TripID], it)
+	}
+	const kmToMiles = 0.621371
+	var kmTotal float64
+	for _, legs := range byTrip {
+		for i := 0; i < len(legs)-1; i++ {
+			a, b := legs[i], legs[i+1]
+			if !validItineraryCoords(a.Latitude, a.Longitude) || !validItineraryCoords(b.Latitude, b.Longitude) {
+				continue
+			}
+			km := haversineKm(a.Latitude, a.Longitude, b.Latitude, b.Longitude)
+			if math.IsNaN(km) || math.IsInf(km, 0) || km <= 0.05 {
+				continue
+			}
+			kmTotal += km
+		}
+	}
+	out.MilesLogged = kmTotal * kmToMiles
+	out.MilesDisplay = formatMilesShort(out.MilesLogged)
+	return out
+}
+
+func tripInclusiveDays(start, end string) int {
+	start = strings.TrimSpace(start)
+	end = strings.TrimSpace(end)
+	if start == "" || end == "" {
+		return 0
+	}
+	t0, err0 := time.Parse("2006-01-02", start)
+	t1, err1 := time.Parse("2006-01-02", end)
+	if err0 != nil || err1 != nil {
+		return 0
+	}
+	if t1.Before(t0) {
+		return 0
+	}
+	return int(t1.Sub(t0).Hours()/24) + 1
+}
+
+// countryHintFromLocation uses the last comma-separated segment (common for OSM-style addresses) as a country/region key.
+func countryHintFromLocation(loc string) string {
+	loc = strings.TrimSpace(loc)
+	if loc == "" || !strings.Contains(loc, ",") {
+		return ""
+	}
+	parts := strings.Split(loc, ",")
+	last := strings.TrimSpace(parts[len(parts)-1])
+	if len(last) < 3 {
+		return ""
+	}
+	if isDigitOnly(last) {
+		return ""
+	}
+	return strings.ToLower(last)
+}
+
+func isDigitOnly(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+func validItineraryCoords(lat, lng float64) bool {
+	if math.IsNaN(lat) || math.IsNaN(lng) {
+		return false
+	}
+	if lat == 0 && lng == 0 {
+		return false
+	}
+	return true
+}
+
+func haversineKm(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusKm = 6371.0
+	φ1 := lat1 * math.Pi / 180
+	φ2 := lat2 * math.Pi / 180
+	Δφ := (lat2 - lat1) * math.Pi / 180
+	Δλ := (lon2 - lon1) * math.Pi / 180
+	a := math.Sin(Δφ/2)*math.Sin(Δφ/2) + math.Cos(φ1)*math.Cos(φ2)*math.Sin(Δλ/2)*math.Sin(Δλ/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	return earthRadiusKm * c
+}
+
+func formatMilesShort(miles float64) string {
+	if miles < 1 {
+		return "0"
+	}
+	if miles < 1000 {
+		return fmt.Sprintf("%.0f", math.Round(miles))
+	}
+	k := miles / 1000
+	if k < 10 {
+		return fmt.Sprintf("%.1fk", math.Round(k*10)/10)
+	}
+	return fmt.Sprintf("%.0fk", math.Round(k))
 }
 
 func (s *Service) GetTrip(ctx context.Context, tripID string) (Trip, error) {
@@ -468,6 +640,8 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 		DayNumber: checkInDay,
 		Title:     AccommodationItineraryCheckInTitle(lodging.Name),
 		Location:  lodging.Address,
+		Latitude:  lodging.Latitude,
+		Longitude: lodging.Longitude,
 		Notes:     checkInNotes,
 		EstCost:   lodging.Cost,
 		StartTime: checkInTime,
@@ -479,6 +653,8 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 		DayNumber: checkOutDay,
 		Title:     AccommodationItineraryCheckOutTitle(lodging.Name),
 		Location:  lodging.Address,
+		Latitude:  lodging.Latitude,
+		Longitude: lodging.Longitude,
 		Notes:     checkOutNotes,
 		EstCost:   lodging.Cost,
 		StartTime: checkOutTime,
@@ -513,12 +689,14 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 	newCheckIn := ItineraryItem{
 		ID: newCI, TripID: lodging.TripID, DayNumber: checkInDay,
 		Title: AccommodationItineraryCheckInTitle(lodging.Name), Location: lodging.Address,
+		Latitude: lodging.Latitude, Longitude: lodging.Longitude,
 		Notes: checkInNotes, EstCost: lodging.Cost,
 		StartTime: checkInTime, EndTime: checkInTime,
 	}
 	newCheckOut := ItineraryItem{
 		ID: newCO, TripID: lodging.TripID, DayNumber: checkOutDay,
 		Title: AccommodationItineraryCheckOutTitle(lodging.Name), Location: lodging.Address,
+		Latitude: lodging.Latitude, Longitude: lodging.Longitude,
 		Notes: checkOutNotes, EstCost: lodging.Cost,
 		StartTime: checkOutTime, EndTime: checkOutTime,
 	}
@@ -1390,6 +1568,9 @@ func (s *Service) GetAppSettings(ctx context.Context) (AppSettings, error) {
 	if settings.AppTitle == "" {
 		settings.AppTitle = "REMI Trip Planner"
 	}
+	if strings.TrimSpace(settings.TripDashboardHeading) == "" {
+		settings.TripDashboardHeading = "Trip Dashboard"
+	}
 	if settings.DefaultCurrencyName == "" {
 		settings.DefaultCurrencyName = "USD"
 	}
@@ -1399,12 +1580,20 @@ func (s *Service) GetAppSettings(ctx context.Context) (AppSettings, error) {
 	if settings.MapDefaultZoom < 1 {
 		settings.MapDefaultZoom = 6
 	}
+	settings.ThemePreference = normalizeThemePreference(settings.ThemePreference)
+	settings.DashboardTripLayout = normalizeDashboardLayout(settings.DashboardTripLayout)
+	settings.DashboardTripSort = normalizeDashboardSort(settings.DashboardTripSort)
+	settings.DashboardHeroBackground = normalizeHeroBackground(settings.DashboardHeroBackground)
 	return settings, nil
 }
 
 func (s *Service) SaveAppSettings(ctx context.Context, settings AppSettings) error {
 	if settings.AppTitle == "" {
 		return errors.New("app title is required")
+	}
+	settings.TripDashboardHeading = strings.TrimSpace(settings.TripDashboardHeading)
+	if settings.TripDashboardHeading == "" {
+		settings.TripDashboardHeading = "Trip Dashboard"
 	}
 	if settings.DefaultCurrencyName == "" {
 		settings.DefaultCurrencyName = "USD"
@@ -1415,7 +1604,80 @@ func (s *Service) SaveAppSettings(ctx context.Context, settings AppSettings) err
 	if settings.MapDefaultZoom < 1 || settings.MapDefaultZoom > 20 {
 		settings.MapDefaultZoom = 6
 	}
+	settings.ThemePreference = normalizeThemePreference(settings.ThemePreference)
+	settings.DashboardTripLayout = normalizeDashboardLayout(settings.DashboardTripLayout)
+	settings.DashboardTripSort = normalizeDashboardSort(settings.DashboardTripSort)
+	settings.DashboardHeroBackground = normalizeHeroBackground(settings.DashboardHeroBackground)
 	return s.repo.SaveAppSettings(ctx, settings)
+}
+
+func normalizeThemePreference(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "light", "dark", "system":
+		return strings.ToLower(strings.TrimSpace(s))
+	default:
+		return "system"
+	}
+}
+
+func normalizeDashboardLayout(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "list", "grid":
+		return strings.ToLower(strings.TrimSpace(s))
+	default:
+		return "grid"
+	}
+}
+
+func normalizeDashboardSort(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "name", "start_date", "updated", "status":
+		return strings.ToLower(strings.TrimSpace(s))
+	default:
+		return "name"
+	}
+}
+
+// normalizeHeroBackground returns default, pattern:<id>, or an https:// image URL.
+func normalizeHeroBackground(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "default") {
+		return "default"
+	}
+	low := strings.ToLower(s)
+	if strings.HasPrefix(low, "pattern:") {
+		p := strings.TrimSpace(low[len("pattern:"):])
+		switch p {
+		case "dots", "grid", "noise", "waves":
+			return "pattern:" + p
+		}
+		return "default"
+	}
+	if strings.HasPrefix(s, "https://") {
+		return s
+	}
+	return "default"
+}
+
+func (s *Service) GetTripDayLabels(ctx context.Context, tripID string) (map[int]string, error) {
+	if strings.TrimSpace(tripID) == "" {
+		return map[int]string{}, errors.New("trip id is required")
+	}
+	return s.repo.GetTripDayLabels(ctx, tripID)
+}
+
+func (s *Service) SaveTripDayLabel(ctx context.Context, tripID string, dayNumber int, label string) error {
+	if strings.TrimSpace(tripID) == "" || dayNumber < 1 {
+		return errors.New("invalid day label")
+	}
+	trip, err := s.repo.GetTrip(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	if trip.IsArchived {
+		return errors.New("archived trips are read-only")
+	}
+	return s.repo.SaveTripDayLabel(ctx, tripID, dayNumber, strings.TrimSpace(label))
 }
 
 // MatchLodgingByHotelTitle matches accommodation check-in/out itinerary titles to a lodging row.

@@ -1,12 +1,22 @@
 bin/
 data/
 server.exe
+*.exe
 
 # IDE / local agent artifacts
 .cursor/
 
 # Runtime-generated uploads
 web/static/uploads/
+
+# Local env / secrets (never commit)
+.env
+.env.*
+!.env.example
+
+# Tests / tooling
+coverage.out
+coverage.html
 
 # OS/editor noise
 .DS_Store

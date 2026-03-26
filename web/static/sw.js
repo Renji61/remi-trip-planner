@@ -1,6 +1,6 @@
-const CACHE = "remi-trip-planner-v5";
+const CACHE = "remi-trip-planner-v14";
+// Do not precache "/" — HTML must always come from the network so UI updates (templates) are not stuck on an old install snapshot.
 const CORE_ASSETS = [
-  "/",
   "/static/app.css",
   "/static/app.js",
   "/manifest.webmanifest"
@@ -24,12 +24,10 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const reqURL = new URL(event.request.url);
 
-  // Always try network first for HTML pages to avoid stale UI after form submits.
+  // Network-first for navigations; never fall back to a stale cached "/" dashboard.
   if (event.request.mode === "navigate") {
     event.respondWith(
-      fetch(event.request)
-        .then((res) => res)
-        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/")))
+      fetch(event.request).then((res) => res).catch(() => caches.match(event.request))
     );
     return;
   }

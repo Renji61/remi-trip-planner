@@ -5,7 +5,6 @@ if ("serviceWorker" in navigator) {
 }
 
 window.addEventListener("load", () => {
-  const THEME_KEY = "remi-theme";
   const TOAST_KEY = "remi-toast-message";
 
   const showToast = (message) => {
@@ -24,6 +23,7 @@ window.addEventListener("load", () => {
       }, 220);
     }, 2600);
   };
+  window.remiShowToast = showToast;
 
   try {
     const pendingToast = sessionStorage.getItem(TOAST_KEY);
@@ -43,18 +43,44 @@ window.addEventListener("load", () => {
   };
 
   document.querySelectorAll("[data-theme-toggle]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const nextDark = !document.documentElement.classList.contains("theme-dark");
-      document.documentElement.classList.toggle("theme-dark", nextDark);
+    btn.addEventListener("click", async () => {
+      const currentlyDark = document.documentElement.classList.contains("theme-dark");
+      const nextPref = currentlyDark ? "light" : "dark";
+      const fd = new FormData();
+      fd.append("theme_preference", nextPref);
       try {
-        localStorage.setItem(THEME_KEY, nextDark ? "dark" : "light");
+        const res = await fetch("/settings/theme", { method: "POST", body: fd, credentials: "same-origin" });
+        if (!res.ok) return;
       } catch (e) {
+        return;
+      }
+      try {
+        document.documentElement.setAttribute("data-theme-pref", nextPref);
+      } catch (e2) {
         /* ignore */
       }
+      document.documentElement.classList.toggle("theme-dark", nextPref === "dark");
       syncThemeIcons();
+      document.dispatchEvent(new CustomEvent("remi:themechange", { detail: { dark: nextPref === "dark" } }));
     });
   });
   syncThemeIcons();
+
+  const syncViewportBottomOffset = () => {
+    let offset = 0;
+    if (window.visualViewport) {
+      const vv = window.visualViewport;
+      offset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+    }
+    document.documentElement.style.setProperty("--viewport-bottom-offset", `${Math.round(offset)}px`);
+  };
+  syncViewportBottomOffset();
+  window.addEventListener("resize", syncViewportBottomOffset);
+  window.addEventListener("orientationchange", syncViewportBottomOffset);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", syncViewportBottomOffset);
+    window.visualViewport.addEventListener("scroll", syncViewportBottomOffset);
+  }
 
   const pad2 = (n) => String(n).padStart(2, "0");
   const now = new Date();
@@ -114,8 +140,47 @@ window.addEventListener("load", () => {
   };
   const directionsURL = (from, to, mode) =>
     `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=${mode}`;
-  const renderItineraryConnectors = (scopeRoot) => {
-    const scopes = scopeRoot ? [scopeRoot] : [document];
+  const connectorCoordsCache = new Map();
+
+  const fillMissingCoords = async (scopes) => {
+    const byLocation = new Map();
+    scopes.forEach((scope) => {
+      scope.querySelectorAll(".day-items.timeline .timeline-item[data-itinerary-item]").forEach((el) => {
+        if (parseCoords(el)) return;
+        const loc = (el.getAttribute("data-location") || "").trim();
+        if (!loc) return;
+        if (!byLocation.has(loc)) byLocation.set(loc, []);
+        byLocation.get(loc).push(el);
+      });
+    });
+    if (byLocation.size === 0) return;
+
+    const applyCoords = (els, coords) => {
+      if (!coords) return;
+      els.forEach((el) => {
+        el.setAttribute("data-lat", coords.lat);
+        el.setAttribute("data-lng", coords.lng);
+      });
+    };
+
+    const fetches = [];
+    for (const [loc, els] of byLocation) {
+      if (connectorCoordsCache.has(loc)) {
+        applyCoords(els, connectorCoordsCache.get(loc));
+      } else {
+        fetches.push(
+          geocodeLocation(loc).then((result) => {
+            const coords = (result && result.lat && result.lng) ? { lat: result.lat, lng: result.lng } : null;
+            connectorCoordsCache.set(loc, coords);
+            applyCoords(els, coords);
+          })
+        );
+      }
+    }
+    if (fetches.length > 0) await Promise.all(fetches);
+  };
+
+  const drawConnectors = (scopes) => {
     scopes.forEach((scope) => {
       scope.querySelectorAll(".day-items.timeline").forEach((list) => {
         list.querySelectorAll("[data-itinerary-connector]").forEach((el) => el.remove());
@@ -150,6 +215,12 @@ window.addEventListener("load", () => {
         }
       });
     });
+  };
+
+  const renderItineraryConnectors = async (scopeRoot) => {
+    const scopes = scopeRoot ? [scopeRoot] : [document];
+    await fillMissingCoords(scopes);
+    drawConnectors(scopes);
   };
   renderItineraryConnectors(document);
 
@@ -191,6 +262,8 @@ window.addEventListener("load", () => {
     };
     itinerarySearchInput.addEventListener("input", applyItinerarySearch);
     itinerarySearchInput.addEventListener("search", applyItinerarySearch);
+    // Sync filter state on load (e.g. bfcache restore, autofill) so day groups are not stuck hidden.
+    applyItinerarySearch();
   }
 
   const geocodeLocation = async (locationQuery) => {
@@ -251,15 +324,92 @@ window.addEventListener("load", () => {
   const closeEditBtn = document.querySelector("[data-edit-toggle='close']");
   if (editPanel && openEditBtn) {
     openEditBtn.addEventListener("click", () => {
+      const topbarDetails = openEditBtn.closest("details.trip-inline-actions-dropdown");
+      if (topbarDetails) {
+        topbarDetails.removeAttribute("open");
+      }
       editPanel.classList.remove("hidden");
       editPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+  }
+  if (editPanel) {
+    const open = new URLSearchParams(window.location.search).get("open");
+    if (open === "edit") {
+      editPanel.classList.remove("hidden");
+      window.setTimeout(() => {
+        editPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 40);
+    }
   }
   if (editPanel && closeEditBtn) {
     closeEditBtn.addEventListener("click", () => {
       editPanel.classList.add("hidden");
     });
   }
+
+  document.querySelectorAll("[data-trip-reorder-list]").forEach((list) => {
+    const fieldName = list.getAttribute("data-trip-reorder-list");
+    if (!fieldName) return;
+    const form = list.closest("form");
+    const hidden = form?.querySelector(`input[type="hidden"][name="${fieldName}"]`);
+    if (!hidden) return;
+    const syncHidden = () => {
+      const keys = [...list.querySelectorAll("[data-reorder-key]")].map((li) => li.getAttribute("data-reorder-key") || "");
+      hidden.value = keys.filter(Boolean).join(",");
+    };
+    let dragEl = null;
+    list.querySelectorAll(".trip-layout-reorder-move").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const li = btn.closest("[data-reorder-key]");
+        const dir = parseInt(btn.getAttribute("data-move") || "0", 10);
+        if (!li || !dir) return;
+        const sib = dir < 0 ? li.previousElementSibling : li.nextElementSibling;
+        if (!sib || !sib.hasAttribute("data-reorder-key")) return;
+        if (dir < 0) {
+          list.insertBefore(li, sib);
+        } else {
+          list.insertBefore(sib, li);
+        }
+        syncHidden();
+      });
+    });
+    list.addEventListener("dragstart", (e) => {
+      const li = e.target.closest("[data-reorder-key]");
+      if (!li || !list.contains(li)) return;
+      dragEl = li;
+      e.dataTransfer.effectAllowed = "move";
+      try {
+        e.dataTransfer.setData("text/plain", li.getAttribute("data-reorder-key") || "");
+      } catch (err) {
+        /* ignore */
+      }
+      li.classList.add("trip-layout-reorder-item--dragging");
+    });
+    list.addEventListener("dragend", (e) => {
+      const li = e.target.closest("[data-reorder-key]");
+      if (li) li.classList.remove("trip-layout-reorder-item--dragging");
+      dragEl = null;
+      syncHidden();
+    });
+    list.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (!dragEl) return;
+      const li = e.target.closest("[data-reorder-key]");
+      if (!li || !list.contains(li) || li === dragEl) return;
+      const rect = li.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      if (before) {
+        list.insertBefore(dragEl, li);
+      } else {
+        list.insertBefore(dragEl, li.nextElementSibling);
+      }
+    });
+    list.addEventListener("drop", (e) => {
+      e.preventDefault();
+      syncHidden();
+    });
+  });
 
   const itineraryViewIdForForm = (formId) => {
     if (!formId) return null;
@@ -279,7 +429,7 @@ window.addEventListener("load", () => {
     const form = document.getElementById(formId);
     if (!form) return;
     form.classList.add("hidden");
-    const row = form.closest(".timeline-item, .expense-item, .accommodation-item, .vehicle-rental-item, .flight-card, .reminder-checklist-item");
+    const row = form.closest(".timeline-item, .expense-item, .accommodation-item, .accommodation-card-wrap, .vehicle-rental-item, .flight-card, .reminder-checklist-item");
     if (row) row.classList.remove("editing");
     const viewId = itineraryViewIdForForm(formId);
     const view = viewId ? document.getElementById(viewId) : null;
@@ -288,15 +438,21 @@ window.addEventListener("load", () => {
 
   document.querySelectorAll("[data-inline-edit-open]").forEach((btn) => {
     btn.addEventListener("click", () => {
+      const actionDetails = btn.closest("details.trip-inline-actions-dropdown");
+      if (actionDetails) {
+        actionDetails.removeAttribute("open");
+      }
       const formId = btn.getAttribute("data-inline-edit-open");
       const form = formId ? document.getElementById(formId) : null;
       if (!form) return;
-      const row = form.closest(".timeline-item, .expense-item, .accommodation-item, .vehicle-rental-item, .flight-card, .reminder-checklist-item");
+      const row = form.closest(".timeline-item, .expense-item, .accommodation-item, .accommodation-card-wrap, .vehicle-rental-item, .flight-card, .reminder-checklist-item");
       if (row) row.classList.add("editing");
       const viewId = itineraryViewIdForForm(formId);
       const view = viewId ? document.getElementById(viewId) : null;
       if (view) view.classList.add("hidden");
       form.classList.remove("hidden");
+      const dateInput = form.querySelector("input[name='itinerary_date']");
+      if (dateInput) dateInput.dataset.originalValue = dateInput.value;
     });
   });
 
@@ -521,6 +677,144 @@ window.addEventListener("load", () => {
     });
   }
 
+  document.querySelectorAll("[data-itinerary-form]").forEach((formEl) => {
+    if (formEl === itineraryForm) return;
+    const locationInput = formEl.querySelector("[data-location-input]");
+    const latitudeInput = formEl.querySelector("[data-latitude-input]");
+    const longitudeInput = formEl.querySelector("[data-longitude-input]");
+    const locationStatus = formEl.querySelector("[data-location-status]");
+    const suggestionBox = formEl.querySelector("[data-location-suggestions]");
+    const locationLookupEnabled = formEl.getAttribute("data-location-lookup-enabled") !== "false";
+    let suggestionTimer = null;
+    let latestQueryToken = 0;
+
+    const setStatus = (message, state) => {
+      if (!locationStatus) return;
+      locationStatus.textContent = message;
+      locationStatus.classList.remove("error", "success");
+      if (state) locationStatus.classList.add(state);
+    };
+    const fillCoordinates = (coords) => {
+      if (!latitudeInput || !longitudeInput) return;
+      latitudeInput.value = coords ? String(coords.lat) : "";
+      longitudeInput.value = coords ? String(coords.lng) : "";
+    };
+    const hideSuggestions = () => {
+      if (!suggestionBox) return;
+      suggestionBox.classList.add("hidden");
+      suggestionBox.innerHTML = "";
+    };
+    const renderSuggestions = (suggestions) => {
+      if (!suggestionBox) return;
+      suggestionBox.innerHTML = "";
+      if (!suggestions.length) {
+        hideSuggestions();
+        return;
+      }
+      suggestions.forEach((suggestion) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "location-suggestion-btn";
+        btn.textContent = suggestion.displayName;
+        btn.addEventListener("click", () => {
+          if (locationInput) locationInput.value = suggestion.displayName;
+          fillCoordinates(suggestion);
+          setStatus("Location selected and ready to plot on the map.", "success");
+          hideSuggestions();
+        });
+        suggestionBox.appendChild(btn);
+      });
+      suggestionBox.classList.remove("hidden");
+    };
+
+    if (locationInput) {
+      locationInput.addEventListener("input", () => {
+        fillCoordinates(null);
+        if (!locationLookupEnabled) return;
+        const trimmed = locationInput.value.trim();
+        if (suggestionTimer) clearTimeout(suggestionTimer);
+        if (trimmed.length < 3) {
+          hideSuggestions();
+          return;
+        }
+        suggestionTimer = window.setTimeout(async () => {
+          const token = ++latestQueryToken;
+          setStatus("Searching places...");
+          const suggestions = await searchLocations(trimmed);
+          if (token !== latestQueryToken) return;
+          renderSuggestions(suggestions);
+          setStatus(suggestions.length ? "Select a place to confirm coordinates." : "No matching places found.", suggestions.length ? null : "error");
+        }, 320);
+      });
+      locationInput.addEventListener("blur", () => {
+        window.setTimeout(hideSuggestions, 150);
+      });
+    }
+    formEl.addEventListener("submit", async (event) => {
+      if (!locationInput || !locationLookupEnabled) return;
+      const query = locationInput.value.trim();
+      if (!query) return;
+      const coords = await geocodeLocation(query);
+      if (!coords) return;
+      fillCoordinates(coords);
+    });
+  });
+
+  document.querySelectorAll("input[data-location-autocomplete]").forEach((input) => {
+    let timer = null;
+    let token = 0;
+    let suggestionsHost = null;
+    const ensureHost = () => {
+      if (suggestionsHost) return suggestionsHost;
+      suggestionsHost = document.createElement("div");
+      suggestionsHost.className = "location-suggestions hidden";
+      const wrapper = input.closest("label") || input.parentElement;
+      if (wrapper) {
+        wrapper.appendChild(suggestionsHost);
+      }
+      return suggestionsHost;
+    };
+    const hide = () => {
+      const host = ensureHost();
+      host.classList.add("hidden");
+      host.innerHTML = "";
+    };
+    input.addEventListener("input", () => {
+      if (timer) clearTimeout(timer);
+      const query = input.value.trim();
+      if (query.length < 3) {
+        hide();
+        return;
+      }
+      timer = window.setTimeout(async () => {
+        const current = ++token;
+        const host = ensureHost();
+        const suggestions = await searchLocations(query);
+        if (current !== token) return;
+        host.innerHTML = "";
+        if (!suggestions.length) {
+          hide();
+          return;
+        }
+        suggestions.forEach((suggestion) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "location-suggestion-btn";
+          btn.textContent = suggestion.displayName;
+          btn.addEventListener("click", () => {
+            input.value = suggestion.displayName;
+            hide();
+          });
+          host.appendChild(btn);
+        });
+        host.classList.remove("hidden");
+      }, 300);
+    });
+    input.addEventListener("blur", () => {
+      window.setTimeout(hide, 150);
+    });
+  });
+
   document.querySelectorAll("[data-accommodation-form]").forEach((accommodationForm) => {
     const accommodationNameInput = accommodationForm.querySelector("[data-accommodation-name]");
     const accommodationAddressInput = accommodationForm.querySelector("[data-accommodation-address]");
@@ -661,6 +955,484 @@ window.addEventListener("load", () => {
     });
   });
 
+  const inferToastMessage = (form) => {
+    const explicit = form.getAttribute("data-toast-message");
+    if (explicit) return explicit;
+    const action = (form.getAttribute("action") || "").toLowerCase();
+    if (action.includes("/delete")) return "Deleted successfully.";
+    if (action.includes("/toggle")) return "Updated successfully.";
+    if (action.includes("/update")) return "Saved changes.";
+    if (action.includes("/trips") && !action.includes("/update")) return "Added successfully.";
+    return "Saved successfully.";
+  };
+
+  const updateChecklistToggleUI = (form, done) => {
+    const row = form.closest(".checklist-view");
+    if (!row) return;
+    const icon = row.querySelector(".check-btn .material-symbols-outlined");
+    const text = row.querySelector("span:not(.material-symbols-outlined)");
+    if (icon) icon.textContent = done ? "check" : "circle";
+    if (text) text.classList.toggle("done", done);
+    const hiddenDone = form.querySelector("input[name='done']");
+    if (hiddenDone) hiddenDone.value = done ? "false" : "true";
+  };
+
+  const updateChecklistEditUI = (form) => {
+    const row = form.closest(".reminder-checklist-item");
+    if (!row) return;
+    const textInput = form.querySelector("input[name='text']");
+    const nextText = (textInput?.value || "").trim();
+    if (!nextText) return;
+    const textNode = row.querySelector(".checklist-view > span:not(.material-symbols-outlined)");
+    if (textNode) {
+      textNode.textContent = nextText;
+    }
+  };
+
+  const refreshInlineViewFromServer = async (form) => {
+    const formId = form.id || "";
+    if (!formId) return;
+    const viewId = itineraryViewIdForForm(formId);
+    if (!viewId) return;
+    const currentView = document.getElementById(viewId);
+    if (!currentView) return;
+    try {
+      const response = await fetch(window.location.href, {
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          Accept: "text/html"
+        }
+      });
+      if (!response.ok) return;
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      const freshView = doc.getElementById(viewId);
+      if (!freshView) return;
+      currentView.innerHTML = freshView.innerHTML;
+      currentView.className = freshView.className;
+    } catch (e) {
+      // keep existing UI if refresh fails
+    }
+  };
+
+  const isItineraryItemForm = (formId) =>
+    formId.startsWith("itinerary-edit-") ||
+    formId.startsWith("vehicle-rental-itinerary-edit-") ||
+    formId.startsWith("accommodation-itinerary-edit-") ||
+    formId.startsWith("flight-itinerary-edit-");
+
+  // Shared helper: fetch fresh page HTML once, reuse across calls
+  const fetchFreshDoc = async () => {
+    const r = await fetch(window.location.href, {
+      headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" }
+    });
+    if (!r.ok) return null;
+    return new DOMParser().parseFromString(await r.text(), "text/html");
+  };
+
+  // Reposition a DOM row to the correct slot based on the fresh server HTML.
+  // rowSelector: CSS selector for the item's row (e.g. "li.timeline-item")
+  // viewId: id of the view element inside the row
+  // dayGroupAttr: data attribute used to identify day groups (e.g. "data-date")
+  // listSelector: CSS selector for the ordered list inside a day group (e.g. "ul.day-items")
+  // itemSelector: CSS selector for sibling rows (e.g. "li.timeline-item")
+  const repositionInDayGroup = (row, freshDoc, viewId, dayGroupAttr, listSelector, itemSelector) => {
+    const freshView = freshDoc.getElementById(viewId);
+    if (!freshView) return false;
+    const freshLi = freshView.closest("li");
+    const freshDayGroup = freshLi ? freshLi.closest(".day-group") : null;
+    const newDate = freshDayGroup ? freshDayGroup.getAttribute(dayGroupAttr) : null;
+
+    const targetDayGroup = newDate
+      ? document.querySelector(`.day-group[${dayGroupAttr}="${newDate}"]`)
+      : row.closest(".day-group");
+    if (!targetDayGroup) return false;
+
+    const targetUl = targetDayGroup.querySelector(listSelector);
+    if (!targetUl) return false;
+
+    // Correct position from fresh HTML
+    const freshTargetUl = freshDayGroup ? freshDayGroup.querySelector(listSelector) : null;
+    const freshItemLis = freshTargetUl
+      ? Array.from(freshTargetUl.querySelectorAll(`:scope > ${itemSelector}`))
+      : [];
+    const freshItemIdx = freshItemLis.findIndex(
+      (li) => li.querySelector(`#${CSS.escape(viewId)}`) !== null
+    );
+
+    const otherItems = Array.from(
+      targetUl.querySelectorAll(`:scope > ${itemSelector}`)
+    ).filter((li) => li !== row);
+
+    if (freshItemIdx <= 0) {
+      const first = targetUl.querySelector(`:scope > ${itemSelector}`);
+      if (first && first !== row) targetUl.insertBefore(row, first);
+      else if (!first) targetUl.appendChild(row);
+    } else {
+      const refItem = otherItems[freshItemIdx - 1];
+      if (refItem) refItem.insertAdjacentElement("afterend", row);
+      else targetUl.appendChild(row);
+    }
+
+    targetDayGroup.open = true;
+    return true;
+  };
+
+  // Sync one itinerary <li> from the fresh document: update content, data attrs, and position.
+  const syncItineraryRow = (row, freshDoc, rowViewId) => {
+    const freshView = freshDoc.getElementById(rowViewId);
+    if (!freshView) return false;
+    const freshLi = freshView.closest("li");
+
+    // Update data attributes on the row
+    if (freshLi) {
+      ["data-lat", "data-lng", "data-title", "data-location", "data-search-text"].forEach((attr) => {
+        const val = freshLi.getAttribute(attr);
+        if (val !== null) row.setAttribute(attr, val);
+        else row.removeAttribute(attr);
+      });
+    }
+
+    // Update view content
+    const currentView = document.getElementById(rowViewId);
+    if (currentView) {
+      currentView.innerHTML = freshView.innerHTML;
+      currentView.className = freshView.className;
+    }
+
+    return repositionInDayGroup(row, freshDoc, rowViewId, "data-date", "ul.day-items", "li.timeline-item");
+  };
+
+  // Return any sibling itinerary forms that share the same entity (flight/vehicle/accommodation).
+  const getSiblingItineraryForms = (form) => {
+    const action = form.getAttribute("action") || "";
+    const m = action.match(/\/(flights|vehicle-rental|accommodation)\/([^/]+)\/update/);
+    if (!m) return [];
+    const [, entityType, entityId] = m;
+    return Array.from(
+      document.querySelectorAll(`form[id][action*="/${entityType}/${entityId}/update"]`)
+    ).filter((f) => f !== form);
+  };
+
+  const smartRepositionItineraryItem = async (form) => {
+    const viewId = itineraryViewIdForForm(form.id);
+    if (!viewId || !viewId.startsWith("itinerary-view-")) return false;
+    const row = form.closest(".timeline-item");
+    if (!row) return false;
+
+    const freshDoc = await fetchFreshDoc();
+    if (!freshDoc) return false;
+
+    // Sync the directly-edited item
+    const ok = syncItineraryRow(row, freshDoc, viewId);
+    if (!ok) return false;
+
+    // Sync sibling items linked to the same entity (e.g. depart + arrive for a flight)
+    getSiblingItineraryForms(form).forEach((siblingForm) => {
+      const siblingViewId = itineraryViewIdForForm(siblingForm.id);
+      if (!siblingViewId) return;
+      const siblingRow = siblingForm.closest(".timeline-item");
+      if (!siblingRow || siblingRow.classList.contains("editing")) return;
+      syncItineraryRow(siblingRow, freshDoc, siblingViewId);
+    });
+
+    renderItineraryConnectors(document);
+    return true;
+  };
+
+  const smartRepositionExpenseItem = async (form) => {
+    const expenseId = form.id.replace("expense-edit-", "");
+    const viewId = `expense-view-${expenseId}`;
+    const row = form.closest(".expense-item");
+    if (!row) return false;
+
+    const freshDoc = await fetchFreshDoc();
+    if (!freshDoc) return false;
+
+    const freshView = freshDoc.getElementById(viewId);
+    if (!freshView) return false;
+
+    // Update view content
+    const currentView = document.getElementById(viewId);
+    if (currentView) {
+      currentView.innerHTML = freshView.innerHTML;
+      currentView.className = freshView.className;
+    }
+
+    return repositionInDayGroup(
+      row, freshDoc, viewId,
+      "data-expense-date", "ul.expense-items", "li.expense-item"
+    );
+  };
+
+  document.querySelectorAll("form[data-ajax-submit]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      const method = (form.getAttribute("method") || "post").toUpperCase();
+      const formData = new FormData(form);
+      const hasFileInput = Boolean(form.querySelector("input[type='file']"));
+      const isMultipartForm = (form.enctype || "").toLowerCase().includes("multipart/form-data") || hasFileInput;
+      const requestBody = isMultipartForm ? formData : new URLSearchParams(formData);
+      const requestHeaders = {
+        "X-Requested-With": "XMLHttpRequest",
+        Accept: "application/json"
+      };
+      if (!isMultipartForm) {
+        requestHeaders["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
+      }
+      try {
+        const response = await fetch(form.action, {
+          method,
+          body: requestBody,
+          headers: requestHeaders
+        });
+        if (!response.ok) {
+          const txt = (await response.text()).trim();
+          throw new Error(txt || "Save failed.");
+        }
+        if (form.classList.contains("check-row")) {
+          const done = String(formData.get("done")) === "true";
+          updateChecklistToggleUI(form, done);
+        }
+        if (/\/checklist\/[^/]+\/update$/i.test(form.action || "")) {
+          updateChecklistEditUI(form);
+        }
+        if (form.id && isItineraryItemForm(form.id)) {
+          const moved = await smartRepositionItineraryItem(form);
+          if (!moved) {
+            try { sessionStorage.setItem(TOAST_KEY, inferToastMessage(form)); } catch (e) { /* ignore */ }
+            window.location.reload();
+            return;
+          }
+          closeInlineEdit(form.id);
+        } else if (form.id && form.id.startsWith("expense-edit-")) {
+          const moved = await smartRepositionExpenseItem(form);
+          if (!moved) {
+            try { sessionStorage.setItem(TOAST_KEY, inferToastMessage(form)); } catch (e) { /* ignore */ }
+            window.location.reload();
+            return;
+          }
+          closeInlineEdit(form.id);
+        } else {
+          await refreshInlineViewFromServer(form);
+          if (form.id && form.id.includes("-edit-")) {
+            closeInlineEdit(form.id);
+          }
+        }
+        const dayLabelInput = form.querySelector("input[data-day-label-input]");
+        if (dayLabelInput) {
+          dayLabelInput.dataset.initialValue = dayLabelInput.value || "";
+          form.classList.remove("day-label-dirty");
+        }
+        if ((form.action || "").toLowerCase().includes("/delete")) {
+          const row = form.closest(".timeline-item, .expense-item, .reminder-checklist-item");
+          if (row) row.remove();
+        }
+        showToast(inferToastMessage(form));
+      } catch (error) {
+        showToast(error?.message || "Unable to save right now.");
+      }
+    });
+  });
+
+  document.querySelectorAll("input[data-day-label-input]").forEach((input) => {
+    const form = input.closest("form");
+    const setDirtyState = () => {
+      if (!form) return;
+      const initial = (input.dataset.initialValue || "").trim();
+      const current = (input.value || "").trim();
+      form.classList.toggle("day-label-dirty", current !== initial);
+    };
+    input.dataset.initialValue = input.value || "";
+    setDirtyState();
+    input.addEventListener("input", setDirtyState);
+    input.addEventListener("keydown", (event) => {
+      const key = event.key || "";
+      const isEnter = key === "Enter" || key === "NumpadEnter" || event.keyCode === 13 || event.which === 13;
+      if (!isEnter) return;
+      event.preventDefault();
+      if (!form) return;
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+        return;
+      }
+      form.submit();
+    });
+  });
+
+  document.querySelectorAll("[data-day-summary-control]").forEach((el) => {
+    ["mousedown", "click", "touchstart"].forEach((eventName) => {
+      el.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
+    });
+    el.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+    });
+  });
+
+  // Prevent <details>/<summary> toggling when interacting with inline day-label controls.
+  document.querySelectorAll(".day-group > summary").forEach((summaryEl) => {
+    summaryEl.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-day-summary-control]")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
+    summaryEl.addEventListener("mousedown", (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-day-summary-control]")) {
+        event.stopPropagation();
+      }
+    }, true);
+    summaryEl.addEventListener("touchstart", (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-day-summary-control]")) {
+        event.stopPropagation();
+      }
+    }, true);
+    summaryEl.addEventListener("keydown", (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-day-summary-control]")) {
+        event.stopPropagation();
+      }
+    }, true);
+  });
+
+  document.querySelectorAll("form[method='post']:not([data-ajax-submit])").forEach((form) => {
+    form.addEventListener("submit", () => {
+      try {
+        sessionStorage.setItem(TOAST_KEY, inferToastMessage(form));
+      } catch (e) {
+        /* ignore */
+      }
+    });
+  });
+
+  const mobileFab = document.querySelector("[data-mobile-fab]");
+  const mobileFabToggle = document.querySelector("[data-mobile-fab-toggle]");
+  const mobileFabMenu = document.querySelector("[data-mobile-fab-menu]");
+  const mobileBackdrop = document.querySelector("[data-mobile-sheet-backdrop]");
+  const mobileSheets = Array.from(document.querySelectorAll(".mobile-sheet"));
+  const openMobileFab = () => {
+    if (!mobileFab || !mobileFabMenu) return;
+    mobileFab.classList.add("open");
+    mobileFabMenu.classList.remove("hidden");
+  };
+  const closeMobileFab = () => {
+    if (!mobileFab || !mobileFabMenu) return;
+    mobileFab.classList.remove("open");
+    mobileFabMenu.classList.add("hidden");
+  };
+  const closeMobileSheets = () => {
+    mobileSheets.forEach((sheet) => {
+      sheet.classList.add("hidden");
+      sheet.setAttribute("aria-hidden", "true");
+    });
+    if (mobileBackdrop) mobileBackdrop.classList.add("hidden");
+  };
+  const openMobileSheet = (sheetId) => {
+    if (!sheetId) return;
+    const target = document.getElementById(sheetId);
+    if (!target) return;
+    closeMobileSheets();
+    target.classList.remove("hidden");
+    target.setAttribute("aria-hidden", "false");
+    if (mobileBackdrop) mobileBackdrop.classList.remove("hidden");
+  };
+  if (mobileFab && mobileFabToggle) {
+    closeMobileFab();
+    mobileFabToggle.addEventListener("click", () => {
+      if (mobileFab.classList.contains("open")) {
+        closeMobileFab();
+      } else {
+        openMobileFab();
+      }
+    });
+    document.querySelectorAll("[data-mobile-sheet-open]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sheetId = btn.getAttribute("data-mobile-sheet-open");
+        openMobileSheet(sheetId);
+        closeMobileFab();
+      });
+    });
+    document.querySelectorAll("[data-mobile-sheet-close]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        closeMobileSheets();
+      });
+    });
+    if (mobileBackdrop) {
+      mobileBackdrop.addEventListener("click", () => {
+        closeMobileSheets();
+      });
+    }
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      closeMobileFab();
+      closeMobileSheets();
+    });
+    window.addEventListener("resize", () => {
+      if (window.innerWidth > 920) {
+        closeMobileFab();
+        closeMobileSheets();
+      }
+    });
+  }
+
+  const tripSearchInput = document.querySelector("[data-dashboard-trip-search]");
+  const tripListsRoot = document.querySelector("[data-dashboard-trip-lists]");
+  if (tripSearchInput && tripListsRoot) {
+    const noneEl = tripListsRoot.querySelector("[data-trip-search-none]");
+    const sections = () => Array.from(tripListsRoot.querySelectorAll("[data-dashboard-trips-section]"));
+    const hideWhenQueryEls = () => Array.from(tripListsRoot.querySelectorAll("[data-trip-search-hide-when-query]"));
+    const allCards = () => Array.from(tripListsRoot.querySelectorAll(".trip-card[data-trip-search]"));
+
+    const applyTripSearch = () => {
+      const q = normalize(tripSearchInput.value);
+      const activeQuery = q.length > 0;
+      const totalCards = allCards().length;
+
+      document.body.classList.toggle("dashboard-hero-search-compact", activeQuery);
+
+      hideWhenQueryEls().forEach((el) => {
+        el.hidden = activeQuery;
+      });
+
+      let anyVisible = false;
+      sections().forEach((section) => {
+        const cards = section.querySelectorAll(".trip-card[data-trip-search]");
+        if (cards.length === 0) {
+          section.hidden = activeQuery;
+          return;
+        }
+        if (!activeQuery) {
+          cards.forEach((card) => {
+            card.hidden = false;
+          });
+          section.hidden = false;
+          return;
+        }
+        let visible = 0;
+        cards.forEach((card) => {
+          const hay = normalize(card.getAttribute("data-trip-search") || "");
+          const show = hay.includes(q);
+          card.hidden = !show;
+          if (show) visible++;
+        });
+        section.hidden = visible === 0;
+        if (visible > 0) anyVisible = true;
+      });
+
+      if (noneEl) {
+        const showNone = activeQuery && totalCards > 0 && !anyVisible;
+        noneEl.hidden = !showNone;
+      }
+    };
+
+    tripSearchInput.addEventListener("input", applyTripSearch);
+    tripSearchInput.addEventListener("search", applyTripSearch);
+    applyTripSearch();
+  }
+
   const mapEl = document.getElementById("map");
   if (!mapEl || typeof L === "undefined") return;
 
@@ -672,10 +1444,29 @@ window.addEventListener("load", () => {
   const startZoom = Number.isNaN(defaultZoom) ? 6 : defaultZoom;
 
   const map = L.map("map").setView([startLat, startLng], startZoom);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const lightLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(map);
+  });
+  const darkLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+  });
+  let activeBaseLayer = null;
+  const setMapTheme = (dark) => {
+    const nextLayer = dark ? darkLayer : lightLayer;
+    if (activeBaseLayer === nextLayer) return;
+    if (activeBaseLayer) {
+      map.removeLayer(activeBaseLayer);
+    }
+    activeBaseLayer = nextLayer;
+    activeBaseLayer.addTo(map);
+  };
+  setMapTheme(document.documentElement.classList.contains("theme-dark"));
+  document.addEventListener("remi:themechange", (event) => {
+    const dark = Boolean(event?.detail?.dark);
+    setMapTheme(dark);
+  });
 
   const points = Array.from(document.querySelectorAll("[data-lat][data-lng]"))
     .map((el) => ({
@@ -692,8 +1483,265 @@ window.addEventListener("load", () => {
     marker.bindPopup(`<b>${p.title}</b><br>${p.location}`);
     latLngs.push([p.lat, p.lng]);
   });
+  let routeLine = null;
   if (latLngs.length > 0) {
-    const line = L.polyline(latLngs, { color: "#2563eb" }).addTo(map);
-    map.fitBounds(line.getBounds(), { padding: [20, 20] });
+    const dark = document.documentElement.classList.contains("theme-dark");
+    routeLine = L.polyline(latLngs, { color: dark ? "#60a5fa" : "#2563eb" }).addTo(map);
+    map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
   }
+  document.addEventListener("remi:themechange", (event) => {
+    if (!routeLine) return;
+    const dark = Boolean(event?.detail?.dark);
+    routeLine.setStyle({ color: dark ? "#60a5fa" : "#2563eb" });
+  });
 });
+
+(function () {
+  const mq = window.matchMedia("(min-width: 681px)");
+  const applyExpenseActionsDropdownOpen = () => {
+    document.querySelectorAll(".trip-details-page details.trip-inline-actions-dropdown").forEach((el) => {
+      if (mq.matches) {
+        el.setAttribute("open", "");
+      } else {
+        el.removeAttribute("open");
+      }
+    });
+  };
+  const init = () => {
+    applyExpenseActionsDropdownOpen();
+    mq.addEventListener("change", applyExpenseActionsDropdownOpen);
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
+})();
+
+(function () {
+  const mqMobile = window.matchMedia("(max-width: 680px)");
+  const LONG_MS = 520;
+  const MOVE_PX = 14;
+  const ROW_SEL = ".expense-item, .timeline-item, .reminder-checklist-item, .flight-card, .title-row";
+
+  const root = document.querySelector(".trip-details-page");
+  const sheet = document.getElementById("trip-long-press-sheet");
+  const titleEl = document.getElementById("trip-long-press-sheet-title");
+  const listEl = document.getElementById("trip-long-press-sheet-list");
+  if (!root || !sheet || !titleEl || !listEl) {
+    return;
+  }
+  const cancelBtn = sheet.querySelector(".trip-long-press-sheet__cancel");
+
+  function shouldIgnoreLongPressTarget(el) {
+    if (!el || !root.contains(el)) {
+      return true;
+    }
+    if (el.closest("a, input, textarea, select, label")) {
+      return true;
+    }
+    if (el.closest(".check-row, .check-btn")) {
+      return true;
+    }
+    if (el.closest(".mobile-fab-wrap, .bottom-nav, .sidebar, .trip-long-press-sheet")) {
+      return true;
+    }
+    if (el.closest(".topbar-right")) {
+      return true;
+    }
+    if (el.closest("[data-day-summary-control], .day-label-inline-form, .day-label-inline-input")) {
+      return true;
+    }
+    if (el.closest("button")) {
+      return true;
+    }
+    if (el.closest("summary")) {
+      return true;
+    }
+    return false;
+  }
+
+  function labelForRow(row) {
+    if (row.matches(".title-row")) {
+      return row.querySelector("h2")?.textContent?.trim() || "Trip";
+    }
+    if (row.matches(".expense-item")) {
+      return row.querySelector(".expense-view-title")?.textContent?.trim() || "Spend";
+    }
+    if (row.matches(".timeline-item")) {
+      return row.querySelector(".itinerary-item-view strong")?.textContent?.trim() || "Stop";
+    }
+    if (row.matches(".reminder-checklist-item")) {
+      const s = row.querySelector(".checklist-view > span");
+      return s?.textContent?.trim() || "Checklist item";
+    }
+    if (row.matches(".flight-card")) {
+      return row.querySelector(".flight-view h4")?.textContent?.trim() || "Flight";
+    }
+    return "Item";
+  }
+
+  let pressTimer = null;
+  let startX = 0;
+  let startY = 0;
+  let activeRow = null;
+  let ghostClickGuardUntil = 0;
+  let ghostClickGuardRow = null;
+
+  function clearPress() {
+    if (pressTimer) {
+      window.clearTimeout(pressTimer);
+    }
+    pressTimer = null;
+    activeRow = null;
+  }
+
+  function openSheetForRow(row) {
+    const actionsRoot = row.querySelector("details.trip-inline-actions-dropdown");
+    if (!actionsRoot) {
+      return;
+    }
+    const sourceButtons = actionsRoot.querySelectorAll(".trip-inline-actions-buttons button");
+    if (!sourceButtons.length) {
+      return;
+    }
+    titleEl.textContent = labelForRow(row);
+    listEl.replaceChildren();
+    sourceButtons.forEach((src) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "trip-long-press-sheet__action";
+      const text = (src.textContent || "").trim();
+      b.textContent = text || "Action";
+      if (src.classList.contains("danger")) {
+        b.classList.add("danger");
+      }
+      b.addEventListener("click", () => {
+        sheet.close();
+        window.requestAnimationFrame(() => {
+          src.click();
+        });
+      });
+      listEl.appendChild(b);
+    });
+    ghostClickGuardUntil = performance.now() + 380;
+    ghostClickGuardRow = row;
+    sheet.showModal();
+    try {
+      if (window.navigator.vibrate) {
+        window.navigator.vibrate(12);
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function onTouchStart(e) {
+    if (!mqMobile.matches || e.touches.length !== 1) {
+      return;
+    }
+    const target = e.target;
+    if (shouldIgnoreLongPressTarget(target)) {
+      return;
+    }
+    const row = target.closest(ROW_SEL);
+    if (!row || !root.contains(row)) {
+      return;
+    }
+    const actionsRoot = row.querySelector("details.trip-inline-actions-dropdown");
+    if (!actionsRoot) {
+      return;
+    }
+    const hasActions = actionsRoot.querySelector(".trip-inline-actions-buttons button");
+    if (!hasActions) {
+      return;
+    }
+    const t = e.touches[0];
+    startX = t.clientX;
+    startY = t.clientY;
+    activeRow = row;
+    pressTimer = window.setTimeout(() => {
+      pressTimer = null;
+      const r = activeRow;
+      activeRow = null;
+      if (!r) {
+        return;
+      }
+      openSheetForRow(r);
+    }, LONG_MS);
+  }
+
+  function onTouchMove(e) {
+    if (!pressTimer || !e.touches[0]) {
+      return;
+    }
+    const t = e.touches[0];
+    const dx = Math.abs(t.clientX - startX);
+    const dy = Math.abs(t.clientY - startY);
+    if (dx > MOVE_PX || dy > MOVE_PX) {
+      clearPress();
+    }
+  }
+
+  function onTouchEnd() {
+    clearPress();
+  }
+
+  function bindTripLongPress() {
+    if (!mqMobile.matches) {
+      return;
+    }
+    root.addEventListener("touchstart", onTouchStart, { passive: true });
+    root.addEventListener("touchmove", onTouchMove, { passive: true });
+    root.addEventListener("touchend", onTouchEnd);
+    root.addEventListener("touchcancel", onTouchEnd);
+  }
+
+  function unbindTripLongPress() {
+    root.removeEventListener("touchstart", onTouchStart);
+    root.removeEventListener("touchmove", onTouchMove);
+    root.removeEventListener("touchend", onTouchEnd);
+    root.removeEventListener("touchcancel", onTouchEnd);
+  }
+
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (performance.now() >= ghostClickGuardUntil || !ghostClickGuardRow) {
+        return;
+      }
+      if (ghostClickGuardRow.contains(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
+    },
+    true
+  );
+
+  cancelBtn?.addEventListener("click", () => {
+    sheet.close();
+  });
+  sheet.addEventListener("click", (e) => {
+    if (e.target === sheet) {
+      sheet.close();
+    }
+  });
+
+  const syncBind = () => {
+    unbindTripLongPress();
+    if (mqMobile.matches) {
+      bindTripLongPress();
+    }
+  };
+
+  const boot = () => {
+    syncBind();
+    mqMobile.addEventListener("change", syncBind);
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else {
+    boot();
+  }
+})();
