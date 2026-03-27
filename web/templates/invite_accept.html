@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  {{template "themeHeadScript" .}}
+  <title>Trip invite | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=24">
+  <script defer src="/static/app.js"></script>
+</head>
+<body class="auth-page">
+  <main class="auth-card-wrap">
+    <article class="card auth-card">
+      <h1>Join trip</h1>
+      {{if .IsLinkInvite}}
+      <p class="muted">Someone shared an invite link to this trip. Sign in, then accept below to join.</p>
+      {{else}}
+      <p class="muted">You were invited as <strong>{{.Email}}</strong>. You must be signed in with this email to accept.</p>
+      {{end}}
+      <form method="post" action="/invites/accept" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="token" value="{{.Token}}">
+        <button type="submit" class="full">Accept invite</button>
+      </form>
+      <p class="muted"><a href="/">Back to dashboard</a></p>
+    </article>
+  </main>
+</body>
+</html>

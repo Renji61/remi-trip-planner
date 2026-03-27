@@ -5,6 +5,36 @@ if ("serviceWorker" in navigator) {
 }
 
 window.addEventListener("load", () => {
+  const csrfMeta = document.querySelector("meta[name='csrf-token']");
+  const csrfToken = csrfMeta && csrfMeta.getAttribute("content") ? csrfMeta.getAttribute("content").trim() : "";
+  if (csrfToken) {
+    document.querySelectorAll("form[method='post'], form[method='POST']").forEach((form) => {
+      if (form.querySelector("input[name='csrf_token']")) return;
+      const action = (form.getAttribute("action") || "").toLowerCase();
+      if (action === "/login" || action === "/setup" || action === "/register" || action.endsWith("/logout")) return;
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "csrf_token";
+      input.value = csrfToken;
+      form.appendChild(input);
+    });
+  }
+
+  document.querySelectorAll("[data-password-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-password-toggle");
+      const input = id ? document.getElementById(id) : null;
+      if (!input || (input.type !== "password" && input.type !== "text")) return;
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.setAttribute("aria-pressed", show ? "true" : "false");
+      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      btn.setAttribute("title", show ? "Hide password" : "Show password");
+      const icon = btn.querySelector(".material-symbols-outlined");
+      if (icon) icon.textContent = show ? "visibility_off" : "visibility";
+    });
+  });
+
   const TOAST_KEY = "remi-toast-message";
 
   const showToast = (message) => {
@@ -35,6 +65,158 @@ window.addEventListener("load", () => {
     /* ignore */
   }
 
+  const tripInviteFlash = document.querySelector("[data-trip-invite-flash]");
+  if (tripInviteFlash) {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("invite_notice") || url.searchParams.has("invite_email")) {
+        url.searchParams.delete("invite_notice");
+        url.searchParams.delete("invite_email");
+        const q = url.searchParams.toString();
+        window.history.replaceState(null, "", url.pathname + (q ? `?${q}` : "") + url.hash);
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    window.setTimeout(() => {
+      tripInviteFlash.remove();
+    }, 3000);
+  }
+
+  const profileSavedBanner = document.querySelector(".profile-updated-banner");
+  if (profileSavedBanner) {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("saved") === "1") {
+        url.searchParams.delete("saved");
+        const q = url.searchParams.toString();
+        window.history.replaceState(null, "", url.pathname + (q ? `?${q}` : "") + url.hash);
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    window.setTimeout(() => {
+      profileSavedBanner.remove();
+    }, 3000);
+  }
+
+  /** One fetch per trip (sidebar + mobile each render tripMembersPanel; parallel POSTs broke SQLite / raced). */
+  const inviteLinkPromiseByTrip = new Map();
+  const inviteRootsByTrip = new Map();
+  document.querySelectorAll("[data-trip-invite-methods]").forEach((root) => {
+    const tripId = root.getAttribute("data-trip-id");
+    if (!tripId) return;
+    if (!inviteRootsByTrip.has(tripId)) inviteRootsByTrip.set(tripId, []);
+    inviteRootsByTrip.get(tripId).push(root);
+  });
+
+  inviteRootsByTrip.forEach((roots, tripId) => {
+    const csrf = roots[0].getAttribute("data-csrf");
+    if (!csrf) return;
+
+    const allLinkInputs = () =>
+      roots.map((r) => r.querySelector(".sidebar-invite-link-url")).filter(Boolean);
+
+    const requestInviteLink = () => {
+      let p = inviteLinkPromiseByTrip.get(tripId);
+      if (p) return p;
+      const fd = new FormData();
+      fd.set("csrf_token", csrf);
+      p = fetch(`/trips/${encodeURIComponent(tripId)}/invite-link`, {
+        method: "POST",
+        body: fd,
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          Accept: "application/json"
+        }
+      })
+        .then((res) => {
+          if (!res.ok) {
+            return res.text().then((txt) => {
+              throw new Error(txt || res.statusText);
+            });
+          }
+          return res.json();
+        })
+        .then((data) => {
+          if (data && data.url) {
+            allLinkInputs().forEach((input) => {
+              input.value = data.url;
+            });
+          }
+        })
+        .catch(() => {
+          inviteLinkPromiseByTrip.delete(tripId);
+          if (typeof window.remiShowToast === "function") {
+            window.remiShowToast("Could not create invite link. Try again.");
+          }
+        });
+      inviteLinkPromiseByTrip.set(tripId, p);
+      return p;
+    };
+
+    roots.forEach((root) => {
+      const tabs = root.querySelectorAll("[data-invite-tab]");
+      const panels = root.querySelectorAll("[data-invite-panel]");
+      const linkInput = root.querySelector(".sidebar-invite-link-url");
+      const copyBtn = root.querySelector("[data-copy-invite-link]");
+
+      const showPanel = (name) => {
+        panels.forEach((p) => {
+          const on = p.getAttribute("data-invite-panel") === name;
+          p.classList.toggle("hidden", !on);
+          if (on) {
+            p.removeAttribute("hidden");
+          } else {
+            p.setAttribute("hidden", "true");
+          }
+        });
+        tabs.forEach((t) => {
+          const sel = t.getAttribute("data-invite-tab") === name;
+          t.setAttribute("aria-selected", sel ? "true" : "false");
+          t.classList.toggle("sidebar-invite-tab--active", sel);
+        });
+        if (name === "link") {
+          requestInviteLink();
+        }
+      };
+
+      tabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+          showPanel(tab.getAttribute("data-invite-tab") || "email");
+        });
+      });
+
+      if (tabs.length === 0) {
+        showPanel("link");
+      }
+
+      if (copyBtn && linkInput) {
+        copyBtn.addEventListener("click", () => {
+          const v = (linkInput.value || "").trim();
+          if (!v) {
+            if (typeof window.remiShowToast === "function") {
+              window.remiShowToast("Wait for the invite link to load, then try again.");
+            }
+            return;
+          }
+          navigator.clipboard.writeText(v).then(
+            () => {
+              if (typeof window.remiShowToast === "function") {
+                window.remiShowToast("Invite link copied.");
+              }
+            },
+            () => {
+              if (typeof window.remiShowToast === "function") {
+                window.remiShowToast("Could not copy. Select the URL and copy manually.");
+              }
+            }
+          );
+        });
+      }
+    });
+  });
+
   const syncThemeIcons = () => {
     const dark = document.documentElement.classList.contains("theme-dark");
     document.querySelectorAll("[data-theme-icon]").forEach((el) => {
@@ -43,16 +225,13 @@ window.addEventListener("load", () => {
   };
 
   document.querySelectorAll("[data-theme-toggle]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", () => {
       const currentlyDark = document.documentElement.classList.contains("theme-dark");
       const nextPref = currentlyDark ? "light" : "dark";
-      const fd = new FormData();
-      fd.append("theme_preference", nextPref);
       try {
-        const res = await fetch("/settings/theme", { method: "POST", body: fd, credentials: "same-origin" });
-        if (!res.ok) return;
+        localStorage.setItem("remi_theme_override", nextPref);
       } catch (e) {
-        return;
+        /* ignore */
       }
       try {
         document.documentElement.setAttribute("data-theme-pref", nextPref);
@@ -730,7 +909,9 @@ window.addEventListener("load", () => {
     if (locationInput) {
       locationInput.addEventListener("input", () => {
         fillCoordinates(null);
-        if (!locationLookupEnabled) return;
+        if (!locationLookupEnabled) {
+          return;
+        }
         const trimmed = locationInput.value.trim();
         if (suggestionTimer) clearTimeout(suggestionTimer);
         if (trimmed.length < 3) {
@@ -958,11 +1139,33 @@ window.addEventListener("load", () => {
   const inferToastMessage = (form) => {
     const explicit = form.getAttribute("data-toast-message");
     if (explicit) return explicit;
-    const action = (form.getAttribute("action") || "").toLowerCase();
-    if (action.includes("/delete")) return "Deleted successfully.";
-    if (action.includes("/toggle")) return "Updated successfully.";
-    if (action.includes("/update")) return "Saved changes.";
-    if (action.includes("/trips") && !action.includes("/update")) return "Added successfully.";
+    const raw = (form.getAttribute("action") || "").trim();
+    const lower = raw.toLowerCase();
+    let path = lower;
+    if (raw) {
+      try {
+        path = new URL(raw, window.location.origin).pathname.toLowerCase();
+      } catch {
+        path = lower;
+      }
+    }
+    if (path.includes("/profile/resend-verify")) return "Verification link sent.";
+    if (path.includes("/profile/password")) return "Password updated.";
+    if (path === "/profile" || /\/profile$/.test(path)) return "Profile updated.";
+    if (path === "/settings" || /\/settings$/.test(path)) return "Settings saved.";
+    if (path === "/trips") return "Trip created.";
+    if (/\/trips\/[^/]+\/update$/i.test(path)) return "Trip details saved.";
+    if (/\/trips\/[^/]+\/delete$/i.test(path)) return "Trip deleted.";
+    if (/\/trips\/[^/]+\/archive$/i.test(path)) return "Trip archived.";
+    if (/\/trips\/[^/]+\/leave$/i.test(path)) return "You left this trip.";
+    if (/\/trips\/[^/]+\/stop-sharing$/i.test(path)) return "Collaborators removed.";
+    if (/\/trips\/[^/]+\/invite$/i.test(path)) return "Invitation sent.";
+    if (path.includes("/hide-archived")) return "Trip list updated.";
+    if (path.includes("/invites/accept")) return "Invite accepted.";
+    if (lower.includes("/delete")) return "Deleted successfully.";
+    if (lower.includes("/toggle")) return "Updated successfully.";
+    if (lower.includes("/update")) return "Saved changes.";
+    if (lower.includes("/trips") && !lower.includes("/update")) return "Added successfully.";
     return "Saved successfully.";
   };
 
@@ -992,6 +1195,7 @@ window.addEventListener("load", () => {
   const refreshInlineViewFromServer = async (form) => {
     const formId = form.id || "";
     if (!formId) return;
+    if (formId.startsWith("day-label-form-")) return;
     const viewId = itineraryViewIdForForm(formId);
     if (!viewId) return;
     const currentView = document.getElementById(viewId);
@@ -1087,7 +1291,15 @@ window.addEventListener("load", () => {
 
     // Update data attributes on the row
     if (freshLi) {
-      ["data-lat", "data-lng", "data-title", "data-location", "data-search-text"].forEach((attr) => {
+      [
+        "data-lat",
+        "data-lng",
+        "data-title",
+        "data-location",
+        "data-search-text",
+        "data-map-day",
+        "data-marker-kind"
+      ].forEach((attr) => {
         const val = freshLi.getAttribute(attr);
         if (val !== null) row.setAttribute(attr, val);
         else row.removeAttribute(attr);
@@ -1166,12 +1378,153 @@ window.addEventListener("load", () => {
     );
   };
 
+  const refreshBudgetTilesFromPage = async () => {
+    const tiles = document.querySelectorAll(".trip-details-page .budget-tile");
+    if (!tiles.length) return;
+    try {
+      const response = await fetch(window.location.href, {
+        headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" },
+        credentials: "same-origin"
+      });
+      if (!response.ok) return;
+      const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+      tiles.forEach((tile) => {
+        const sel = tile.classList.contains("trip-budget-tile--mobile")
+          ? ".budget-tile.trip-budget-tile--mobile"
+          : tile.classList.contains("trip-budget-tile--sidebar")
+            ? ".budget-tile.trip-budget-tile--sidebar"
+            : ".budget-tile";
+        const fresh = doc.querySelector(sel);
+        if (fresh) {
+          tile.innerHTML = fresh.innerHTML;
+        }
+      });
+    } catch (e) {
+      /* ignore */
+    }
+  };
+
+  /** Fields associated via the HTML form="" attribute are omitted from FormData(form) in some browsers. */
+  const mergeFormAssociatedControls = (form, formData) => {
+    const id = form.getAttribute("id");
+    if (!id) return;
+    document.querySelectorAll(`[form="${CSS.escape(id)}"]`).forEach((el) => {
+      if (
+        !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)
+      ) {
+        return;
+      }
+      if (!el.name || el.disabled) return;
+      const t = el.type;
+      if (t === "submit" || t === "button" || t === "image" || t === "file" || t === "reset") return;
+      if ((t === "checkbox" || t === "radio") && !el.checked) return;
+      formData.set(el.name, el.value);
+    });
+  };
+
+  /** Shared styled confirm: `form[data-app-confirm]` + data-confirm-title, optional body/ok/icon/variant. Runs in capture phase before `data-ajax-submit`. */
+  let pendingConfirmSubmitForm = null;
+  const confirmDialogEl = document.getElementById("dialog-confirm-action");
+  if (confirmDialogEl instanceof HTMLDialogElement) {
+    const confirmTitleEl = document.getElementById("dialog-confirm-action-title");
+    const confirmBodyEl = document.getElementById("dialog-confirm-action-desc");
+    const confirmIconEl = document.getElementById("dialog-confirm-action-icon");
+    const confirmOkBtn = document.getElementById("dialog-confirm-action-ok");
+    const confirmCancelBtn = confirmDialogEl.querySelector("[data-confirm-cancel]");
+
+    const populateConfirmFromForm = (form) => {
+      const title = form.getAttribute("data-confirm-title") || "Confirm?";
+      const body = (form.getAttribute("data-confirm-body") || "").trim();
+      const ok = form.getAttribute("data-confirm-ok") || "Confirm";
+      const icon = form.getAttribute("data-confirm-icon") || "help_outline";
+      const variant = (form.getAttribute("data-confirm-variant") || "danger").toLowerCase();
+      if (confirmTitleEl) {
+        confirmTitleEl.textContent = title;
+      }
+      if (confirmBodyEl) {
+        if (body) {
+          confirmBodyEl.textContent = body;
+          confirmBodyEl.hidden = false;
+          confirmDialogEl.setAttribute("aria-describedby", "dialog-confirm-action-desc");
+        } else {
+          confirmBodyEl.textContent = "";
+          confirmBodyEl.hidden = true;
+          confirmDialogEl.removeAttribute("aria-describedby");
+        }
+      }
+      if (confirmIconEl) {
+        confirmIconEl.textContent = icon;
+      }
+      if (confirmOkBtn) {
+        confirmOkBtn.textContent = ok;
+        confirmOkBtn.classList.toggle("app-confirm-dialog__btn--danger", variant === "danger");
+        confirmOkBtn.classList.toggle("app-confirm-dialog__btn--neutral", variant === "neutral");
+      }
+    };
+
+    const closeConfirmClearPending = () => {
+      pendingConfirmSubmitForm = null;
+      try {
+        confirmDialogEl.close();
+      } catch (e) {
+        /* ignore */
+      }
+    };
+
+    confirmOkBtn?.addEventListener("click", () => {
+      const f = pendingConfirmSubmitForm;
+      pendingConfirmSubmitForm = null;
+      try {
+        confirmDialogEl.close();
+      } catch (e) {
+        /* ignore */
+      }
+      if (f) {
+        f.dataset.confirmPass = "1";
+        if (typeof f.requestSubmit === "function") {
+          f.requestSubmit();
+        } else {
+          f.submit();
+        }
+      }
+    });
+    confirmCancelBtn?.addEventListener("click", closeConfirmClearPending);
+    confirmDialogEl.addEventListener("cancel", (e) => {
+      e.preventDefault();
+      closeConfirmClearPending();
+    });
+    confirmDialogEl.addEventListener("click", (e) => {
+      if (e.target === confirmDialogEl) {
+        closeConfirmClearPending();
+      }
+    });
+
+    document.querySelectorAll("form[data-app-confirm]").forEach((form) => {
+      form.addEventListener(
+        "submit",
+        (e) => {
+          if (form.dataset.confirmPass === "1") {
+            delete form.dataset.confirmPass;
+            return;
+          }
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          pendingConfirmSubmitForm = form;
+          populateConfirmFromForm(form);
+          confirmDialogEl.showModal();
+        },
+        true
+      );
+    });
+  }
+
   document.querySelectorAll("form[data-ajax-submit]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       if (event.defaultPrevented) return;
       event.preventDefault();
       const method = (form.getAttribute("method") || "post").toUpperCase();
       const formData = new FormData(form);
+      mergeFormAssociatedControls(form, formData);
       const hasFileInput = Boolean(form.querySelector("input[type='file']"));
       const isMultipartForm = (form.enctype || "").toLowerCase().includes("multipart/form-data") || hasFileInput;
       const requestBody = isMultipartForm ? formData : new URLSearchParams(formData);
@@ -1221,7 +1574,17 @@ window.addEventListener("load", () => {
             closeInlineEdit(form.id);
           }
         }
-        const dayLabelInput = form.querySelector("input[data-day-label-input]");
+        let dayLabelInput = form.querySelector("input[data-day-label-input]");
+        if (!dayLabelInput && form.id) {
+          dayLabelInput = document.querySelector(
+            `input[data-day-label-input][form="${CSS.escape(form.id)}"]`
+          );
+        }
+        if (!dayLabelInput && form.elements?.length) {
+          dayLabelInput = Array.from(form.elements).find(
+            (el) => el instanceof HTMLInputElement && el.hasAttribute("data-day-label-input")
+          );
+        }
         if (dayLabelInput) {
           dayLabelInput.dataset.initialValue = dayLabelInput.value || "";
           form.classList.remove("day-label-dirty");
@@ -1230,6 +1593,9 @@ window.addEventListener("load", () => {
           const row = form.closest(".timeline-item, .expense-item, .reminder-checklist-item");
           if (row) row.remove();
         }
+        if (document.querySelector(".trip-details-page .budget-tile")) {
+          await refreshBudgetTilesFromPage();
+        }
         showToast(inferToastMessage(form));
       } catch (error) {
         showToast(error?.message || "Unable to save right now.");
@@ -1237,8 +1603,21 @@ window.addEventListener("load", () => {
     });
   });
 
+  const formOwnerForField = (input) => {
+    if (input.form) return input.form;
+    const fid = input.getAttribute("form");
+    if (fid) return document.getElementById(fid);
+    return input.closest("form");
+  };
+
+  document.querySelectorAll(".day-label-inline-save-btn").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+  });
+
   document.querySelectorAll("input[data-day-label-input]").forEach((input) => {
-    const form = input.closest("form");
+    const form = formOwnerForField(input);
     const setDirtyState = () => {
       if (!form) return;
       const initial = (input.dataset.initialValue || "").trim();
@@ -1249,6 +1628,7 @@ window.addEventListener("load", () => {
     setDirtyState();
     input.addEventListener("input", setDirtyState);
     input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
       const key = event.key || "";
       const isEnter = key === "Enter" || key === "NumpadEnter" || event.keyCode === 13 || event.which === 13;
       if (!isEnter) return;
@@ -1274,25 +1654,16 @@ window.addEventListener("load", () => {
   });
 
   // Prevent <details>/<summary> toggling when interacting with inline day-label controls.
+  // Do not preventDefault on the Save button — that would block form submit (button also has data-day-summary-control).
+  // Only intercept click on <summary>: preventDefault stops <details> toggle. Do not use capture-phase
+  // mousedown/keydown on summary when the target is the day-label input — that runs *before* the event
+  // reaches the input and breaks typing (e.g. Space still toggling the section).
   document.querySelectorAll(".day-group > summary").forEach((summaryEl) => {
     summaryEl.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest("[data-day-summary-control]")) {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest('button[type="submit"]')) return;
+      if (event.target.closest("[data-day-summary-control]")) {
         event.preventDefault();
-        event.stopPropagation();
-      }
-    }, true);
-    summaryEl.addEventListener("mousedown", (event) => {
-      if (event.target instanceof Element && event.target.closest("[data-day-summary-control]")) {
-        event.stopPropagation();
-      }
-    }, true);
-    summaryEl.addEventListener("touchstart", (event) => {
-      if (event.target instanceof Element && event.target.closest("[data-day-summary-control]")) {
-        event.stopPropagation();
-      }
-    }, true);
-    summaryEl.addEventListener("keydown", (event) => {
-      if (event.target instanceof Element && event.target.closest("[data-day-summary-control]")) {
         event.stopPropagation();
       }
     }, true);
@@ -1300,6 +1671,17 @@ window.addEventListener("load", () => {
 
   document.querySelectorAll("form[method='post']:not([data-ajax-submit])").forEach((form) => {
     form.addEventListener("submit", () => {
+      const action = (form.getAttribute("action") || "").trim().toLowerCase();
+      if (!action) return;
+      let path = action;
+      try {
+        path = new URL(action, window.location.origin).pathname.toLowerCase();
+      } catch {
+        /* keep action */
+      }
+      if (path === "/logout" || path.endsWith("/logout")) return;
+      if (path === "/login" || path.endsWith("/login")) return;
+      if (path === "/setup" || path.endsWith("/setup")) return;
       try {
         sessionStorage.setItem(TOAST_KEY, inferToastMessage(form));
       } catch (e) {
@@ -1376,6 +1758,60 @@ window.addEventListener("load", () => {
         closeMobileSheets();
       }
     });
+  }
+
+  document.querySelectorAll(".mobile-sheet").forEach((sheet) => {
+    sheet.addEventListener(
+      "focusin",
+      (e) => {
+        if (window.innerWidth > 920) return;
+        const t = e.target;
+        if (!(t instanceof HTMLElement)) return;
+        if (!t.matches("input, textarea, select")) return;
+        const scrollRoot = t.closest(".mobile-sheet > form");
+        window.setTimeout(() => {
+          try {
+            t.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+          } catch (err) {
+            t.scrollIntoView(true);
+          }
+          if (scrollRoot) {
+            const r = t.getBoundingClientRect();
+            const pr = scrollRoot.getBoundingClientRect();
+            if (r.bottom > pr.bottom - 8) {
+              scrollRoot.scrollTop += r.bottom - pr.bottom + 16;
+            }
+            if (r.top < pr.top + 8) {
+              scrollRoot.scrollTop -= pr.top + 8 - r.top;
+            }
+          }
+        }, 280);
+      },
+      true
+    );
+  });
+
+  const stopSheetEl = document.getElementById("mobile-sheet-stop");
+  if (stopSheetEl && typeof openMobileSheet === "function") {
+    const openParam = new URLSearchParams(window.location.search).get("open");
+    if (openParam === "stop") {
+      openMobileSheet("mobile-sheet-stop");
+      window.setTimeout(() => {
+        const loc = stopSheetEl.querySelector("[data-location-input]");
+        const focusable = loc || stopSheetEl.querySelector("input, textarea, select");
+        if (focusable && typeof focusable.focus === "function") {
+          focusable.focus();
+        }
+      }, 60);
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.delete("open");
+        const qs = u.searchParams.toString();
+        window.history.replaceState({}, "", u.pathname + (qs ? `?${qs}` : "") + u.hash);
+      } catch (e) {
+        /* ignore */
+      }
+    }
   }
 
   const tripSearchInput = document.querySelector("[data-dashboard-trip-search]");
@@ -1468,32 +1904,150 @@ window.addEventListener("load", () => {
     setMapTheme(dark);
   });
 
-  const points = Array.from(document.querySelectorAll("[data-lat][data-lng]"))
+  const dayPalette = [
+    "#2563eb",
+    "#7c3aed",
+    "#0891b2",
+    "#ea580c",
+    "#db2777",
+    "#65a30d",
+    "#e11d48",
+    "#0f766e",
+    "#a855f7",
+    "#0ea5e9",
+    "#f59e0b",
+    "#14b8a6",
+    "#ef4444",
+    "#84cc16",
+    "#6366f1",
+    "#d946ef"
+  ];
+  const kindGlyph = {
+    stay: "hotel",
+    vehicle: "directions_car",
+    flight: "flight",
+    stop: "place"
+  };
+  const escapeHtml = (s) =>
+    String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const points = Array.from(document.querySelectorAll("[data-map-itinerary-point][data-lat][data-lng]"))
     .map((el) => ({
       lat: parseFloat(el.getAttribute("data-lat") || "0"),
       lng: parseFloat(el.getAttribute("data-lng") || "0"),
       title: el.getAttribute("data-title") || "",
-      location: el.getAttribute("data-location") || ""
+      location: el.getAttribute("data-location") || "",
+      day: parseInt(el.getAttribute("data-map-day") || "1", 10) || 1,
+      kind: (el.getAttribute("data-marker-kind") || "stop").toLowerCase()
     }))
     .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng) && (p.lat !== 0 || p.lng !== 0));
 
-  const latLngs = [];
+  const uniqueDays = [...new Set(points.map((p) => Math.max(1, p.day)))].sort((a, b) => a - b);
+  const colorByDay = new Map();
+  uniqueDays.forEach((d, i) => {
+    colorByDay.set(d, dayPalette[i % dayPalette.length]);
+  });
+  const ringForDay = (day) => colorByDay.get(Math.max(1, day)) || dayPalette[0];
+
+  const markersByDay = new Map();
+  uniqueDays.forEach((d) => markersByDay.set(d, []));
+
   points.forEach((p) => {
-    const marker = L.marker([p.lat, p.lng]).addTo(map);
-    marker.bindPopup(`<b>${p.title}</b><br>${p.location}`);
-    latLngs.push([p.lat, p.lng]);
+    const day = Math.max(1, p.day);
+    const ring = ringForDay(day);
+    const glyph = kindGlyph[p.kind] || kindGlyph.stop;
+    const icon = L.divIcon({
+      className: "remi-map-marker-wrap",
+      html: `<div class="remi-map-marker" style="--remi-ring:${ring}"><span class="material-symbols-outlined" aria-hidden="true">${glyph}</span></div>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 34],
+      popupAnchor: [0, -32]
+    });
+    const marker = L.marker([p.lat, p.lng], { icon });
+    marker.bindPopup(
+      `<b>${escapeHtml(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtml(p.location)}`
+    );
+    markersByDay.get(day).push(marker);
   });
-  let routeLine = null;
-  if (latLngs.length > 0) {
-    const dark = document.documentElement.classList.contains("theme-dark");
-    routeLine = L.polyline(latLngs, { color: dark ? "#60a5fa" : "#2563eb" }).addTo(map);
-    map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+
+  const selectedDays = new Set(uniqueDays);
+  const legendButtons = new Map();
+
+  const visibleMarkersList = () => {
+    const out = [];
+    selectedDays.forEach((d) => {
+      (markersByDay.get(d) || []).forEach((m) => out.push(m));
+    });
+    return out;
+  };
+
+  const syncLegendButtons = () => {
+    legendButtons.forEach((btn, d) => {
+      const on = selectedDays.has(d);
+      btn.classList.toggle("is-off", !on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  };
+
+  const fitMapToVisibleMarkers = () => {
+    const vis = visibleMarkersList();
+    vis.forEach((m) => {
+      if (!map.hasLayer(m)) m.addTo(map);
+    });
+    uniqueDays.forEach((d) => {
+      if (selectedDays.has(d)) return;
+      (markersByDay.get(d) || []).forEach((m) => {
+        if (map.hasLayer(m)) map.removeLayer(m);
+      });
+    });
+    if (vis.length === 0) {
+      map.setView([startLat, startLng], startZoom);
+      return;
+    }
+    if (vis.length === 1) {
+      map.setView(vis[0].getLatLng(), Math.max(startZoom, 12));
+      return;
+    }
+    const group = L.featureGroup(vis);
+    map.fitBounds(group.getBounds(), { padding: [24, 24], maxZoom: 16 });
+  };
+
+  if (uniqueDays.length > 0) {
+    const leg = document.createElement("div");
+    leg.className = "trip-map-day-legend";
+    leg.setAttribute("aria-label", "Show or hide markers by itinerary day");
+    uniqueDays.forEach((d) => {
+      const ring = ringForDay(d);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "trip-map-day-legend-item";
+      btn.dataset.day = String(d);
+      btn.setAttribute("aria-pressed", "true");
+      btn.title = `Toggle Day ${d} markers on the map`;
+      const sw = document.createElement("span");
+      sw.className = "trip-map-day-legend-swatch";
+      sw.setAttribute("aria-hidden", "true");
+      sw.style.setProperty("--trip-map-swatch", ring);
+      btn.appendChild(sw);
+      btn.appendChild(document.createTextNode(`Day ${d}`));
+      btn.addEventListener("click", () => {
+        if (selectedDays.has(d)) selectedDays.delete(d);
+        else selectedDays.add(d);
+        syncLegendButtons();
+        fitMapToVisibleMarkers();
+      });
+      legendButtons.set(d, btn);
+      leg.appendChild(btn);
+    });
+    mapEl.insertAdjacentElement("afterend", leg);
   }
-  document.addEventListener("remi:themechange", (event) => {
-    if (!routeLine) return;
-    const dark = Boolean(event?.detail?.dark);
-    routeLine.setStyle({ color: dark ? "#60a5fa" : "#2563eb" });
-  });
+
+  syncLegendButtons();
+  fitMapToVisibleMarkers();
 });
 
 (function () {
@@ -1745,3 +2299,154 @@ window.addEventListener("load", () => {
     boot();
   }
 })();
+
+// Trip settings: Trip sections (ui_trip_section_*) are masters for module on/off; Main column uses ui_vis_main_*
+// for layout visibility only. When a master is off, matching main-column checkboxes are disabled; turning the
+// master back on restores their prior checked state. Main column changes do not affect Trip sections or sidebar.
+window.addEventListener("load", () => {
+  if (!document.body.classList.contains("page-trip-settings")) {
+    return;
+  }
+  const form = document.getElementById("trip-settings-save-form");
+  if (!form) {
+    return;
+  }
+  const MASTER_KEYS = ["itinerary", "checklist", "stay", "vehicle", "flights", "spends"];
+  /** @type {Map<string, boolean>} main-column ui_vis_main_* checked state when master goes off */
+  const preservedMain = new Map();
+  /** @type {Map<string, boolean>} sidebar widget checked state when a master gates it (e.g. add_stop, budget, checklist) */
+  const preservedSidebar = new Map();
+
+  function masterCheckbox(key) {
+    return form.querySelector(`input[type="checkbox"][data-vis-master="${key}"]`);
+  }
+
+  function setMainColumnFromMaster(key) {
+    const m = masterCheckbox(key);
+    const on = Boolean(m && m.checked);
+    const col = form.querySelector(`input[type="checkbox"][data-vis-main-col-key="${key}"]`);
+    const label = form.querySelector(`.trip-settings-sec-vis-column-label[data-vis-main-col="${key}"]`);
+    if (!col || !label) {
+      return;
+    }
+    if (!on) {
+      if (!preservedMain.has(key)) {
+        preservedMain.set(key, col.checked);
+      }
+      col.disabled = true;
+      col.checked = false;
+      label.classList.add("trip-settings-sec-vis-mirror-label--locked");
+    } else {
+      col.disabled = false;
+      if (preservedMain.has(key)) {
+        col.checked = preservedMain.get(key);
+      }
+      label.classList.remove("trip-settings-sec-vis-mirror-label--locked");
+    }
+    const hint = label.querySelector(".trip-settings-vis-live-hint");
+    if (hint) {
+      if (on) {
+        hint.setAttribute("hidden", "");
+      } else {
+        hint.removeAttribute("hidden");
+      }
+    }
+  }
+
+  function applySpendsGatedSidebar() {
+    const spendsOn = Boolean(masterCheckbox("spends")?.checked);
+    form.querySelectorAll('[data-spends-master-gated="1"]').forEach((lab) => {
+      const cb = lab.querySelector('input[type="checkbox"][name^="ui_vis_sidebar_"]');
+      if (!cb) {
+        return;
+      }
+      const sk = (cb.getAttribute("name") || "").replace(/^ui_vis_sidebar_/, "");
+      if (!sk) {
+        return;
+      }
+      if (!spendsOn) {
+        if (!preservedSidebar.has(sk)) {
+          preservedSidebar.set(sk, cb.checked);
+        }
+        cb.checked = false;
+        cb.disabled = true;
+        lab.classList.add("trip-settings-toggle-row--muted");
+      } else {
+        cb.disabled = false;
+        lab.classList.remove("trip-settings-toggle-row--muted");
+        if (preservedSidebar.has(sk)) {
+          cb.checked = preservedSidebar.get(sk);
+        }
+      }
+    });
+  }
+
+  function applyItineraryGatedSidebar() {
+    const on = Boolean(masterCheckbox("itinerary")?.checked);
+    form.querySelectorAll('[data-itinerary-master-gated="1"]').forEach((lab) => {
+      const cb = lab.querySelector('input[type="checkbox"][name^="ui_vis_sidebar_"]');
+      if (!cb) {
+        return;
+      }
+      const sk = (cb.getAttribute("name") || "").replace(/^ui_vis_sidebar_/, "");
+      if (!sk) {
+        return;
+      }
+      if (!on) {
+        if (!preservedSidebar.has(sk)) {
+          preservedSidebar.set(sk, cb.checked);
+        }
+        cb.checked = false;
+        cb.disabled = true;
+        lab.classList.add("trip-settings-toggle-row--muted");
+      } else {
+        cb.disabled = false;
+        lab.classList.remove("trip-settings-toggle-row--muted");
+        if (preservedSidebar.has(sk)) {
+          cb.checked = preservedSidebar.get(sk);
+        }
+      }
+    });
+  }
+
+  function applyChecklistGatedSidebar() {
+    const on = Boolean(masterCheckbox("checklist")?.checked);
+    form.querySelectorAll('[data-checklist-master-gated="1"]').forEach((lab) => {
+      const cb = lab.querySelector('input[type="checkbox"][name^="ui_vis_sidebar_"]');
+      if (!cb) {
+        return;
+      }
+      const sk = (cb.getAttribute("name") || "").replace(/^ui_vis_sidebar_/, "");
+      if (!sk) {
+        return;
+      }
+      if (!on) {
+        if (!preservedSidebar.has(sk)) {
+          preservedSidebar.set(sk, cb.checked);
+        }
+        cb.checked = false;
+        cb.disabled = true;
+        lab.classList.add("trip-settings-toggle-row--muted");
+      } else {
+        cb.disabled = false;
+        lab.classList.remove("trip-settings-toggle-row--muted");
+        if (preservedSidebar.has(sk)) {
+          cb.checked = preservedSidebar.get(sk);
+        }
+      }
+    });
+  }
+
+  function syncTripSectionMasters() {
+    MASTER_KEYS.forEach((k) => setMainColumnFromMaster(k));
+    applySpendsGatedSidebar();
+    applyItineraryGatedSidebar();
+    applyChecklistGatedSidebar();
+  }
+
+  MASTER_KEYS.forEach((key) => {
+    masterCheckbox(key)?.addEventListener("change", syncTripSectionMasters);
+  });
+
+  syncTripSectionMasters();
+});

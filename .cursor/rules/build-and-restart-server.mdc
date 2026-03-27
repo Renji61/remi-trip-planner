@@ -1,0 +1,11 @@
+---
+description: (Superseded) See remi-dev-auto-restart.mdc — native server on 8051
+globs: "**/REMI Trip Planner/**"
+alwaysApply: false
+---
+
+# Use `remi-dev-auto-restart.mdc`
+
+Project convention: **rebuild and restart on port 8051** after changes. See **`.cursor/rules/remi-dev-auto-restart.mdc`** for the mandatory PowerShell steps.
+
+Docker (`docker compose` / `deploy-docker.ps1`) is optional; default local workflow is **native Go** on **`:8051`**.

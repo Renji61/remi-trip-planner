@@ -42,6 +42,11 @@ func chdirToModuleRoot() {
 		if tryChdir(exeDir) {
 			return
 		}
+		// go build -o bin/remi-server.exe leaves the binary under repo/bin; templates are in the parent dir.
+		parent := filepath.Clean(filepath.Join(exeDir, ".."))
+		if parent != exeDir && tryChdir(parent) {
+			return
+		}
 	}
 
 	wd, err := os.Getwd()

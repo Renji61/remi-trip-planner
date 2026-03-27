@@ -2,44 +2,62 @@
 <html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
   {{template "themeHeadScript" .}}
-  <title>Settings | {{.Settings.AppTitle}}</title>
+  <title>Site settings | {{.Settings.AppTitle}}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=40">
+  <link rel="stylesheet" href="/static/app.css?v=77">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js"></script>
+  <script defer src="/static/app.js?v=73"></script>
 </head>
-<body>
-  <main class="app-shell">
+<body class="page-site-settings">
+  <main class="app-shell" aria-label="Site settings">
     <aside class="sidebar">
-      <div class="brand">
+      <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
         <div>
           <h1>{{.Settings.AppTitle}}</h1>
           <p>Serene Navigator</p>
         </div>
-      </div>
+      </a>
       <ul class="nav-list">
-        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">luggage</span>My Trip</a></li>
-        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">explore</span>Discover</a></li>
-        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">payments</span>Spends</a></li>
-        <li class="nav-item active"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined" aria-hidden="true">luggage</span>My Trip</a></li>
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined" aria-hidden="true">explore</span>Discover</a></li>
+        <li class="nav-item"><a href="/"><span class="material-symbols-outlined" aria-hidden="true">payments</span>Spends</a></li>
+        <li class="nav-item active"><a href="/settings" aria-current="page"><span class="material-symbols-outlined" aria-hidden="true">settings</span>Settings</a></li>
       </ul>
       <div class="sidebar-bottom">
         <a class="btn" href="{{if .TripID}}/trips/{{.TripID}}{{else}}/{{end}}">{{if .TripID}}Back to My Trip{{else}}Back to Dashboard{{end}}</a>
         <a class="support-link" href="/">Support</a>
+        <a class="support-link" href="/profile">Profile</a>
+        <form method="post" action="/logout" class="sidebar-logout-form"><button type="submit" class="logout-link">Logout</button></form>
       </div>
     </aside>
 
-    <section class="main" aria-label="{{if .TripID}}Trip settings{{else}}App settings{{end}}">
-      <header class="topbar">
+    <section class="main site-settings-main" aria-label="{{if .TripID}}App settings while viewing a trip{{else}}App settings{{end}}">
+      <header class="trip-mobile-header site-settings-mobile-header">
+        <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
+          <span class="material-symbols-outlined" aria-hidden="true">home</span>
+        </a>
+        <h2 class="trip-mobile-header-title">Site settings</h2>
+        <div class="budget-mobile-header-actions">
+          <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+          <a class="budget-mobile-header-btn" href="/settings{{if .TripID}}?trip_id={{.TripID}}{{end}}" aria-label="Site settings" title="Site settings" aria-current="page">
+            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+          </a>
+        </div>
+      </header>
+
+      <header class="topbar trip-mobile-topbar">
         <div class="title-group">
-          <h2>{{if .TripID}}Trip Settings{{else}}Settings{{end}}</h2>
-          <p>{{if .TripID}}Adjust preferences while managing this trip.{{else}}Configure defaults and map behavior for the app.{{end}}</p>
+          <h2>Site settings</h2>
+          <p>{{if .TripID}}Defaults and appearance for the app while you manage this trip.{{else}}Configure map behavior, registration, and your personal dashboard.{{end}}</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           <a href="/" class="icon-btn" aria-label="Go to dashboard">
@@ -51,125 +69,180 @@
         </div>
       </header>
 
-      <div class="settings-grid">
-        <section class="card" aria-labelledby="settings-general-title">
-          <h3 id="settings-general-title">General</h3>
-          {{if .Saved}}
-          <p class="settings-success" role="status">Settings saved successfully.</p>
-          {{end}}
-          <form method="post" action="/settings" class="form-grid">
-            {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
-            <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
-            <label class="full">Trip Dashboard
-              <input type="text" name="trip_dashboard_heading" value="{{.Settings.TripDashboardHeading}}" required autocomplete="off" aria-describedby="hint-dash-title">
-            </label>
-            <p id="hint-dash-title" class="settings-field-hint muted full">Shown as the main heading on your home dashboard. The sidebar brand remains <strong>{{.Settings.AppTitle}}</strong>.</p>
-            <label>Default Currency Name
-              <input type="text" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}" required autocomplete="off" aria-describedby="hint-currency">
-            </label>
-            <label>Default Currency Symbol
-              <input type="text" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}" required autocomplete="off" aria-describedby="hint-currency">
-            </label>
-            <p id="hint-currency" class="settings-field-hint muted full">Used for new trips and dashboard totals. ISO name (e.g. USD) and symbol (e.g. $).</p>
-            <label>Map Center Latitude
-              <input type="number" step="any" name="map_default_latitude" value="{{.Settings.MapDefaultLatitude}}" aria-describedby="hint-map">
-            </label>
-            <label>Map Center Longitude
-              <input type="number" step="any" name="map_default_longitude" value="{{.Settings.MapDefaultLongitude}}" aria-describedby="hint-map">
-            </label>
-            <label>Map Default Zoom
-              <input type="number" min="1" max="20" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}" aria-describedby="hint-map">
-            </label>
-            <p id="hint-map" class="settings-field-hint muted full">Default map view on trip pages (1–20).</p>
-            <label class="full">Location Lookup
-              <select name="enable_location_lookup" aria-describedby="hint-lookup">
-                <option value="true" {{if .Settings.EnableLocationLookup}}selected{{end}}>Enabled</option>
-                <option value="false" {{if not .Settings.EnableLocationLookup}}selected{{end}}>Disabled</option>
-              </select>
-            </label>
-            <p id="hint-lookup" class="settings-field-hint muted full">When enabled, the app can suggest coordinates for locations (uses external lookup).</p>
-            <input type="hidden" name="theme_preference" value="{{.Settings.ThemePreference}}">
-            <input type="hidden" name="dashboard_trip_layout" value="{{.Settings.DashboardTripLayout}}">
-            <input type="hidden" name="dashboard_trip_sort" value="{{.Settings.DashboardTripSort}}">
-            <input type="hidden" name="dashboard_hero_background" value="{{.Settings.DashboardHeroBackground}}">
-            <button class="full" type="submit">Save Settings</button>
-          </form>
-        </section>
+      <div class="settings-grid site-settings-page">
+        {{if .Saved}}
+        <p class="settings-success site-settings-flash" role="status">Settings saved successfully.</p>
+        {{end}}
+        {{if .Reset}}
+        <p class="settings-success site-settings-flash" role="status">Site options and your dashboard preferences were reset to defaults.</p>
+        {{end}}
 
-        <section class="card" aria-labelledby="settings-appearance-title">
-          <h3 id="settings-appearance-title">Appearance</h3>
-          <form method="post" action="/settings" class="form-grid">
-            {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
-            <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
-            <input type="hidden" name="trip_dashboard_heading" value="{{.Settings.TripDashboardHeading}}">
-            <input type="hidden" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}">
-            <input type="hidden" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}">
-            <input type="hidden" name="map_default_latitude" value="{{.Settings.MapDefaultLatitude}}">
-            <input type="hidden" name="map_default_longitude" value="{{.Settings.MapDefaultLongitude}}">
-            <input type="hidden" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}">
-            <input type="hidden" name="enable_location_lookup" value="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}">
-            <input type="hidden" name="dashboard_trip_layout" value="{{.Settings.DashboardTripLayout}}">
-            <input type="hidden" name="dashboard_trip_sort" value="{{.Settings.DashboardTripSort}}">
-            <label class="full">Theme
-              <select name="theme_preference" aria-describedby="hint-theme" title="Choose app color theme: light, dark, or match your device">
-                <option value="light" {{if eq .Settings.ThemePreference "light"}}selected{{end}}>Light</option>
-                <option value="dark" {{if eq .Settings.ThemePreference "dark"}}selected{{end}}>Dark</option>
-                <option value="system" {{if eq .Settings.ThemePreference "system"}}selected{{end}}>Follow system</option>
-              </select>
-            </label>
-            <p id="hint-theme" class="settings-field-hint muted full">Applies across the app. The header sun/moon control switches between light and dark and saves here.</p>
-            <label class="full">Dashboard hero background
-              <select name="dashboard_hero_background_mode" id="dashboard_hero_background_mode" aria-describedby="hint-hero" title="Background style for the dashboard hero area">
-                <option value="default" {{if eq .Settings.DashboardHeroBackground "default"}}selected{{end}}>Default photo (optimized)</option>
-                <option value="pattern:dots" {{if eq .Settings.DashboardHeroBackground "pattern:dots"}}selected{{end}}>Muted pattern: dots</option>
-                <option value="pattern:grid" {{if eq .Settings.DashboardHeroBackground "pattern:grid"}}selected{{end}}>Muted pattern: grid</option>
-                <option value="pattern:noise" {{if eq .Settings.DashboardHeroBackground "pattern:noise"}}selected{{end}}>Muted pattern: noise</option>
-                <option value="pattern:waves" {{if eq .Settings.DashboardHeroBackground "pattern:waves"}}selected{{end}}>Muted pattern: waves</option>
-                <option value="custom_url" {{if hasPrefix .Settings.DashboardHeroBackground "https://"}}selected{{end}}>Custom image URL (HTTPS only)</option>
-              </select>
-            </label>
-            <label class="full">Custom image URL
-              <input type="url" name="dashboard_hero_background_url" placeholder="https://…" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}" autocomplete="off" aria-describedby="hint-hero" title="HTTPS URL for a custom dashboard background image">
-            </label>
-            <p id="hint-hero" class="settings-field-hint muted full">Patterns are lightweight. Custom images must use HTTPS. Choose “Custom image URL” and paste the address, then save.</p>
-            <button class="full" type="submit">Save appearance</button>
-          </form>
-        </section>
+        <div class="site-settings-layout">
+          <div class="site-settings-col-main">
+            <div class="trip-settings-subcard ssi-general" aria-labelledby="settings-general-title">
+              <div class="trip-settings-card-head">
+                <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">tune</span>
+                <h3 class="trip-settings-card-title" id="settings-general-title">General</h3>
+              </div>
+              <p class="muted trip-settings-section-hint" id="hint-instance">App title, map defaults, and location lookup apply to <strong>everyone</strong> on this server. Dashboard heading, currency, and registration below are saved to <strong>your account</strong> together with this form.</p>
+              <form method="post" action="/settings" class="form-grid trip-settings-form-grid">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
+                <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
+                <label class="full">Trip dashboard heading
+                  <input type="text" name="trip_dashboard_heading" value="{{.Settings.TripDashboardHeading}}" required autocomplete="off" aria-describedby="hint-dash-title">
+                </label>
+                <p id="hint-dash-title" class="settings-field-hint muted full">Shown as the main heading on your home dashboard. The sidebar brand stays <strong>{{.Settings.AppTitle}}</strong>.</p>
+                <label>Default currency name
+                  <input type="text" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}" required autocomplete="off" aria-describedby="hint-currency">
+                </label>
+                <label>Default currency symbol
+                  <input type="text" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}" required autocomplete="off" aria-describedby="hint-currency">
+                </label>
+                <p id="hint-currency" class="settings-field-hint muted full">Used for new trips and dashboard totals (e.g. USD and $).</p>
+                <label>Map center latitude
+                  <input type="number" step="any" name="map_default_latitude" value="{{.Settings.MapDefaultLatitude}}" aria-describedby="hint-map">
+                </label>
+                <label>Map center longitude
+                  <input type="number" step="any" name="map_default_longitude" value="{{.Settings.MapDefaultLongitude}}" aria-describedby="hint-map">
+                </label>
+                <label>Map default zoom
+                  <input type="number" min="1" max="20" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}" aria-describedby="hint-map">
+                </label>
+                <p id="hint-map" class="settings-field-hint muted full">Default map view on trip pages (1–20).</p>
+                <label class="full">Location lookup
+                  <select name="enable_location_lookup" aria-describedby="hint-lookup">
+                    <option value="true" {{if .Settings.EnableLocationLookup}}selected{{end}}>Enabled</option>
+                    <option value="false" {{if not .Settings.EnableLocationLookup}}selected{{end}}>Disabled</option>
+                  </select>
+                </label>
+                <p id="hint-lookup" class="settings-field-hint muted full">When enabled, the app can suggest coordinates for locations (may use external lookup).</p>
+                <input type="hidden" name="theme_preference" value="{{.Settings.ThemePreference}}">
+                <input type="hidden" name="dashboard_trip_layout" value="{{.Settings.DashboardTripLayout}}">
+                <input type="hidden" name="dashboard_trip_sort" value="{{.Settings.DashboardTripSort}}">
+                <input type="hidden" name="dashboard_hero_background" value="{{.Settings.DashboardHeroBackground}}">
+                <input type="hidden" name="dashboard_hero_background_mode" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}custom_url{{else}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <input type="hidden" name="dashboard_hero_background_url" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <label class="trip-settings-toggle-row">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">person_add</span>
+                  <span class="trip-settings-toggle-text">Allow new users to register <span class="trip-settings-vis-lock-hint">(public sign-up)</span></span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="site_registration_enabled" value="0">
+                    <input type="checkbox" name="site_registration_enabled" value="1" {{if .Settings.RegistrationEnabled}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <p class="settings-field-hint muted full">When off, <code>/register</code> is unavailable; the first account is still created via <code>/setup</code>.</p>
+                <button type="submit" class="trip-settings-save-btn">Save general</button>
+              </form>
+            </div>
 
-        <section class="card" aria-labelledby="settings-dashboard-title">
-          <h3 id="settings-dashboard-title">Dashboard</h3>
-          <form method="post" action="/settings" class="form-grid">
-            {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
-            <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
-            <input type="hidden" name="trip_dashboard_heading" value="{{.Settings.TripDashboardHeading}}">
-            <input type="hidden" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}">
-            <input type="hidden" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}">
-            <input type="hidden" name="map_default_latitude" value="{{.Settings.MapDefaultLatitude}}">
-            <input type="hidden" name="map_default_longitude" value="{{.Settings.MapDefaultLongitude}}">
-            <input type="hidden" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}">
-            <input type="hidden" name="enable_location_lookup" value="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}">
-            <input type="hidden" name="theme_preference" value="{{.Settings.ThemePreference}}">
-            <input type="hidden" name="dashboard_hero_background_mode" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}custom_url{{else}}{{.Settings.DashboardHeroBackground}}{{end}}">
-            <input type="hidden" name="dashboard_hero_background_url" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}">
-            <label class="full">Trip layout
-              <select name="dashboard_trip_layout" aria-describedby="hint-layout">
-                <option value="grid" {{if eq .Settings.DashboardTripLayout "grid"}}selected{{end}}>Grid</option>
-                <option value="list" {{if eq .Settings.DashboardTripLayout "list"}}selected{{end}}>List</option>
-              </select>
-            </label>
-            <label class="full">Sort trips by
-              <select name="dashboard_trip_sort" aria-describedby="hint-sort">
-                <option value="name" {{if eq .Settings.DashboardTripSort "name"}}selected{{end}}>Name</option>
-                <option value="start_date" {{if eq .Settings.DashboardTripSort "start_date"}}selected{{end}}>Start date</option>
-                <option value="updated" {{if eq .Settings.DashboardTripSort "updated"}}selected{{end}}>Last updated</option>
-                <option value="status" {{if eq .Settings.DashboardTripSort "status"}}selected{{end}}>Status</option>
-              </select>
-            </label>
-            <p id="hint-layout" class="settings-field-hint muted full">Grid fills the row with responsive columns; list shows a compact horizontal card.</p>
-            <p id="hint-sort" class="settings-field-hint muted full">Applies separately within Your Trips, Draft, and Archived.</p>
-            <button class="full" type="submit">Save dashboard</button>
-          </form>
-        </section>
+            <div class="trip-settings-subcard ssi-appearance" aria-labelledby="settings-appearance-title">
+              <div class="trip-settings-card-head">
+                <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">palette</span>
+                <h3 class="trip-settings-card-title" id="settings-appearance-title">Appearance</h3>
+              </div>
+              <p class="muted trip-settings-section-hint">Theme and dashboard hero background. Saves independently from General and Dashboard.</p>
+              <form method="post" action="/settings" class="form-grid trip-settings-form-grid">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
+                <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
+                <input type="hidden" name="trip_dashboard_heading" value="{{.Settings.TripDashboardHeading}}">
+                <input type="hidden" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}">
+                <input type="hidden" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}">
+                <input type="hidden" name="map_default_latitude" value="{{.Settings.MapDefaultLatitude}}">
+                <input type="hidden" name="map_default_longitude" value="{{.Settings.MapDefaultLongitude}}">
+                <input type="hidden" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}">
+                <input type="hidden" name="enable_location_lookup" value="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}">
+                <input type="hidden" name="site_registration_enabled" value="{{if .Settings.RegistrationEnabled}}1{{else}}0{{end}}">
+                <input type="hidden" name="dashboard_trip_layout" value="{{.Settings.DashboardTripLayout}}">
+                <input type="hidden" name="dashboard_trip_sort" value="{{.Settings.DashboardTripSort}}">
+                <label class="full">Theme
+                  <select name="theme_preference" aria-describedby="hint-theme" title="Choose app color theme">
+                    <option value="light" {{if eq .Settings.ThemePreference "light"}}selected{{end}}>Light</option>
+                    <option value="dark" {{if eq .Settings.ThemePreference "dark"}}selected{{end}}>Dark</option>
+                    <option value="system" {{if eq .Settings.ThemePreference "system"}}selected{{end}}>Follow system</option>
+                  </select>
+                </label>
+                <p id="hint-theme" class="settings-field-hint muted full">Applies across the app. The header control switches light/dark and saves here.</p>
+                <label class="full">Dashboard hero background
+                  <select name="dashboard_hero_background_mode" id="dashboard_hero_background_mode" aria-describedby="hint-hero">
+                    <option value="default" {{if eq .Settings.DashboardHeroBackground "default"}}selected{{end}}>Default photo (optimized)</option>
+                    <option value="pattern:dots" {{if eq .Settings.DashboardHeroBackground "pattern:dots"}}selected{{end}}>Muted pattern: dots</option>
+                    <option value="pattern:grid" {{if eq .Settings.DashboardHeroBackground "pattern:grid"}}selected{{end}}>Muted pattern: grid</option>
+                    <option value="pattern:noise" {{if eq .Settings.DashboardHeroBackground "pattern:noise"}}selected{{end}}>Muted pattern: noise</option>
+                    <option value="pattern:waves" {{if eq .Settings.DashboardHeroBackground "pattern:waves"}}selected{{end}}>Muted pattern: waves</option>
+                    <option value="custom_url" {{if hasPrefix .Settings.DashboardHeroBackground "https://"}}selected{{end}}>Custom image URL (HTTPS only)</option>
+                  </select>
+                </label>
+                <label class="full">Custom image URL
+                  <input type="url" name="dashboard_hero_background_url" placeholder="https://…" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}" autocomplete="off" aria-describedby="hint-hero">
+                </label>
+                <p id="hint-hero" class="settings-field-hint muted full">Choose “Custom image URL” and paste an HTTPS address, then save.</p>
+                <button type="submit" class="trip-settings-save-btn">Save appearance</button>
+              </form>
+            </div>
+
+            <div class="trip-settings-subcard ssi-dashboard" aria-labelledby="settings-dashboard-title">
+              <div class="trip-settings-card-head">
+                <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">dashboard</span>
+                <h3 class="trip-settings-card-title" id="settings-dashboard-title">Dashboard</h3>
+              </div>
+              <p class="muted trip-settings-section-hint">How trips are listed on your home dashboard.</p>
+              <form method="post" action="/settings" class="form-grid trip-settings-form-grid">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
+                <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
+                <input type="hidden" name="trip_dashboard_heading" value="{{.Settings.TripDashboardHeading}}">
+                <input type="hidden" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}">
+                <input type="hidden" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}">
+                <input type="hidden" name="map_default_latitude" value="{{.Settings.MapDefaultLatitude}}">
+                <input type="hidden" name="map_default_longitude" value="{{.Settings.MapDefaultLongitude}}">
+                <input type="hidden" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}">
+                <input type="hidden" name="enable_location_lookup" value="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}">
+                <input type="hidden" name="site_registration_enabled" value="{{if .Settings.RegistrationEnabled}}1{{else}}0{{end}}">
+                <input type="hidden" name="theme_preference" value="{{.Settings.ThemePreference}}">
+                <input type="hidden" name="dashboard_hero_background_mode" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}custom_url{{else}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <input type="hidden" name="dashboard_hero_background_url" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <label class="full">Trip layout
+                  <select name="dashboard_trip_layout" aria-describedby="hint-layout">
+                    <option value="grid" {{if eq .Settings.DashboardTripLayout "grid"}}selected{{end}}>Grid</option>
+                    <option value="list" {{if eq .Settings.DashboardTripLayout "list"}}selected{{end}}>List</option>
+                  </select>
+                </label>
+                <label class="full">Sort trips by
+                  <select name="dashboard_trip_sort" aria-describedby="hint-sort">
+                    <option value="name" {{if eq .Settings.DashboardTripSort "name"}}selected{{end}}>Name</option>
+                    <option value="start_date" {{if eq .Settings.DashboardTripSort "start_date"}}selected{{end}}>Start date</option>
+                    <option value="updated" {{if eq .Settings.DashboardTripSort "updated"}}selected{{end}}>Last updated</option>
+                    <option value="status" {{if eq .Settings.DashboardTripSort "status"}}selected{{end}}>Status</option>
+                  </select>
+                </label>
+                <p id="hint-layout" class="settings-field-hint muted full">Grid uses responsive columns; list uses a compact horizontal card.</p>
+                <p id="hint-sort" class="settings-field-hint muted full">Applies within Your Trips, Draft, and Archived.</p>
+                <button type="submit" class="trip-settings-save-btn">Save dashboard</button>
+              </form>
+            </div>
+          </div>
+
+          <div class="site-settings-col-rail">
+            <div class="trip-settings-assist ssi-assist" aria-labelledby="site-settings-assist-title">
+              <div class="trip-settings-assist-copy">
+                <h3 class="trip-settings-assist-title" id="site-settings-assist-title">About these settings</h3>
+                <p class="trip-settings-assist-text">Each card saves its own section. Map and registration changes affect all users; theme, hero, layout, currency, and dashboard title are yours only.</p>
+                <a class="trip-settings-assist-link" href="/">Back to dashboard</a>
+                <div class="site-settings-reset-wrap">
+                  <form method="post" action="/settings/reset-all" data-app-confirm data-confirm-title="Reset all settings?" data-confirm-body="App title, map defaults, registration, and your personal dashboard preferences return to factory defaults. This cannot be undone." data-confirm-ok="Reset everything" data-confirm-icon="settings_backup_restore" data-confirm-variant="danger">
+                    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                    {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{else}}<input type="hidden" name="return_to" value="/settings">{{end}}
+                    <button type="submit" class="btn secondary-btn site-settings-reset-btn">Reset all settings</button>
+                  </form>
+                </div>
+              </div>
+              <span class="trip-settings-assist-mark" aria-hidden="true">?</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -179,5 +252,6 @@
     <a href="/"><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>Spends</span></a>
     <a class="active" href="/settings"><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>Settings</span></a>
   </nav>
+  {{template "appConfirmDialog"}}
 </body>
 </html>

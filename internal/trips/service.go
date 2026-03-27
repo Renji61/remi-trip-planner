@@ -23,13 +23,16 @@ type Trip struct {
 	CurrencyName   string
 	CurrencySymbol string
 	IsArchived     bool
+	OwnerUserID    string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	// Per-trip UI: section visibility on trip page and nav (default all enabled).
-	UIShowStay    bool
-	UIShowVehicle bool
-	UIShowFlights bool
-	UIShowSpends  bool
+	UIShowStay      bool
+	UIShowVehicle   bool
+	UIShowFlights   bool
+	UIShowSpends    bool
+	UIShowItinerary bool
+	UIShowChecklist bool
 	// UIItineraryExpand: first | all | none — default expanded state for itinerary day groups.
 	UIItineraryExpand string
 	// UISpendsExpand: first | all | none — for spends-by-day on trip page.
@@ -44,6 +47,13 @@ type Trip struct {
 	UIMainSectionOrder string
 	// Comma-separated sidebar widget keys (add_stop,budget,...); empty means default.
 	UISidebarWidgetOrder string
+	// Comma-separated keys hidden from the main column / sidebar (layout visibility). Empty with legacy UIShow* still applies migration path in MainSectionVisible / SidebarWidgetVisible.
+	UIMainSectionHidden   string
+	UISidebarWidgetHidden string
+	// UIShowCustomLinks: show user-defined links in the trip page left sidebar (desktop).
+	UIShowCustomLinks bool
+	// UICustomSidebarLinks: JSON array [{label,url},...], max 3, http/https only.
+	UICustomSidebarLinks string
 }
 
 type ItineraryItem struct {
@@ -244,6 +254,7 @@ type AppSettings struct {
 	MapDefaultLongitude     float64
 	MapDefaultZoom          int
 	EnableLocationLookup    bool
+	RegistrationEnabled     bool   // allow /register when true (instance-wide)
 	ThemePreference         string // light, dark, system
 	DashboardTripLayout     string // grid, list
 	DashboardTripSort       string // name, start_date, updated, status
@@ -314,6 +325,44 @@ type Repository interface {
 	SaveAppSettings(ctx context.Context, settings AppSettings) error
 	GetTripDayLabels(ctx context.Context, tripID string) (map[int]string, error)
 	SaveTripDayLabel(ctx context.Context, tripID string, dayNumber int, label string) error
+
+	CountUsers(ctx context.Context) (int, error)
+	CreateUser(ctx context.Context, u User) (string, error)
+	UpdateUser(ctx context.Context, u User) error
+	GetUserByID(ctx context.Context, id string) (User, error)
+	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByUsername(ctx context.Context, username string) (User, error)
+	EmailExists(ctx context.Context, email, excludeUserID string) (bool, error)
+	UsernameExists(ctx context.Context, username, excludeUserID string) (bool, error)
+	AssignOrphanTripsToUser(ctx context.Context, userID string) error
+	CreateSession(ctx context.Context, userID, tokenRaw, csrf string, ttl time.Duration) (string, error)
+	GetSessionByTokenHash(ctx context.Context, tokenRaw string) (Session, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+	DeleteSessionByTokenRaw(ctx context.Context, tokenRaw string) error
+	DeleteExpiredSessions(ctx context.Context) error
+	ReplaceEmailVerifyToken(ctx context.Context, userID, tokenRaw string, ttl time.Duration) error
+	ConsumeEmailVerifyToken(ctx context.Context, tokenRaw string) (string, error)
+	GetUserSettings(ctx context.Context, userID string) (UserSettings, error)
+	SaveUserSettings(ctx context.Context, s UserSettings) error
+	SeedUserSettingsFromAppDefaults(ctx context.Context, userID string, app AppSettings) error
+	ListVisibleTripsForUser(ctx context.Context, userID string) ([]Trip, error)
+	IsTripOwner(ctx context.Context, tripID, userID string) (bool, error)
+	IsActiveCollaborator(ctx context.Context, tripID, userID string) (bool, error)
+	AddTripMember(ctx context.Context, tripID, userID, invitedBy string) error
+	MarkTripMemberLeft(ctx context.Context, tripID, userID string) error
+	RevokeAllCollaborators(ctx context.Context, tripID string) error
+	SetTripArchivedHiddenForUser(ctx context.Context, tripID, userID string, hidden bool) error
+	IsArchivedTripHiddenOnDashboard(ctx context.Context, tripID, userID string) (bool, error)
+	CountActiveCollaborators(ctx context.Context, tripID string) (int, error)
+	ListTripPartyProfiles(ctx context.Context, tripID string) ([]UserProfile, error)
+	CreateTripInvite(ctx context.Context, inv TripInvite, tokenRaw string) error
+	GetTripInviteByTokenRaw(ctx context.Context, tokenRaw string) (TripInviteLookup, error)
+	MarkTripInviteAccepted(ctx context.Context, inviteID string) error
+	RevokePendingTripInvites(ctx context.Context, tripID string) error
+	ListPendingTripInvitesForTrip(ctx context.Context, tripID string) ([]TripInvitePending, error)
+	RevokeTripInviteForTrip(ctx context.Context, tripID, inviteID string) error
+	CreateTripInviteLink(ctx context.Context, tripID, invitedByUserID, tokenRaw string, expiresAt time.Time) error
+	RevokeAllTripInviteLinksForTrip(ctx context.Context, tripID string) error
 }
 
 type Service struct {
@@ -322,6 +371,26 @@ type Service struct {
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// ResetSiteSettingsToDefaults overwrites app_settings id=1 with factory defaults.
+func (s *Service) ResetSiteSettingsToDefaults(ctx context.Context) error {
+	return s.repo.SaveAppSettings(ctx, DefaultAppSettings())
+}
+
+// ResetUserUISettingsToDefaults resets the signed-in user's dashboard/theme preferences.
+func (s *Service) ResetUserUISettingsToDefaults(ctx context.Context, userID string) error {
+	return s.repo.SaveUserSettings(ctx, DefaultUserUISettings(userID))
+}
+
+// ResetTripUIPresets resets layout, section toggles, labels, and custom sidebar links for a trip.
+func (s *Service) ResetTripUIPresets(ctx context.Context, tripID string) error {
+	t, err := s.repo.GetTrip(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	ApplyDefaultTripUIPresets(&t)
+	return s.repo.UpdateTrip(ctx, t)
 }
 
 func (s *Service) CreateTrip(ctx context.Context, t Trip) (tripID string, err error) {
@@ -347,7 +416,17 @@ func (s *Service) ComputeTravelStats(ctx context.Context, tripsList []Trip) (Tra
 	if err != nil {
 		return TravelStats{}, err
 	}
-	return buildTravelStats(tripsList, items), nil
+	allowed := make(map[string]struct{}, len(tripsList))
+	for _, t := range tripsList {
+		allowed[t.ID] = struct{}{}
+	}
+	filtered := items[:0]
+	for _, it := range items {
+		if _, ok := allowed[it.TripID]; ok {
+			filtered = append(filtered, it)
+		}
+	}
+	return buildTravelStats(tripsList, filtered), nil
 }
 
 func buildTravelStats(tripsList []Trip, items []ItineraryItem) TravelStats {
@@ -472,6 +551,14 @@ func (s *Service) GetTrip(ctx context.Context, tripID string) (Trip, error) {
 		return Trip{}, errors.New("trip id is required")
 	}
 	return s.repo.GetTrip(ctx, tripID)
+}
+
+// GetTripDetailsVisible loads details only after confirming the user may access the trip (owner or active collaborator).
+func (s *Service) GetTripDetailsVisible(ctx context.Context, tripID, userID string) (TripDetails, error) {
+	if _, err := s.TripAccess(ctx, tripID, userID); err != nil {
+		return TripDetails{}, err
+	}
+	return s.GetTripDetails(ctx, tripID)
 }
 
 func (s *Service) GetTripDetails(ctx context.Context, tripID string) (TripDetails, error) {
@@ -909,6 +996,10 @@ func (s *Service) AddChecklistItem(ctx context.Context, item ChecklistItem) erro
 		return errors.New("archived trips are read-only")
 	}
 	return s.repo.AddChecklistItem(ctx, item)
+}
+
+func (s *Service) GetChecklistItem(ctx context.Context, itemID string) (ChecklistItem, error) {
+	return s.repo.GetChecklistItem(ctx, itemID)
 }
 
 func (s *Service) ToggleChecklistItem(ctx context.Context, itemID string, done bool) error {

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  {{template "themeHeadScript" .}}
+  <title>Welcome | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=24">
+  <script defer src="/static/app.js"></script>
+</head>
+<body class="auth-page">
+  <main class="auth-card-wrap">
+    <article class="card auth-card">
+      <div class="brand auth-brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p class="muted">Start your journey: Create the first account for this instance.</p>
+        </div>
+      </div>
+      <form method="post" action="/setup" class="form-grid" id="setup-form">
+        <label class="full">Email
+          <input type="email" name="email" value="{{.Email}}" placeholder="you@example.com" required autocomplete="email">
+        </label>
+        <label class="full">Username
+          <input type="text" name="username" value="{{.Username}}" placeholder="johndoe" required minlength="2" autocomplete="username">
+        </label>
+        <label class="full">Display name
+          <input type="text" name="display_name" value="{{.DisplayName}}" placeholder="John Doe" autocomplete="name">
+        </label>
+        <label class="full auth-password-label">Password
+          <span class="auth-password-row">
+            <input type="password" id="setup-password" name="password" required minlength="8" autocomplete="new-password" aria-describedby="setup-password-hint">
+            <button type="button" class="auth-password-toggle" data-password-toggle="setup-password" aria-label="Show password" aria-pressed="false" title="Show password">
+              <span class="material-symbols-outlined" aria-hidden="true">visibility</span>
+            </button>
+          </span>
+        </label>
+        <p id="setup-password-hint" class="settings-field-hint muted full auth-password-hint">Minimum 8 characters required.</p>
+        <label class="full auth-password-label">Confirm password
+          <span class="auth-password-row">
+            <input type="password" id="setup-password-confirm" name="password_confirm" required minlength="8" autocomplete="new-password">
+            <button type="button" class="auth-password-toggle" data-password-toggle="setup-password-confirm" aria-label="Show confirm password" aria-pressed="false" title="Show password">
+              <span class="material-symbols-outlined" aria-hidden="true">visibility</span>
+            </button>
+          </span>
+        </label>
+        {{if .Error}}<p class="settings-field-hint error full auth-setup-error" role="alert">{{.Error}}</p>{{end}}
+        <button type="submit" class="full">Create account</button>
+      </form>
+    </article>
+  </main>
+</body>
+</html>

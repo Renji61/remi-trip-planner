@@ -50,19 +50,51 @@ func TestJoinMainSectionOrder(t *testing.T) {
 }
 
 func TestMainSectionVisible(t *testing.T) {
-	tr := Trip{UIShowSpends: false, UIShowStay: true}
+	tr := Trip{
+		UIShowSpends: false, UIShowStay: true,
+		UIShowItinerary: true, UIShowChecklist: true,
+	}
 	if MainSectionVisible(MainSectionSpends, tr) {
 		t.Fatal("spends should hide")
 	}
 	if !MainSectionVisible(MainSectionMap, tr) {
 		t.Fatal("map always on")
 	}
+	tr2 := Trip{
+		UIMainSectionHidden: "map", UIShowStay: true, UIShowSpends: true,
+		UIShowItinerary: true, UIShowChecklist: true,
+	}
+	if MainSectionVisible(MainSectionMap, tr2) {
+		t.Fatal("map hidden via UIMainSectionHidden")
+	}
+	if !MainSectionVisible(MainSectionStay, tr2) {
+		t.Fatal("stay still visible")
+	}
+	trIt := Trip{UIShowItinerary: false, UIShowChecklist: true, UIShowStay: true, UIShowSpends: true}
+	if MainSectionVisible(MainSectionItinerary, trIt) {
+		t.Fatal("itinerary off should hide main block")
+	}
 }
 
 func TestSidebarWidgetVisible(t *testing.T) {
-	tr := Trip{UIShowSpends: false}
+	tr := Trip{UIShowSpends: false, UIShowItinerary: true, UIShowChecklist: true}
 	if SidebarWidgetVisible(SidebarBudget, tr) {
 		t.Fatal("budget hidden without spends")
+	}
+	tr2 := Trip{UIShowSpends: true, UISidebarWidgetHidden: "budget", UIShowItinerary: true, UIShowChecklist: true}
+	if SidebarWidgetVisible(SidebarBudget, tr2) {
+		t.Fatal("budget hidden via UISidebarWidgetHidden")
+	}
+	if !SidebarWidgetVisible(SidebarAddStop, tr2) {
+		t.Fatal("add_stop visible")
+	}
+	trNoIt := Trip{UIShowSpends: true, UIShowItinerary: false, UIShowChecklist: true}
+	if SidebarWidgetVisible(SidebarAddStop, trNoIt) {
+		t.Fatal("add_stop hidden when itinerary off")
+	}
+	trNoCk := Trip{UIShowSpends: true, UIShowItinerary: true, UIShowChecklist: false}
+	if SidebarWidgetVisible(SidebarAddChecklist, trNoCk) {
+		t.Fatal("sidebar checklist hidden when checklist section off")
 	}
 }
 

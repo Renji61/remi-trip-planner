@@ -3,37 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
   {{template "themeHeadScript" .}}
   <title>{{.Details.Trip.Name}} | {{.Settings.AppTitle}}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=48">
+  <link rel="stylesheet" href="/static/app.css?v=74">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js"></script>
+  <script defer src="/static/app.js?v=77"></script>
 </head>
 <body>
   <main class="app-shell trip-details-page">
     <aside class="sidebar">
-      <div class="brand">
+      <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
         <div>
           <h1>{{.Settings.AppTitle}}</h1>
           <p>Serene Navigator</p>
         </div>
-      </div>
-      <ul class="nav-list">
-        <li class="nav-item active"><a href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined">luggage</span>My Trip</a></li>
-        {{if .Details.Trip.UIShowStay}}<li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined">hotel</span>{{.Details.Trip.StaySectionTitle}}</a></li>{{end}}
-        {{if .Details.Trip.UIShowVehicle}}<li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined">car_rental</span>{{.Details.Trip.VehicleSectionTitle}}</a></li>{{end}}
-        {{if .Details.Trip.UIShowFlights}}<li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined">flight</span>{{.Details.Trip.FlightsSectionTitle}}</a></li>{{end}}
-        {{if .Details.Trip.UIShowSpends}}<li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined">payments</span>{{.Details.Trip.SpendsSectionTitle}}</a></li>{{end}}
-        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}?open=edit"><span class="material-symbols-outlined">settings</span>Settings</a></li>
-      </ul>
+      </a>
+      {{template "tripSidebarNav" .}}
+      {{template "tripMembersPanel" .}}
       <div class="sidebar-bottom">
         <a class="btn" href="/">Back to Dashboard</a>
         <a class="support-link" href="/">Support</a>
@@ -42,20 +37,27 @@
     </aside>
 
     <section class="main">
+      {{if and .InviteNotice .InviteNoticeEmail}}
+      <p class="trip-invite-flash" role="status" data-trip-invite-flash>
+        {{if eq .InviteNotice "sent"}}Invite sent to {{.InviteNoticeEmail}}{{end}}
+        {{if eq .InviteNotice "added"}}{{.InviteNoticeEmail}} was added to the trip.{{end}}
+      </p>
+      {{end}}
       <header class="trip-mobile-header">
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard">
           <span class="material-symbols-outlined">home</span>
         </a>
-        <h2>My Trip</h2>
+        <h2 class="trip-mobile-header-title">{{if .Details.Trip.Name}}{{.Details.Trip.Name}}{{else}}My Trip{{end}}</h2>
         <div class="budget-mobile-header-actions">
           <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
-          <a class="budget-mobile-header-btn" href="/trips/{{.Details.Trip.ID}}?open=edit" aria-label="Open trip settings">
+          <a class="budget-mobile-header-btn" href="/trips/{{.Details.Trip.ID}}/settings" aria-label="Open trip settings">
             <span class="material-symbols-outlined">settings</span>
           </a>
         </div>
       </header>
+      <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
 
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
@@ -68,22 +70,52 @@
               </summary>
               <div class="trip-inline-actions-buttons trip-topbar-actions-buttons">
                 {{if not .Details.Trip.IsArchived}}
-                <button type="button" class="link-btn" data-edit-toggle="open">Edit</button>
-                <form method="post" action="/trips/{{.Details.Trip.ID}}/archive" onsubmit="return confirm('Archive this trip? Archived trips are read-only.');">
+                <a class="link-btn" href="/trips/{{.Details.Trip.ID}}/settings">Trip settings</a>
+                {{if .TripAccess.IsOwner}}
+                <form method="post" action="/trips/{{.Details.Trip.ID}}/archive" data-app-confirm data-confirm-title="Archive this trip?" data-confirm-body="Archived trips are read-only. You can still view them from your dashboard." data-confirm-ok="Archive trip" data-confirm-icon="archive" data-confirm-variant="neutral">
+                  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                   <button type="submit" class="link-btn">Archive</button>
                 </form>
                 {{end}}
-                <form method="post" action="/trips/{{.Details.Trip.ID}}/delete" onsubmit="return confirm('Delete this trip permanently? This cannot be undone.');">
+                {{end}}
+                {{if .TripAccess.IsOwner}}
+                <form method="post" action="/trips/{{.Details.Trip.ID}}/delete" data-app-confirm data-confirm-title="Delete this trip permanently?" data-confirm-body="This removes the trip and its data. This cannot be undone." data-confirm-ok="Delete trip" data-confirm-icon="delete_forever" data-confirm-variant="danger">
+                  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                   <button type="submit" class="link-btn danger">Delete</button>
                 </form>
+                {{end}}
               </div>
             </details>
           </div>
           <p>{{formatUIDate .Details.Trip.StartDate}} – {{formatUIDate .Details.Trip.EndDate}}</p>
           {{if .Details.Trip.IsArchived}}<p class="archived-note">Archived trip: this trip is read-only.</p>{{end}}
+          {{if not .TripAccess.IsOwner}}
+          <form method="post" action="/trips/{{.Details.Trip.ID}}/leave" style="margin-top:10px;" data-app-confirm data-confirm-title="Leave this trip?" data-confirm-body="You will need a new invite to return." data-confirm-ok="Leave trip" data-confirm-icon="logout" data-confirm-variant="danger">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button type="submit" class="link-btn danger">Leave trip</button>
+          </form>
+          {{end}}
+          {{if and .TripAccess.IsOwner (gt .CollaboratorCount 0)}}
+          <form method="post" action="/trips/{{.Details.Trip.ID}}/stop-sharing" style="margin-top:8px;" data-app-confirm data-confirm-title="Stop sharing for everyone?" data-confirm-body="All collaborators and pending invites will be removed from this trip." data-confirm-ok="Remove all" data-confirm-icon="group_off" data-confirm-variant="danger">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button type="submit" class="link-btn danger">Stop sharing for everyone</button>
+          </form>
+          {{end}}
+          {{if and (not .TripAccess.IsOwner) .Details.Trip.IsArchived}}
+          <form method="post" action="/trips/{{.Details.Trip.ID}}/hide-archived" style="margin-top:8px;">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            {{if .ArchivedHiddenFromDashboard}}
+            <input type="hidden" name="hidden" value="0">
+            <button type="submit" class="link-btn">Show on my dashboard</button>
+            {{else}}
+            <input type="hidden" name="hidden" value="1">
+            <button type="submit" class="link-btn">Hide from my dashboard</button>
+            {{end}}
+          </form>
+          {{end}}
         </div>
         <div class="topbar-right">
-          <input type="search" placeholder="Search itinerary..." data-itinerary-search aria-label="Search itinerary" autocomplete="off">
+          {{if .Details.Trip.UIShowItinerary}}<input type="search" placeholder="Search itinerary..." data-itinerary-search aria-label="Search itinerary" autocomplete="off">{{end}}
           <div class="avatar-row">
             <a href="/" class="icon-btn" aria-label="Go to dashboard">
               <span class="material-symbols-outlined" aria-hidden="true">home</span>
@@ -106,87 +138,6 @@
             </div>
           </section>
 
-          <section class="card hidden trip-edit-panel" id="edit-trip" data-edit-panel>
-            <h3>Edit Trip Details</h3>
-            {{if .Details.Trip.IsArchived}}
-            <p class="muted">Archived trips are read-only. Delete is still available from the trip header.</p>
-            {{else}}
-            <form method="post" action="/trips/{{.Details.Trip.ID}}/update" class="form-grid">
-              <label class="full">Trip Name<input type="text" name="name" value="{{.Details.Trip.Name}}" required></label>
-              <label class="full">Description<input type="text" name="description" value="{{.Details.Trip.Description}}" placeholder="Short trip summary"></label>
-              <label>Start Date<input type="date" name="start_date" value="{{.Details.Trip.StartDate}}"></label>
-              <label>End Date<input type="date" name="end_date" value="{{.Details.Trip.EndDate}}"></label>
-              <label>Currency Name<input type="text" name="currency_name" value="{{.CurrencyName}}" placeholder="e.g. PHP"></label>
-              <label>Currency Symbol<input type="text" name="currency_symbol" value="{{.CurrencySymbol}}" placeholder="e.g. ₱"></label>
-              <label class="full">Trip Cover Image URL<input type="url" name="cover_image_url" value="{{.Details.Trip.CoverImage}}" placeholder="https://..."></label>
-              <h4 class="full">Trip page & navigation</h4>
-              <p class="full muted">Turn sections off to hide them on this trip’s main page, sidebar, and mobile nav. Disabled sections redirect to this page if opened directly.</p>
-              <label class="checkbox-inline full"><input type="hidden" name="ui_show_stay" value="0"><input type="checkbox" name="ui_show_stay" value="1" {{if .Details.Trip.UIShowStay}}checked{{end}}> Show Stay (accommodation) section & links</label>
-              <label class="checkbox-inline full"><input type="hidden" name="ui_show_vehicle" value="0"><input type="checkbox" name="ui_show_vehicle" value="1" {{if .Details.Trip.UIShowVehicle}}checked{{end}}> Show Vehicle section & links</label>
-              <label class="checkbox-inline full"><input type="hidden" name="ui_show_flights" value="0"><input type="checkbox" name="ui_show_flights" value="1" {{if .Details.Trip.UIShowFlights}}checked{{end}}> Show Flights section & links</label>
-              <label class="checkbox-inline full"><input type="hidden" name="ui_show_spends" value="0"><input type="checkbox" name="ui_show_spends" value="1" {{if .Details.Trip.UIShowSpends}}checked{{end}}> Show Spends section, budget tile & quick expense</label>
-              <label class="full">Default expanded itinerary days
-                <select name="ui_itinerary_expand">
-                  <option value="first" {{if eq .Details.Trip.UIItineraryExpand "first"}}selected{{end}}>First day only</option>
-                  <option value="all" {{if eq .Details.Trip.UIItineraryExpand "all"}}selected{{end}}>All days</option>
-                  <option value="none" {{if eq .Details.Trip.UIItineraryExpand "none"}}selected{{end}}>None (all collapsed)</option>
-                </select>
-              </label>
-              <label class="full">Default expanded spend days (on trip page)
-                <select name="ui_spends_expand">
-                  <option value="first" {{if eq .Details.Trip.UISpendsExpand "first"}}selected{{end}}>First day only</option>
-                  <option value="all" {{if eq .Details.Trip.UISpendsExpand "all"}}selected{{end}}>All days</option>
-                  <option value="none" {{if eq .Details.Trip.UISpendsExpand "none"}}selected{{end}}>None (all collapsed)</option>
-                </select>
-              </label>
-              <label class="full">Time display on this trip
-                <select name="ui_time_format">
-                  <option value="12h" {{if eq .Details.Trip.UITimeFormat "24h"}}{{else}}selected{{end}}>12-hour (e.g. 3:00 PM)</option>
-                  <option value="24h" {{if eq .Details.Trip.UITimeFormat "24h"}}selected{{end}}>24-hour (e.g. 15:00)</option>
-                </select>
-              </label>
-              <h4 class="full">Layout order</h4>
-              <p class="full muted">Drag to reorder. The trip hero and cover stay at the top; below that, main sections follow this order. Sidebar widgets apply on wider screens (the right column).</p>
-              <input type="hidden" name="ui_main_section_order" value="{{.UIMainSectionOrderValue}}">
-              <p class="full trip-layout-reorder-heading" id="trip-layout-main-label">Main column (below hero)</p>
-              <ul class="trip-layout-reorder-list" data-trip-reorder-list="ui_main_section_order" aria-labelledby="trip-layout-main-label">
-                {{range .MainSectionOrder}}
-                <li class="trip-layout-reorder-item" draggable="true" data-reorder-key="{{.}}">
-                  <span class="trip-layout-reorder-handle material-symbols-outlined" aria-hidden="true">drag_indicator</span>
-                  <span class="trip-layout-reorder-label">{{tripMainSectionLabel .}}</span>
-                  <span class="trip-layout-reorder-actions">
-                    <button type="button" class="trip-layout-reorder-move" data-move="-1" aria-label="Move {{tripMainSectionLabel .}} up"><span class="material-symbols-outlined" aria-hidden="true">expand_less</span></button>
-                    <button type="button" class="trip-layout-reorder-move" data-move="1" aria-label="Move {{tripMainSectionLabel .}} down"><span class="material-symbols-outlined" aria-hidden="true">expand_more</span></button>
-                  </span>
-                </li>
-                {{end}}
-              </ul>
-              <input type="hidden" name="ui_sidebar_widget_order" value="{{.UISidebarWidgetOrderValue}}">
-              <p class="full trip-layout-reorder-heading" id="trip-layout-sidebar-label">Right sidebar widgets</p>
-              <ul class="trip-layout-reorder-list" data-trip-reorder-list="ui_sidebar_widget_order" aria-labelledby="trip-layout-sidebar-label">
-                {{range .SidebarWidgetOrder}}
-                <li class="trip-layout-reorder-item" draggable="true" data-reorder-key="{{.}}">
-                  <span class="trip-layout-reorder-handle material-symbols-outlined" aria-hidden="true">drag_indicator</span>
-                  <span class="trip-layout-reorder-label">{{tripSidebarWidgetLabel .}}</span>
-                  {{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}}<span class="trip-layout-reorder-note">(hidden while Spends is off)</span>{{end}}
-                  <span class="trip-layout-reorder-actions">
-                    <button type="button" class="trip-layout-reorder-move" data-move="-1" aria-label="Move {{tripSidebarWidgetLabel .}} up"><span class="material-symbols-outlined" aria-hidden="true">expand_less</span></button>
-                    <button type="button" class="trip-layout-reorder-move" data-move="1" aria-label="Move {{tripSidebarWidgetLabel .}} down"><span class="material-symbols-outlined" aria-hidden="true">expand_more</span></button>
-                  </span>
-                </li>
-                {{end}}
-              </ul>
-              <h4 class="full">Rename sections (optional)</h4>
-              <label>Stay nav label<input type="text" name="ui_label_stay" value="{{.Details.Trip.UILabelStay}}" placeholder="Stay" maxlength="80" autocomplete="off"></label>
-              <label>Vehicle nav label<input type="text" name="ui_label_vehicle" value="{{.Details.Trip.UILabelVehicle}}" placeholder="Vehicle" maxlength="80" autocomplete="off"></label>
-              <label>Flights nav label<input type="text" name="ui_label_flights" value="{{.Details.Trip.UILabelFlights}}" placeholder="Flights" maxlength="80" autocomplete="off"></label>
-              <label>Spends nav label<input type="text" name="ui_label_spends" value="{{.Details.Trip.UILabelSpends}}" placeholder="Spends" maxlength="80" autocomplete="off"></label>
-              <button class="full" type="submit">Save Trip Changes</button>
-              <button class="full secondary-btn" type="button" data-edit-toggle="close">Cancel</button>
-            </form>
-            {{end}}
-          </section>
-
           {{range .MainSectionOrder}}
           {{if mainSectionVisible . $.Details.Trip}}
           {{if eq . "map"}}
@@ -205,18 +156,21 @@
                 <summary class="day-group-summary day-group-summary--itinerary">
                   <span class="day-group-summary-title">Day {{$group.DayNumber}}{{if $group.DateLabel}} – {{formatUIDate $group.DateLabel}}{{end}}</span>
                   {{if not $.Details.Trip.IsArchived}}
-                  <form method="post" action="/trips/{{$.Details.Trip.ID}}/days/{{$group.DayNumber}}/label" class="day-label-inline-form" data-ajax-submit data-toast-message="Day label saved." data-day-summary-control>
-                    <input type="text" name="day_label" value="{{$group.DayDescription}}" placeholder="Add day description..." class="day-label-inline-input" data-day-label-input data-day-summary-control>
-                    <button type="submit" class="day-label-inline-save-btn" data-day-summary-control>Save</button>
-                  </form>
+                  <span class="day-label-inline-controls">
+                    <input type="text" name="day_label" form="day-label-form-{{$group.DayNumber}}" value="{{$group.DayDescription}}" placeholder="Add day description..." class="day-label-inline-input" data-day-label-input data-day-summary-control autocomplete="off">
+                    <button type="submit" form="day-label-form-{{$group.DayNumber}}" class="day-label-inline-save-btn" data-day-summary-control>Save</button>
+                  </span>
                   {{else if $group.DayDescription}}
                   <em class="day-group-summary-note">{{$group.DayDescription}}</em>
                   {{end}}
                   <span class="day-group-chevron" aria-hidden="true"><span class="material-symbols-outlined">expand_more</span></span>
                 </summary>
+                {{if not $.Details.Trip.IsArchived}}
+                <form id="day-label-form-{{$group.DayNumber}}" method="post" action="/trips/{{$.Details.Trip.ID}}/days/{{$group.DayNumber}}/label" class="day-label-inline-form" data-ajax-submit data-toast-message="Day label saved." hidden aria-hidden="true"></form>
+                {{end}}
                 <ul class="list timeline day-items">
                   {{range $group.Items}}
-                  <li class="timeline-item" data-itinerary-item data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
+                  <li class="timeline-item" data-itinerary-item data-map-itinerary-point data-map-day="{{$group.DayNumber}}" data-marker-kind="{{if ne .Lodging.ID ""}}stay{{else if ne .Vehicle.ID ""}}vehicle{{else if ne .Flight.ID ""}}flight{{else}}stop{{end}}" data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
                     {{if not $.Details.Trip.IsArchived}}
                     <details class="item-actions trip-inline-actions-dropdown">
                       <summary class="trip-inline-actions-summary">
@@ -230,7 +184,7 @@
                           data-inline-edit-open="{{if ne .Lodging.ID ""}}accommodation-itinerary-edit-{{.Item.ID}}{{else if ne .Vehicle.ID ""}}vehicle-rental-itinerary-edit-{{.Item.ID}}{{else if ne .Flight.ID ""}}flight-itinerary-edit-{{.Item.ID}}{{else}}itinerary-edit-{{.Item.ID}}{{end}}"
                         >Edit</button>
                         {{if and (eq .Lodging.ID "") (eq .Vehicle.ID "") (eq .Flight.ID "")}}
-                        <form method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/delete" onsubmit="return confirm('Delete this itinerary item?');" data-ajax-submit data-toast-message="Itinerary stop deleted.">
+                        <form method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/delete" data-app-confirm data-confirm-title="Delete this itinerary stop?" data-confirm-body="This removes the stop from your trip itinerary." data-confirm-ok="Delete stop" data-confirm-icon="pin_drop" data-confirm-variant="danger" data-ajax-submit data-toast-message="Itinerary stop deleted.">
                           <button type="submit" class="item-action-btn danger">Delete</button>
                         </form>
                         {{end}}
@@ -259,16 +213,20 @@
                       <div class="itinerary-field">
                         {{if ne .Lodging.ID ""}}
                         <span class="itinerary-label">Address</span>
-                        <span class="itinerary-value">{{if .Lodging.Address}}{{.Lodging.Address}}{{else if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        {{$mapHint := .Lodging.Address}}{{if eq $mapHint ""}}{{$mapHint = .Item.Location}}{{end}}
+                        <span class="itinerary-value">{{if .Lodging.Address}}{{.Lodging.Address}}{{else if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Map" aria-label="Open map"><span class="material-symbols-outlined" aria-hidden="true">map</span></a>{{end}}</span>
                         {{else if ne .Vehicle.ID ""}}
                         <span class="itinerary-label">Pick Up Location</span>
-                        <span class="itinerary-value">{{if .Vehicle.PickUpLocation}}{{.Vehicle.PickUpLocation}}{{else if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        {{$mapHint := .Vehicle.PickUpLocation}}{{if eq $mapHint ""}}{{$mapHint = .Item.Location}}{{end}}
+                        <span class="itinerary-value">{{if .Vehicle.PickUpLocation}}{{.Vehicle.PickUpLocation}}{{else if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Map" aria-label="Open map"><span class="material-symbols-outlined" aria-hidden="true">map</span></a>{{end}}</span>
                         {{else if ne .Flight.ID ""}}
                         <span class="itinerary-label">{{if eq .Item.ID .Flight.DepartItineraryID}}Depart Airport{{else}}Arrive Airport{{end}}</span>
-                        <span class="itinerary-value">{{if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        {{$mapHint := .Item.Location}}
+                        <span class="itinerary-value">{{if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Map" aria-label="Open map"><span class="material-symbols-outlined" aria-hidden="true">map</span></a>{{end}}</span>
                         {{else}}
                         <span class="itinerary-label">Location</span>
-                        <span class="itinerary-value">{{if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        {{$mapHint := .Item.Location}}
+                        <span class="itinerary-value">{{if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Map" aria-label="Open map"><span class="material-symbols-outlined" aria-hidden="true">map</span></a>{{end}}</span>
                         {{end}}
                       </div>
                       {{if ne .Flight.ID ""}}
@@ -448,11 +406,11 @@
               <div class="budget-overlay">
                 <div>
                   <div class="meta">Total Budgeted Cost</div>
-                  <div class="amount">{{$.CurrencySymbol}}{{printf "%.2f" $.TotalBudgeted}}</div>
+                  <div class="amount" title="{{$.CurrencySymbol}}{{formatTripMoney $.TotalBudgeted}}">{{abbrevMoney $.CurrencySymbol $.TotalBudgeted}}</div>
                 </div>
                 <div class="budget-spent-chip">
                   <div class="meta">Total Budget Spent</div>
-                  <div class="chip-amount">{{$.CurrencySymbol}}{{printf "%.2f" $.TotalExpense}}</div>
+                  <div class="chip-amount" title="{{$.CurrencySymbol}}{{formatTripMoney $.TotalExpense}}">{{abbrevMoney $.CurrencySymbol $.TotalExpense}}</div>
                 </div>
               </div>
               <div class="progress">
@@ -490,7 +448,7 @@
                               class="item-action-btn"
                               data-inline-edit-open="expense-edit-{{.ID}}"
                             >Edit</button>
-                            <form method="post" action="/trips/{{$.Details.Trip.ID}}/expenses/{{.ID}}/delete" onsubmit="return confirm('Delete this expense item?');" data-ajax-submit data-toast-message="Spend deleted.">
+                            <form method="post" action="/trips/{{$.Details.Trip.ID}}/expenses/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this spend?" data-confirm-body="This expense will be removed from your trip. You cannot undo this from the app." data-confirm-ok="Delete spend" data-confirm-icon="receipt_long" data-confirm-variant="danger" data-ajax-submit data-toast-message="Spend deleted.">
                               <button type="submit" class="item-action-btn danger">Delete</button>
                             </form>
                           </div>
@@ -520,8 +478,6 @@
                           {{end}}
                         </select>
                       </label>
-                      <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" .Amount}}" required></label>
-                      <label>Date<input type="date" name="spent_on" value="{{.SpentOn}}"></label>
                       <label>Payment Method
                         <select name="payment_method" required>
                           <option value="Cash" {{if or (eq $curMethod "") (eq $curMethod "Cash")}}selected{{end}}>Cash</option>
@@ -532,9 +488,13 @@
                           <option value="Mobile Payment" {{if eq $curMethod "Mobile Payment"}}selected{{end}}>Mobile Payment</option>
                         </select>
                       </label>
-                      <label>Notes<input type="text" name="notes" value="{{.Notes}}"></label>
-                      <button type="submit">Save</button>
-                      <button type="button" class="secondary-btn" data-inline-edit-cancel="expense-edit-{{.ID}}">Cancel</button>
+                      <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" .Amount}}" required></label>
+                      <label>Date<input type="date" name="spent_on" value="{{.SpentOn}}"></label>
+                      <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}"></label>
+                      <div class="full expense-edit-actions">
+                        <button type="submit">Save</button>
+                        <button type="button" class="secondary-btn" data-inline-edit-cancel="expense-edit-{{.ID}}">Cancel</button>
+                      </div>
                     </form>
                     {{end}}
                   </li>
@@ -577,7 +537,7 @@
                             class="item-action-btn"
                             data-inline-edit-open="checklist-edit-{{.ID}}"
                           >Edit</button>
-                          <form method="post" action="/checklist/{{.ID}}/delete" onsubmit="return confirm('Delete this checklist item?');" data-ajax-submit data-toast-message="Checklist item deleted.">
+                          <form method="post" action="/checklist/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this checklist item?" data-confirm-body="It will be removed from your reminder checklist." data-confirm-ok="Delete item" data-confirm-icon="checklist" data-confirm-variant="danger" data-ajax-submit data-toast-message="Checklist item deleted.">
                             <button type="submit" class="item-action-btn danger">Delete</button>
                           </form>
                         </div>
@@ -623,39 +583,43 @@
                   {{if not $.Details.Trip.IsArchived}}
                   <div class="item-actions accommodation-card-actions">
                     <button type="button" class="item-action-btn" data-inline-edit-open="trip-accommodation-edit-{{.ID}}" aria-label="Edit stay: {{.Name}}" title="Edit this stay">Edit</button>
-                    <form method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/delete" onsubmit="return confirm('Delete this accommodation entry?');">
+                    <form method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this stay?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete stay" data-confirm-icon="hotel" data-confirm-variant="danger">
                       <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
                       <button type="submit" class="item-action-btn danger" aria-label="Delete stay: {{.Name}}" title="Delete this stay">Delete</button>
                     </form>
                   </div>
                   {{end}}
-                  <div id="trip-accommodation-view-{{.ID}}" class="item-view accommodation-card-view">
-                    <div class="accommodation-media">
-                      {{if .AttachmentPath}}
-                      <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open booking attachment in a new tab: {{.Name}}">
-                        <img class="accommodation-cover" src="{{.AttachmentPath}}" alt="Booking attachment image for {{.Name}}">
-                      </a>
-                      {{else}}
-                      <div class="accommodation-cover accommodation-cover--placeholder" role="img" aria-label="No booking image">
-                        <span class="material-symbols-outlined" aria-hidden="true">hotel</span>
-                      </div>
-                      {{end}}
-                    </div>
-                    <div class="accommodation-main">
-                      <div class="accommodation-main-head">
-                        <h4>{{.Name}}{{if .BookingConfirmation}} | Booking #{{.BookingConfirmation}}{{end}}</h4>
-                        <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}}</strong>
-                      </div>
-                      <p class="accommodation-main-address"><span class="material-symbols-outlined" aria-hidden="true">location_on</span>{{if .Address}}{{.Address}}{{else}}-{{end}}</p>
-                      <div class="accommodation-meta-pills">
-                        <span><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><span class="visually-hidden">Check-in: </span>{{formatTripDateTime $.Details.Trip .CheckInAt}}</span>
-                        <span><span class="material-symbols-outlined" aria-hidden="true">event</span><span class="visually-hidden">Check-out: </span>{{formatTripDateTime $.Details.Trip .CheckOutAt}}</span>
-                      </div>
-                      <div class="accommodation-footer">
+                  <div id="trip-accommodation-view-{{.ID}}" class="item-view">
+                    <div class="vehicle-card-content">
+                      <div class="vehicle-media">
                         {{if .AttachmentPath}}
-                        <a class="attachment-btn" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open booking attachment in a new tab" aria-label="Open booking attachment for {{.Name}}">Open Attachment</a>
+                        <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open booking attachment in a new tab: {{.Name}}">
+                          <img class="vehicle-card-image" src="{{.AttachmentPath}}" alt="Booking attachment image for {{.Name}}">
+                        </a>
+                        {{else}}
+                        <div class="vehicle-card-image vehicle-card-image--placeholder" role="img" aria-label="No booking image">
+                          <span class="material-symbols-outlined" aria-hidden="true">hotel</span>
+                        </div>
                         {{end}}
-                        {{if .Notes}}<p class="accommodation-note">{{.Notes}}</p>{{end}}
+                      </div>
+                      <div class="vehicle-main">
+                        <div class="vehicle-main-top">
+                          <div>
+                            <h4>{{.Name}}</h4>
+                            <p>{{if .Address}}{{.Address}}{{else}}—{{end}}{{with googleMapsSearchURL .Latitude .Longitude .Address}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Map" aria-label="Open map"><span class="material-symbols-outlined" aria-hidden="true">map</span></a>{{end}}</p>
+                          </div>
+                          <div class="vehicle-cost-block">
+                            <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}}</strong>
+                            <small>Total Stay</small>
+                          </div>
+                        </div>
+                        <div class="vehicle-meta-grid">
+                          <div><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><div><strong>{{formatTripDateTime $.Details.Trip .CheckInAt}}</strong><small>Check-in</small></div></div>
+                          <div><span class="material-symbols-outlined" aria-hidden="true">event</span><div><strong>{{formatTripDateTime $.Details.Trip .CheckOutAt}}</strong><small>Check-out</small></div></div>
+                          <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{if .BookingConfirmation}}{{.BookingConfirmation}}{{else}}—{{end}}</strong><small>Confirmation</small></div></div>
+                          <div><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><strong>{{if .AttachmentPath}}<a class="trip-stay-meta-attachment-link" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">Open</a>{{else}}—{{end}}</strong><small>Attachment</small></div></div>
+                        </div>
+                        {{if .Notes}}<p class="vehicle-note">{{.Notes}}</p>{{end}}
                       </div>
                     </div>
                   </div>
@@ -710,7 +674,7 @@
                 {{if not $.Details.Trip.IsArchived}}
                 <div class="item-actions vehicle-card-actions">
                   <button type="button" class="item-action-btn" data-inline-edit-open="vehicle-rental-edit-{{.ID}}" aria-label="Edit vehicle rental: {{if .VehicleDetail}}{{.VehicleDetail}}{{else}}booking{{end}}" title="Edit this rental">Edit</button>
-                  <form method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/delete" onsubmit="return confirm('Delete this vehicle rental entry?');">
+                  <form method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this vehicle rental?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete rental" data-confirm-icon="car_rental" data-confirm-variant="danger">
                     <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
                     <button type="submit" class="item-action-btn danger" aria-label="Delete vehicle rental: {{if .VehicleDetail}}{{.VehicleDetail}}{{else}}booking{{end}}" title="Delete this rental">Delete</button>
                   </form>
@@ -815,7 +779,7 @@
                   </summary>
                   <div class="trip-inline-actions-buttons">
                     <button type="button" class="item-action-btn" data-inline-edit-open="flight-edit-{{.ID}}">Edit</button>
-                    <form method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{.ID}}/delete" onsubmit="return confirm('Delete this flight entry?');" data-ajax-submit data-toast-message="Flight deleted.">
+                    <form method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this flight?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete flight" data-confirm-icon="flight_takeoff" data-confirm-variant="danger" data-ajax-submit data-toast-message="Flight deleted.">
                       <button type="submit" class="item-action-btn danger">Delete</button>
                     </form>
                   </div>
@@ -876,7 +840,11 @@
               {{end}}
             </ul>
             {{else}}
-            <p class="muted">No flights yet.</p>
+            <div class="accommodation-empty trip-page-flights-empty">
+              <div aria-hidden="true"><span class="material-symbols-outlined">flight</span></div>
+              <h4>No flights yet</h4>
+              <p>Add a flight on the full {{$.Details.Trip.FlightsSectionTitle}} page — use the section title link above.</p>
+            </div>
             {{end}}
           </section>
           {{end}}
@@ -917,11 +885,11 @@
             <div class="budget-overlay">
               <div>
                 <div class="meta">Total Budgeted Cost</div>
-                <div class="amount">{{$.CurrencySymbol}}{{printf "%.2f" $.TotalBudgeted}}</div>
+                <div class="amount" title="{{$.CurrencySymbol}}{{formatTripMoney $.TotalBudgeted}}">{{abbrevMoney $.CurrencySymbol $.TotalBudgeted}}</div>
               </div>
               <div class="budget-spent-chip">
                 <div class="meta">Total Budget Spent</div>
-                <div class="chip-amount">{{$.CurrencySymbol}}{{printf "%.2f" $.TotalExpense}}</div>
+                <div class="chip-amount" title="{{$.CurrencySymbol}}{{formatTripMoney $.TotalExpense}}">{{abbrevMoney $.CurrencySymbol $.TotalExpense}}</div>
               </div>
             </div>
             <div class="progress">
@@ -1015,10 +983,10 @@
       <span class="material-symbols-outlined">add</span>
     </button>
     <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
-      <button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-stop">
+      {{if .Details.Trip.UIShowItinerary}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-stop">
         <span class="material-symbols-outlined">pin_drop</span>
         Add Stop
-      </button>
+      </button>{{end}}
       {{if .Details.Trip.UIShowSpends}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-expense">
         <span class="material-symbols-outlined">receipt_long</span>
         Add {{.Details.Trip.SpendsSectionTitle}}
@@ -1027,6 +995,10 @@
         <span class="material-symbols-outlined">hotel</span>
         Add {{.Details.Trip.StaySectionTitle}}
       </button>{{end}}
+      {{if .Details.Trip.UIShowVehicle}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-vehicle">
+        <span class="material-symbols-outlined">car_rental</span>
+        Add {{.Details.Trip.VehicleSectionTitle}}
+      </button>{{end}}
       {{if .Details.Trip.UIShowFlights}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-flight">
         <span class="material-symbols-outlined">flight</span>
         Add {{.Details.Trip.FlightsSectionTitle}}
@@ -1034,7 +1006,7 @@
     </div>
   </div>
   <div class="mobile-sheet-backdrop hidden" data-mobile-sheet-backdrop></div>
-  <section id="mobile-sheet-stop" class="mobile-sheet hidden" aria-hidden="true">
+  {{if .Details.Trip.UIShowItinerary}}<section id="mobile-sheet-stop" class="mobile-sheet hidden" aria-hidden="true">
     <div class="mobile-sheet-head">
       <h3>Add New Stop</h3>
       <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add stop">
@@ -1056,7 +1028,7 @@
       <label class="full">Notes<input type="text" name="notes" placeholder="Optional details"></label>
       <button class="full" type="submit">Add to Itinerary</button>
     </form>
-  </section>
+  </section>{{end}}
   {{if .Details.Trip.UIShowSpends}}
   <section id="mobile-sheet-expense" class="mobile-sheet hidden" aria-hidden="true">
     <div class="mobile-sheet-head">
@@ -1114,6 +1086,29 @@
     </form>
   </section>
   {{end}}
+  {{if .Details.Trip.UIShowVehicle}}
+  <section id="mobile-sheet-vehicle" class="mobile-sheet hidden" aria-hidden="true">
+    <div class="mobile-sheet-head">
+      <h3>Add {{.Details.Trip.VehicleSectionTitle}}</h3>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add vehicle rental">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid vehicle-form-grid" enctype="multipart/form-data">
+      <label class="full">Vehicle Name & Type<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
+      <label>Pick-up Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+      <label>Booking Confirmation #<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
+      <label>Pick-up Date & Time<input type="datetime-local" name="pick_up_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
+      <label>Drop-off Date & Time<input type="datetime-local" name="drop_off_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
+      <label>Rental Cost<input type="number" step="0.01" name="cost" placeholder="0.00"></label>
+      <label>Insurance Cost<input type="number" step="0.01" name="insurance_cost" placeholder="0.00"></label>
+      <label class="checkbox-inline full"><input type="checkbox" name="pay_at_pick_up" value="true">Pay at Pick Up</label>
+      <label class="full">Attach Vehicle Image<input type="file" name="vehicle_image" accept="image/*"></label>
+      <label class="full">Additional Notes<input type="text" name="notes" placeholder="Notes about insurance coverage, keys, etc."></label>
+      <button class="full vehicle-submit-btn" type="submit">Save {{.Details.Trip.VehicleSectionTitle}} booking</button>
+    </form>
+  </section>
+  {{end}}
   {{if .Details.Trip.UIShowFlights}}
   <section id="mobile-sheet-flight" class="mobile-sheet hidden" aria-hidden="true">
     <div class="mobile-sheet-head">
@@ -1146,5 +1141,6 @@
     {{if .Details.Trip.UIShowFlights}}<a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined">flight</span><span>{{.Details.Trip.FlightsSectionTitle}}</span></a>{{end}}
     {{if .Details.Trip.UIShowSpends}}<a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined">payments</span><span>{{.Details.Trip.SpendsSectionTitle}}</span></a>{{end}}
   </nav>
+  {{template "appConfirmDialog"}}
 </body>
 </html>

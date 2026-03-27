@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  {{template "themeHeadScript" .}}
+  <title>Create account | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=42">
+  <script defer src="/static/app.js"></script>
+</head>
+<body class="auth-page">
+  <header class="trip-mobile-header auth-page-mobile-header" aria-label="Create account">
+    <span class="auth-page-mobile-header-spacer" aria-hidden="true"></span>
+    <h2 class="trip-mobile-header-title">Create account</h2>
+    <div class="budget-mobile-header-actions">
+      <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+        <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+      </button>
+    </div>
+  </header>
+  <header class="auth-page-desktop-topbar topbar" aria-label="Page tools">
+    <div class="title-group auth-page-desktop-topbar-spacer" aria-hidden="true"></div>
+    <div class="topbar-right topbar-right--tools">
+      <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+        <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+      </button>
+    </div>
+  </header>
+  <main class="auth-card-wrap">
+    <article class="card auth-card">
+      <div class="brand auth-brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>Create account</h1>
+          <p class="muted">Join {{.Settings.AppTitle}}.</p>
+        </div>
+      </div>
+      <form method="post" action="/register" class="form-grid" id="register-form">
+        {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
+        <label class="full">Email
+          <input type="email" name="email" value="{{.Email}}" placeholder="you@example.com" required autocomplete="email">
+        </label>
+        <label class="full">Username
+          <input type="text" name="username" value="{{.Username}}" placeholder="johndoe" required minlength="2" autocomplete="username">
+        </label>
+        <label class="full">Display name
+          <input type="text" name="display_name" value="{{.DisplayName}}" placeholder="John Doe" autocomplete="name">
+        </label>
+        <label class="full auth-password-label">Password
+          <span class="auth-password-row">
+            <input type="password" id="register-password" name="password" required minlength="8" autocomplete="new-password" aria-describedby="register-password-hint">
+            <button type="button" class="auth-password-toggle" data-password-toggle="register-password" aria-label="Show password" aria-pressed="false" title="Show password">
+              <span class="material-symbols-outlined" aria-hidden="true">visibility</span>
+            </button>
+          </span>
+        </label>
+        <p id="register-password-hint" class="settings-field-hint muted full auth-password-hint">Minimum 8 characters required.</p>
+        <label class="full auth-password-label">Confirm password
+          <span class="auth-password-row">
+            <input type="password" id="register-password-confirm" name="password_confirm" required minlength="8" autocomplete="new-password">
+            <button type="button" class="auth-password-toggle" data-password-toggle="register-password-confirm" aria-label="Show confirm password" aria-pressed="false" title="Show password">
+              <span class="material-symbols-outlined" aria-hidden="true">visibility</span>
+            </button>
+          </span>
+        </label>
+        {{if .Error}}<p class="settings-field-hint error full auth-setup-error" role="alert">{{.Error}}</p>{{end}}
+        <button type="submit" class="full">Create account</button>
+      </form>
+      <p class="auth-card-footer muted full">
+        Already have an account? <a class="auth-inline-link" href="{{.LoginURL}}">Sign in</a>
+      </p>
+    </article>
+  </main>
+</body>
+</html>

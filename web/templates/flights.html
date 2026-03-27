@@ -3,34 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
   {{template "themeHeadScript" .}}
   <title>{{.Details.Trip.FlightsSectionTitle}} | {{.Details.Trip.Name}} | {{.Settings.AppTitle}}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=40">
+  <link rel="stylesheet" href="/static/app.css?v=71">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js"></script>
+  <script defer src="/static/app.js?v=73"></script>
 </head>
 <body>
   <main class="app-shell" aria-label="{{.Details.Trip.FlightsSectionTitle}}">
     <aside class="sidebar">
-      <div class="brand">
+      <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
         <div>
           <h1>{{.Settings.AppTitle}}</h1>
           <p>Serene Navigator</p>
         </div>
-      </div>
-      <ul class="nav-list">
-        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined" aria-hidden="true">luggage</span>My Trip</a></li>
-        {{if .Details.Trip.UIShowStay}}<li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>{{.Details.Trip.StaySectionTitle}}</a></li>{{end}}
-        {{if .Details.Trip.UIShowVehicle}}<li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>{{.Details.Trip.VehicleSectionTitle}}</a></li>{{end}}
-        {{if .Details.Trip.UIShowFlights}}<li class="nav-item active"><a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>{{.Details.Trip.FlightsSectionTitle}}</a></li>{{end}}
-        {{if .Details.Trip.UIShowSpends}}<li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined" aria-hidden="true">payments</span>{{.Details.Trip.SpendsSectionTitle}}</a></li>{{end}}
-        <li class="nav-item"><a href="/trips/{{.Details.Trip.ID}}?open=edit"><span class="material-symbols-outlined" aria-hidden="true">settings</span>Settings</a></li>
-      </ul>
+      </a>
+      {{template "tripSidebarNav" .}}
+      {{template "tripMembersPanel" .}}
       <div class="sidebar-bottom">
         <a class="btn" href="/">Back to Dashboard</a>
         <a class="support-link" href="/">Support</a>
@@ -47,11 +42,12 @@
           <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
-          <a class="budget-mobile-header-btn" href="/trips/{{.Details.Trip.ID}}?open=edit" aria-label="Open trip settings" title="Open trip settings">
+          <a class="budget-mobile-header-btn" href="/trips/{{.Details.Trip.ID}}/settings" aria-label="Open trip settings" title="Open trip settings">
             <span class="material-symbols-outlined" aria-hidden="true">settings</span>
           </a>
         </div>
       </header>
+      <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
 
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
@@ -104,7 +100,7 @@
               {{if not $.Details.Trip.IsArchived}}
               <div class="item-actions flight-card-actions">
                 <button type="button" class="item-action-btn" data-inline-edit-open="flight-edit-{{.ID}}" aria-label="Edit flight: {{if .FlightName}}{{.FlightName}}{{else}}booking{{end}}" title="Edit this flight">Edit</button>
-                <form method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{.ID}}/delete" onsubmit="return confirm('Delete this flight entry?');">
+                <form method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this flight?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete flight" data-confirm-icon="flight_takeoff" data-confirm-variant="danger">
                   <button type="submit" class="item-action-btn danger" aria-label="Delete flight: {{if .FlightName}}{{.FlightName}}{{else}}booking{{end}}" title="Delete this flight">Delete</button>
                 </form>
               </div>
@@ -178,7 +174,7 @@
       <span class="material-symbols-outlined" aria-hidden="true">add</span>
     </button>
     <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
-      <a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>Add Stop</a>
+      {{if .Details.Trip.UIShowItinerary}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}?open=stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>Add Stop</a>{{end}}
       {{if .Details.Trip.UIShowSpends}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/budget#add-expense"><span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>Add {{.Details.Trip.SpendsSectionTitle}}</a>{{end}}
       {{if .Details.Trip.UIShowStay}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add {{.Details.Trip.StaySectionTitle}}</a>{{end}}
       {{if .Details.Trip.UIShowVehicle}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add {{.Details.Trip.VehicleSectionTitle}}</a>{{end}}
@@ -192,6 +188,7 @@
     {{if .Details.Trip.UIShowFlights}}<a class="active" href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span><span>{{.Details.Trip.FlightsSectionTitle}}</span></a>{{end}}
     {{if .Details.Trip.UIShowSpends}}<a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>{{.Details.Trip.SpendsSectionTitle}}</span></a>{{end}}
   </nav>
+  {{template "appConfirmDialog"}}
 </body>
 </html>
 

@@ -44,7 +44,7 @@ $watcher.IncludeSubdirectories = $true
 $watcher.NotifyFilter = [System.IO.NotifyFilters]::LastWrite -bor [System.IO.NotifyFilters]::FileName
 $watcher.EnableRaisingEvents = $true
 
-Write-Host "Watching $Root — .go, .html, .css, .js, .sql changes trigger rebuild. Ctrl+C to stop."
+Write-Host "Watching $Root -- .go, .html, .css, .js, .sql changes trigger rebuild. Ctrl+C to stop."
 Build-And-Start
 
 try {

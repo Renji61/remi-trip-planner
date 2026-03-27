@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
   {{template "themeHeadScript" .}}
   <title>{{.Settings.TripDashboardHeading}} | {{.Settings.AppTitle}}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,13 +18,13 @@
 <body>
   <main class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
+      <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
         <div>
           <h1>{{.Settings.AppTitle}}</h1>
           <p>Serene Navigator</p>
         </div>
-      </div>
+      </a>
       <ul class="nav-list">
         <li class="nav-item active"><a href="/"><span class="material-symbols-outlined">luggage</span>My Trip</a></li>
         <li class="nav-item"><a href="/"><span class="material-symbols-outlined">explore</span>Discover</a></li>
@@ -33,7 +34,8 @@
       <div class="sidebar-bottom">
         <a class="btn" href="/">Plan New Trip</a>
         <a class="support-link" href="/">Support</a>
-        <a class="logout-link" href="/">Logout</a>
+        <a class="support-link" href="/profile">Profile</a>
+        <form method="post" action="/logout" style="margin:0;"><button type="submit" class="logout-link" style="background:none;border:none;padding:0;cursor:pointer;font:inherit;color:inherit;width:100%;text-align:left;">Logout</button></form>
       </div>
     </aside>
 
@@ -52,8 +54,13 @@
             <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
               <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
             </button>
-            <span class="avatar-dot"></span>
-            <span class="avatar">A</span>
+            <a href="/profile" class="avatar-link" title="Profile" aria-label="Open profile">
+              {{if profileAvatarURL .CurrentUser}}
+              <span class="avatar avatar--photo" style="background-image:url('{{profileAvatarURL .CurrentUser}}');" role="img" aria-hidden="true"></span>
+              {{else}}
+              <span class="avatar">{{profileInitial .CurrentUser}}</span>
+              {{end}}
+            </a>
           </div>
         </div>
       </header>
@@ -136,6 +143,26 @@
             {{end}}
             </section>
 
+            {{if .SharedTripCards}}
+            <section class="dashboard-trips-section" data-dashboard-trips-section aria-labelledby="dash-section-shared">
+            <h3 id="dash-section-shared" class="section-title">Shared with you</h3>
+            <div class="{{if $.DashboardListLayout}}trip-list-scroll{{end}}">
+              {{if $.DashboardListLayout}}
+              <div class="trip-list-head" aria-hidden="true">
+                <span class="trip-list-head__cell trip-list-head__cell--dest">Trip destination</span>
+                <span class="trip-list-head__cell">Schedule</span>
+                <span class="trip-list-head__cell">Status</span>
+                <span class="trip-list-head__cell">Budget allocation</span>
+                <span class="trip-list-head__cell trip-list-head__cell--party">Party</span>
+              </div>
+              {{end}}
+              <div class="trip-grid{{if $.DashboardListLayout}} trip-grid--list{{end}}" role="list">
+              {{range .SharedTripCards}}{{template "dashboardTripCard" .}}{{end}}
+              </div>
+            </div>
+            </section>
+            {{end}}
+
             {{if .DraftTripCards}}
             <section class="dashboard-trip-section dashboard-trip-section--draft dashboard-trips-section" data-dashboard-trips-section aria-labelledby="dash-section-draft">
             <h3 id="dash-section-draft" class="section-title">{{if eq (len .DraftTripCards) 1}}Draft Trip{{else}}Draft Trips{{end}}</h3>
@@ -213,7 +240,7 @@
 
 {{define "dashboardTripCard"}}
               {{if .DashboardListLayout}}
-              <article class="trip-card trip-card--list-row" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{formatTripDateRange .StartDate .EndDate}} {{.StatusLabel}} {{.TripSubtitle}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}">
+              <article class="trip-card trip-card--list-row" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{range .Party}}{{.PublicDisplayName}} {{.Username}} {{end}} {{formatTripDateRange .StartDate .EndDate}} {{.StatusLabel}} {{.TripSubtitle}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}">
                 <div class="trip-list-row-desktop">
                 <div class="trip-list-col trip-list-col--dest">
                   <a class="trip-list-dest-link" href="/trips/{{.ID}}" aria-label="View details for {{.Name}}">
@@ -252,7 +279,19 @@
                   <div class="trip-list-budget-bar" role="progressbar" aria-valuenow="{{.BudgetPercent}}" aria-valuemin="0" aria-valuemax="100" aria-label="Budget used: {{.BudgetPercent}} percent"><span class="trip-list-budget-bar-fill trip-list-budget-bar-fill--{{.StatusSlug}}" style="width: {{.BudgetPercent}}%"></span></div>
                 </div>
                 <div class="trip-list-col trip-list-col--party">
+                  {{if gt (len .Party) 0}}
+                  <details class="trip-party-popover">
+                    <summary class="trip-party-stack" aria-label="Travel party for {{.Name}}">
+                      {{range $i, $p := .Party}}{{if lt $i 3}}{{if $p.AvatarPath}}<span class="trip-party-avatar trip-party-avatar--img" style="background-image:url('{{$p.AvatarPath}}')" title="{{$p.PublicDisplayName}}"></span>{{else}}<span class="trip-party-avatar" title="{{$p.PublicDisplayName}}">{{$p.InitialForAvatar}}</span>{{end}}{{end}}{{end}}
+                      {{if gt (len .Party) 3}}<span class="trip-party-avatar trip-party-avatar--more">+{{sub (len .Party) 3}}</span>{{end}}
+                    </summary>
+                    <div class="trip-party-popover-panel">
+                      <ul>{{range .Party}}<li><strong>{{.PublicDisplayName}}</strong>{{if .Username}} <span class="muted">@{{.Username}}</span>{{end}}</li>{{end}}</ul>
+                    </div>
+                  </details>
+                  {{else}}
                   <a class="trip-list-party-add" href="/trips/{{.ID}}" title="Open trip" aria-label="Open trip {{.Name}}"><span class="material-symbols-outlined" aria-hidden="true">add</span></a>
+                  {{end}}
                 </div>
                 </div>
                 <div class="trip-list-row-mobile">
@@ -283,7 +322,7 @@
                 </div>
               </article>
               {{else}}
-              <article class="trip-card" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{formatTripDateRange .StartDate .EndDate}} {{.StatusLabel}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}" aria-labelledby="trip-card-title-{{.ID}} trip-card-status-{{.ID}}">
+              <article class="trip-card" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{range .Party}}{{.PublicDisplayName}} {{.Username}} {{end}} {{formatTripDateRange .StartDate .EndDate}} {{.StatusLabel}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}" aria-labelledby="trip-card-title-{{.ID}} trip-card-status-{{.ID}}">
                 <a class="trip-card-cover-link trip-card-cover-wrap" href="/trips/{{.ID}}" aria-label="View details for {{.Name}}">
                   <span id="trip-card-status-{{.ID}}" class="trip-status-badge trip-status-badge--{{.StatusSlug}}">{{.StatusLabel}}</span>
                   {{if .CoverImage}}
@@ -296,7 +335,7 @@
                 </a>
                 <div class="trip-card-body">
                   <div class="trip-head trip-head--dashboard">
-                    <h3 id="trip-card-title-{{.ID}}">{{.Name}}</h3>
+                    <h3 id="trip-card-title-{{.ID}}">{{.Name}}{{if .HasSharedIcon}}<span class="trip-shared-pill" title="Others are on this trip"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">group</span> Shared</span>{{end}}</h3>
                     <div class="trip-budget-block">
                       <span class="trip-budget-label">Budget</span>
                       <span class="trip-budget-value">{{.CurrencySymbol}}{{formatTripMoney .BudgetTotal}}</span>
@@ -308,6 +347,12 @@
                   </div>
                   {{if .Description}}
                   <p class="muted trip-card-desc">{{.Description}}</p>
+                  {{end}}
+                  {{if gt (len .Party) 0}}
+                  <div class="trip-party-stack" style="margin:10px 0 12px;padding-left:2px;" aria-label="Travel party">
+                    {{range $i, $p := .Party}}{{if lt $i 4}}{{if $p.AvatarPath}}<span class="trip-party-avatar trip-party-avatar--img" style="background-image:url('{{$p.AvatarPath}}')"></span>{{else}}<span class="trip-party-avatar">{{$p.InitialForAvatar}}</span>{{end}}{{end}}{{end}}
+                    {{if gt (len .Party) 4}}<span class="trip-party-avatar trip-party-avatar--more">+{{sub (len .Party) 4}}</span>{{end}}
+                  </div>
                   {{end}}
                   <div class="trip-card-open-wrap">
                     <a class="btn trip-card-open-btn" href="/trips/{{.ID}}" aria-label="Open trip {{.Name}}">Open Trip</a>

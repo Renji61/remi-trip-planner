@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  {{template "themeHeadScript" .}}
+  <title>Email verification | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=24">
+  <script defer src="/static/app.js"></script>
+</head>
+<body class="auth-page">
+  <main class="auth-card-wrap">
+    <article class="card auth-card">
+      {{if .OK}}
+      <h1>Email verified</h1>
+      <p class="muted">You can close this tab or <a href="/">go to your dashboard</a>.</p>
+      {{else}}
+      <h1>Link invalid or expired</h1>
+      <p class="muted">Request a new link from your <a href="/profile">profile</a>.</p>
+      {{end}}
+    </article>
+  </main>
+</body>
+</html>

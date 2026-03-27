@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  {{template "themeHeadScript" .}}
+  <title>Trip settings | {{.Details.Trip.Name}} | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=76">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="/static/app.js?v=73"></script>
+</head>
+<body class="page-trip-settings">
+  <main class="app-shell" aria-label="Trip settings">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Go to dashboard">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </a>
+      {{template "tripSidebarNav" .}}
+      {{template "tripMembersPanel" .}}
+      <div class="sidebar-bottom">
+        <a class="btn" href="/trips/{{.Details.Trip.ID}}">Back to Trip</a>
+        <a class="support-link" href="/">Support</a>
+        <a class="logout-link" href="/">Logout</a>
+      </div>
+    </aside>
+
+    <section class="main trip-settings-main">
+      <header class="trip-mobile-header trip-settings-mobile-header">
+        <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
+          <span class="material-symbols-outlined" aria-hidden="true">home</span>
+        </a>
+        <h2 class="trip-mobile-header-title">Trip settings</h2>
+        <div class="budget-mobile-header-actions">
+          <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+          <a class="budget-mobile-header-btn" href="/trips/{{.Details.Trip.ID}}/settings" aria-label="Trip settings" title="Trip settings" aria-current="page">
+            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+          </a>
+        </div>
+      </header>
+      <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
+
+      <header class="topbar trip-mobile-topbar">
+        <div class="title-group">
+          <h2>Trip settings</h2>
+          <p>Dates, currency, navigation labels, and layout for {{.Details.Trip.Name}}.</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">
+          <a href="/" class="icon-btn" aria-label="Go to dashboard">
+            <span class="material-symbols-outlined" aria-hidden="true">home</span>
+          </a>
+          <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="settings-grid trip-settings-page">
+        {{if .Details.Trip.IsArchived}}
+        <section class="trip-settings-subcard" aria-labelledby="trip-settings-archived-title">
+          <h3 id="trip-settings-archived-title">{{.Details.Trip.Name}}</h3>
+          <p class="muted">Archived trips are read-only. You can still open the trip or delete it from the trip page menu.</p>
+        </section>
+        {{else}}
+        {{if .Saved}}
+        <p class="settings-success trip-settings-flash" role="status">Trip settings saved.</p>
+        {{end}}
+        {{if .Reset}}
+        <p class="settings-success trip-settings-flash" role="status">Trip display options were reset to defaults.</p>
+        {{end}}
+
+        <form id="trip-settings-save-form" method="post" action="/trips/{{.Details.Trip.ID}}/update" class="trip-settings-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <input type="hidden" name="return_to" value="/trips/{{.Details.Trip.ID}}/settings?saved=1">
+
+          <div class="trip-settings-layout">
+            <div class="trip-settings-col-main">
+            <div class="trip-settings-subcard tsi-info" aria-labelledby="trip-settings-info-title">
+              <div class="trip-settings-card-head">
+                <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">info</span>
+                <h3 class="trip-settings-card-title" id="trip-settings-info-title">Trip information</h3>
+              </div>
+              <div class="form-grid trip-settings-form-grid">
+                <label class="full">Trip name<input type="text" name="name" value="{{.Details.Trip.Name}}" required></label>
+                <label class="full">Description<textarea name="description" rows="3" placeholder="Short trip summary">{{.Details.Trip.Description}}</textarea></label>
+                <label>Start date<input type="date" name="start_date" value="{{.Details.Trip.StartDate}}"></label>
+                <label>End date<input type="date" name="end_date" value="{{.Details.Trip.EndDate}}"></label>
+                <label>Currency name<input type="text" name="currency_name" value="{{.CurrencyName}}" placeholder="e.g. PHP"></label>
+                <label>Currency symbol<input type="text" name="currency_symbol" value="{{.CurrencySymbol}}" placeholder="e.g. ₱"></label>
+                <label class="full">Trip cover image URL<input type="url" name="cover_image_url" value="{{.Details.Trip.CoverImage}}" placeholder="https://..."></label>
+              </div>
+            </div>
+
+            <div class="trip-settings-area-body tsi-body">
+              <div class="trip-settings-subcard trip-settings-subcard--layout" aria-labelledby="trip-settings-layout-title">
+                <div class="trip-settings-card-head">
+                  <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">view_quilt</span>
+                  <h3 class="trip-settings-card-title" id="trip-settings-layout-title">Layout order</h3>
+                </div>
+                <p class="muted trip-settings-section-hint">Drag to reorder. The trip hero stays at the top; main sections and sidebar widgets follow these lists on wider screens.</p>
+                <input type="hidden" name="ui_main_section_order" value="{{.UIMainSectionOrderValue}}">
+                <input type="hidden" name="ui_sidebar_widget_order" value="{{.UISidebarWidgetOrderValue}}">
+                <div class="trip-settings-layout-order-split">
+                  <div class="trip-settings-layout-order-col">
+                    <p class="trip-settings-section-label" id="trip-settings-layout-main-label">Main column</p>
+                    <ul class="trip-layout-reorder-list trip-layout-reorder-list--settings" data-trip-reorder-list="ui_main_section_order" aria-labelledby="trip-settings-layout-main-label">
+                      {{range .MainSectionOrder}}
+                      <li class="trip-layout-reorder-item" draggable="true" data-reorder-key="{{.}}">
+                        <span class="trip-layout-reorder-handle material-symbols-outlined" aria-hidden="true">drag_indicator</span>
+                        <span class="trip-layout-reorder-label">{{tripMainSectionLabel .}}</span>
+                        <span class="trip-layout-reorder-actions">
+                          <button type="button" class="trip-layout-reorder-move" data-move="-1" aria-label="Move {{tripMainSectionLabel .}} up"><span class="material-symbols-outlined" aria-hidden="true">expand_less</span></button>
+                          <button type="button" class="trip-layout-reorder-move" data-move="1" aria-label="Move {{tripMainSectionLabel .}} down"><span class="material-symbols-outlined" aria-hidden="true">expand_more</span></button>
+                        </span>
+                      </li>
+                      {{end}}
+                    </ul>
+                  </div>
+                  <div class="trip-settings-layout-order-col">
+                    <p class="trip-settings-section-label" id="trip-settings-layout-sidebar-label">Sidebar widgets</p>
+                    <ul class="trip-layout-reorder-list trip-layout-reorder-list--settings" data-trip-reorder-list="ui_sidebar_widget_order" aria-labelledby="trip-settings-layout-sidebar-label">
+                      {{range .SidebarWidgetOrder}}
+                      <li class="trip-layout-reorder-item" draggable="true" data-reorder-key="{{.}}">
+                        <span class="trip-layout-reorder-handle material-symbols-outlined" aria-hidden="true">drag_indicator</span>
+                        <span class="trip-layout-reorder-label">{{tripSidebarWidgetLabel .}}</span>
+                        {{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}}<span class="trip-layout-reorder-note">(hidden while Spends is off)</span>{{end}}
+                        <span class="trip-layout-reorder-actions">
+                          <button type="button" class="trip-layout-reorder-move" data-move="-1" aria-label="Move {{tripSidebarWidgetLabel .}} up"><span class="material-symbols-outlined" aria-hidden="true">expand_less</span></button>
+                          <button type="button" class="trip-layout-reorder-move" data-move="1" aria-label="Move {{tripSidebarWidgetLabel .}} down"><span class="material-symbols-outlined" aria-hidden="true">expand_more</span></button>
+                        </span>
+                      </li>
+                      {{end}}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div class="trip-settings-subcard trip-settings-subcard--layout trip-settings-subcard--section-visibility" aria-labelledby="trip-settings-section-vis-title">
+                <div class="trip-settings-card-head">
+                  <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">visibility</span>
+                  <h3 class="trip-settings-card-title" id="trip-settings-section-vis-title">Section visibility</h3>
+                </div>
+                <p class="muted trip-settings-section-hint">Show or hide the same blocks as in layout order on the trip page, sidebar, and mobile nav. <strong>Itinerary, Checklist, Stay, Vehicle, Flights, and Spends</strong> (and <strong>custom sidebar links</strong>) are turned on or off from the <strong>Trip sections</strong> card on the right; when a section is off there, its matching switches below are disabled until you turn it back on. Turning off <strong>Itinerary</strong> disables the itinerary block and <strong>Add new stop</strong>; turning off <strong>Checklist</strong> disables the reminder checklist and <strong>Add to checklist</strong>; turning off <strong>Spends</strong> disables budget-related sidebar widgets.</p>
+                <div class="trip-settings-layout-order-split trip-settings-layout-order-split--visibility">
+                  <div class="trip-settings-layout-order-col">
+                    <p class="trip-settings-section-label" id="trip-settings-vis-main-label">Main column</p>
+                    <div class="trip-settings-toggle-list trip-settings-toggle-list--layout-mirror" aria-labelledby="trip-settings-vis-main-label">
+                      {{range .MainSectionOrder}}
+                      {{if or (eq . "itinerary") (eq . "checklist") (eq . "stay") (eq . "vehicle") (eq . "flights") (eq . "spends")}}
+                      <label class="trip-settings-toggle-row trip-settings-toggle-row--compact trip-settings-sec-vis-column-label{{if not (tripSectionEnabled . $.Details.Trip)}} trip-settings-sec-vis-mirror-label--locked{{end}}" data-vis-main-col="{{.}}">
+                        <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripMainSectionVisibilityIcon .}}</span>
+                        <span class="trip-settings-toggle-text">{{tripMainSectionLabel .}}<span class="trip-settings-vis-live-hint"{{if tripSectionEnabled . $.Details.Trip}} hidden{{end}}><span class="trip-settings-vis-lock-hint">(off in Trip sections)</span></span></span>
+                        <span class="trip-settings-switch">
+                          <input type="hidden" name="ui_vis_main_{{.}}" value="0">
+                          <input type="checkbox" name="ui_vis_main_{{.}}" value="1" data-vis-main-col-key="{{.}}" {{if mainSectionVisible . $.Details.Trip}}checked{{end}} {{if not (tripSectionEnabled . $.Details.Trip)}}disabled{{end}}>
+                          <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                        </span>
+                      </label>
+                      {{else}}
+                      <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
+                        <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripMainSectionVisibilityIcon .}}</span>
+                        <span class="trip-settings-toggle-text">{{tripMainSectionLabel .}}</span>
+                        <span class="trip-settings-switch">
+                          <input type="hidden" name="ui_vis_main_{{.}}" value="0">
+                          <input type="checkbox" name="ui_vis_main_{{.}}" value="1" {{if mainSectionVisible . $.Details.Trip}}checked{{end}}>
+                          <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                        </span>
+                      </label>
+                      {{end}}
+                      {{end}}
+                    </div>
+                  </div>
+                  <div class="trip-settings-layout-order-col">
+                    <p class="trip-settings-section-label" id="trip-settings-vis-sidebar-label">Sidebar widgets</p>
+                    <div class="trip-settings-toggle-list trip-settings-toggle-list--layout-mirror">
+                      {{range .SidebarWidgetOrder}}
+                      <label class="trip-settings-toggle-row trip-settings-toggle-row--compact{{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}} trip-settings-toggle-row--muted{{end}}{{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}} trip-settings-toggle-row--muted{{end}}{{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}} trip-settings-toggle-row--muted{{end}}" {{if eq . "add_stop"}}data-itinerary-master-gated="1"{{end}}{{if eq . "checklist"}}data-checklist-master-gated="1"{{end}}{{if or (eq . "budget") (eq . "quick_spends")}}data-spends-master-gated="1"{{end}}>
+                        <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripSidebarWidgetVisibilityIcon .}}</span>
+                        <span class="trip-settings-toggle-text">{{tripSidebarWidgetLabel .}}{{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}} <span class="trip-settings-vis-lock-hint">(Itinerary off)</span>{{end}}{{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}} <span class="trip-settings-vis-lock-hint">(Checklist off)</span>{{end}}{{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}} <span class="trip-settings-vis-lock-hint">(Spends off)</span>{{end}}</span>
+                        <span class="trip-settings-switch">
+                          <input type="hidden" name="ui_vis_sidebar_{{.}}" value="0">
+                          <input type="checkbox" name="ui_vis_sidebar_{{.}}" value="1" {{if sidebarWidgetVisible . $.Details.Trip}}checked{{end}} {{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}}disabled{{end}} {{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}}disabled{{end}} {{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}}disabled{{end}}>
+                          <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                        </span>
+                      </label>
+                      {{end}}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="trip-settings-subcard" aria-labelledby="trip-settings-custom-title">
+                <div class="trip-settings-card-head">
+                  <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">link</span>
+                  <h3 class="trip-settings-card-title" id="trip-settings-custom-title">Custom sidebar links</h3>
+                </div>
+                <p class="muted trip-settings-section-hint">Up to three links in the trip page sidebar (desktop). <strong>https</strong> URLs only. Drag rows or use arrows to set order.</p>
+                <input type="hidden" name="ui_custom_link_slot_order" value="1,2,3">
+                <ul class="trip-layout-reorder-list trip-custom-links-reorder trip-layout-reorder-list--settings" data-trip-reorder-list="ui_custom_link_slot_order" aria-label="Custom link order">
+                  {{range .CustomLinkEditorSlots}}
+                  <li class="trip-layout-reorder-item trip-custom-link-reorder-item" draggable="true" data-reorder-key="{{.N}}">
+                    <span class="trip-layout-reorder-handle material-symbols-outlined" aria-hidden="true">drag_indicator</span>
+                    <div class="trip-custom-link-fields">
+                      <label>Link label<input type="text" name="custom_link_{{.N}}_label" value="{{.Label}}" placeholder="e.g. Hotel booking" maxlength="120" autocomplete="off"></label>
+                      <label>URL<input type="url" name="custom_link_{{.N}}_url" value="{{.URL}}" placeholder="https://…" autocomplete="off"></label>
+                    </div>
+                    <span class="trip-layout-reorder-actions">
+                      <button type="button" class="trip-layout-reorder-move" data-move="-1" aria-label="Move link {{.N}} up"><span class="material-symbols-outlined" aria-hidden="true">expand_less</span></button>
+                      <button type="button" class="trip-layout-reorder-move" data-move="1" aria-label="Move link {{.N}} down"><span class="material-symbols-outlined" aria-hidden="true">expand_more</span></button>
+                    </span>
+                  </li>
+                  {{end}}
+                </ul>
+              </div>
+
+              <div class="trip-settings-subcard" aria-labelledby="trip-settings-rename-title">
+                <p class="trip-settings-section-label" id="trip-settings-rename-title">Rename sections</p>
+                <p class="muted trip-settings-section-hint">Optional labels for navigation (defaults stay if left blank).</p>
+                <div class="form-grid trip-settings-form-grid">
+                  <label>Stay nav label<input type="text" name="ui_label_stay" value="{{.Details.Trip.UILabelStay}}" placeholder="Stay" maxlength="80" autocomplete="off"></label>
+                  <label>Vehicle nav label<input type="text" name="ui_label_vehicle" value="{{.Details.Trip.UILabelVehicle}}" placeholder="Vehicle" maxlength="80" autocomplete="off"></label>
+                  <label>Flights nav label<input type="text" name="ui_label_flights" value="{{.Details.Trip.UILabelFlights}}" placeholder="Flights" maxlength="80" autocomplete="off"></label>
+                  <label>Spends nav label<input type="text" name="ui_label_spends" value="{{.Details.Trip.UILabelSpends}}" placeholder="Spends" maxlength="80" autocomplete="off"></label>
+                </div>
+              </div>
+
+              <div class="trip-settings-subcard" aria-labelledby="trip-settings-display-title">
+                <p class="trip-settings-section-label" id="trip-settings-display-title">Display preferences</p>
+                <div class="form-grid trip-settings-form-grid">
+                  <label class="full">Default expanded itinerary days
+                    <select name="ui_itinerary_expand">
+                      <option value="first" {{if eq .Details.Trip.UIItineraryExpand "first"}}selected{{end}}>First day only</option>
+                      <option value="all" {{if eq .Details.Trip.UIItineraryExpand "all"}}selected{{end}}>All days</option>
+                      <option value="none" {{if eq .Details.Trip.UIItineraryExpand "none"}}selected{{end}}>None (all collapsed)</option>
+                    </select>
+                  </label>
+                  <label class="full">Default expanded spend days (on trip page)
+                    <select name="ui_spends_expand">
+                      <option value="first" {{if eq .Details.Trip.UISpendsExpand "first"}}selected{{end}}>First day only</option>
+                      <option value="all" {{if eq .Details.Trip.UISpendsExpand "all"}}selected{{end}}>All days</option>
+                      <option value="none" {{if eq .Details.Trip.UISpendsExpand "none"}}selected{{end}}>None (all collapsed)</option>
+                    </select>
+                  </label>
+                  <label class="full">Time display on this trip
+                    <select name="ui_time_format">
+                      <option value="12h" {{if eq .Details.Trip.UITimeFormat "24h"}}{{else}}selected{{end}}>12-hour (e.g. 3:00 PM)</option>
+                      <option value="24h" {{if eq .Details.Trip.UITimeFormat "24h"}}selected{{end}}>24-hour (e.g. 15:00)</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="trip-settings-actions-row">
+              <button type="submit" form="trip-settings-save-form" class="trip-settings-save-btn">Save all changes</button>
+              <a class="btn secondary-btn trip-settings-cancel" href="/trips/{{.Details.Trip.ID}}">Cancel</a>
+              <button type="submit" form="trip-settings-reset-form" class="btn secondary-btn trip-settings-reset-inline-btn">Reset Settings</button>
+            </div>
+            </div>
+
+            <div class="trip-settings-col-rail">
+            <div class="trip-settings-subcard tsi-rail-features" aria-labelledby="trip-settings-rail-features-title">
+              <p class="trip-settings-section-label" id="trip-settings-rail-features-title">Trip sections</p>
+                <p class="muted trip-settings-section-hint">Turn these areas on or off for this trip (navigation, pages, and layout). Custom sidebar links appear in the trip sidebar when enabled. Updates in Section visibility follow in real time; save to apply.</p>
+              <div class="trip-settings-toggle-list">
+                <label class="trip-settings-toggle-row">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripMainSectionVisibilityIcon "itinerary"}}</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "itinerary"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_itinerary" value="0">
+                    <input type="checkbox" name="ui_trip_section_itinerary" value="1" data-vis-master="itinerary" {{if .Details.Trip.UIShowItinerary}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripMainSectionVisibilityIcon "checklist"}}</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "checklist"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_checklist" value="0">
+                    <input type="checkbox" name="ui_trip_section_checklist" value="1" data-vis-master="checklist" {{if .Details.Trip.UIShowChecklist}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">hotel</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "stay"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_stay" value="0">
+                    <input type="checkbox" name="ui_trip_section_stay" value="1" data-vis-master="stay" {{if .Details.Trip.UIShowStay}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">directions_car</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "vehicle"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_vehicle" value="0">
+                    <input type="checkbox" name="ui_trip_section_vehicle" value="1" data-vis-master="vehicle" {{if .Details.Trip.UIShowVehicle}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">flight</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "flights"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_flights" value="0">
+                    <input type="checkbox" name="ui_trip_section_flights" value="1" data-vis-master="flights" {{if .Details.Trip.UIShowFlights}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">payments</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "spends"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_spends" value="0">
+                    <input type="checkbox" name="ui_trip_section_spends" value="1" data-vis-master="spends" {{if .Details.Trip.UIShowSpends}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <p class="trip-settings-section-label trip-settings-section-label--nested" id="trip-settings-rail-custom-links-label">Custom sidebar links</p>
+                <label class="trip-settings-toggle-row" aria-labelledby="trip-settings-rail-custom-links-label">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">link</span>
+                  <span class="trip-settings-toggle-text">Show custom links in sidebar</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_show_custom_links" value="0">
+                    <input type="checkbox" name="ui_show_custom_links" value="1" {{if .Details.Trip.UIShowCustomLinks}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div class="trip-settings-assist trip-settings-area-assist tsi-assist" aria-labelledby="trip-settings-assist-title">
+              <div class="trip-settings-assist-copy">
+                <h3 class="trip-settings-assist-title" id="trip-settings-assist-title">Need assistance?</h3>
+                <p class="trip-settings-assist-text">Changes apply after you save. Hidden sections won’t appear in navigation until turned back on.</p>
+                <a class="trip-settings-assist-link" href="/">Back to dashboard</a>
+              </div>
+              <span class="trip-settings-assist-mark" aria-hidden="true">?</span>
+            </div>
+            </div>
+          </div>
+        </form>
+
+        <form id="trip-settings-reset-form" method="post" action="/trips/{{.Details.Trip.ID}}/reset-ui" class="trip-settings-reset-form trip-settings-reset-form--hidden" data-app-confirm data-confirm-title="Reset trip display options?" data-confirm-body="Sections, layout, labels, and custom links return to defaults. Trip name, dates, and currency are not changed." data-confirm-ok="Reset settings" data-confirm-icon="restart_alt" data-confirm-variant="neutral">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <input type="hidden" name="return_to" value="/trips/{{.Details.Trip.ID}}/settings">
+        </form>
+
+        {{end}}
+      </div>
+    </section>
+  </main>
+
+  <div class="mobile-fab-wrap" data-mobile-fab>
+    <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation">
+      <span class="material-symbols-outlined" aria-hidden="true">add</span>
+    </button>
+    <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
+      {{if .Details.Trip.UIShowItinerary}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}?open=stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>Add Stop</a>{{end}}
+      {{if .Details.Trip.UIShowSpends}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/budget#add-expense"><span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>Add {{.Details.Trip.SpendsSectionTitle}}</a>{{end}}
+      {{if .Details.Trip.UIShowStay}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add {{.Details.Trip.StaySectionTitle}}</a>{{end}}
+      {{if .Details.Trip.UIShowVehicle}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add {{.Details.Trip.VehicleSectionTitle}}</a>{{end}}
+      {{if .Details.Trip.UIShowFlights}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>Add {{.Details.Trip.FlightsSectionTitle}}</a>{{end}}
+    </div>
+  </div>
+  <nav class="bottom-nav" aria-label="Trip sections">
+    <a href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined" aria-hidden="true">map</span><span>My Trip</span></a>
+    {{if .Details.Trip.UIShowStay}}<a href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span><span>{{.Details.Trip.StaySectionTitle}}</span></a>{{end}}
+    {{if .Details.Trip.UIShowVehicle}}<a href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span><span>{{.Details.Trip.VehicleSectionTitle}}</span></a>{{end}}
+    {{if .Details.Trip.UIShowFlights}}<a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span><span>{{.Details.Trip.FlightsSectionTitle}}</span></a>{{end}}
+    {{if .Details.Trip.UIShowSpends}}<a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>{{.Details.Trip.SpendsSectionTitle}}</span></a>{{end}}
+  </nav>
+  {{template "appConfirmDialog"}}
+</body>
+</html>

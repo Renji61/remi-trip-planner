@@ -38,6 +38,10 @@ type app struct {
 	staticDir   string
 }
 
+func tripForbiddenOrMissing(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, trips.ErrTripAccessDenied)
+}
+
 // geocodeLocation calls the Nominatim API to resolve a location string into
 // geographic coordinates. Returns (0, 0) silently when geocoding fails so that
 // callers can treat missing coordinates gracefully.
@@ -109,6 +113,10 @@ type dashboardTripCard struct {
 	ScheduleDurationLabel string
 	// DashboardListLayout mirrors settings; required inside {{define "dashboardTripCard"}} where $ is the card, not the page root.
 	DashboardListLayout bool
+	Party               []trips.UserProfile
+	ActiveCollaborators int
+	ViewerIsOwner       bool
+	HasSharedIcon       bool
 }
 
 type dashboardBudgetRollup struct {
@@ -177,11 +185,51 @@ func NewRouter(deps Dependencies) http.Handler {
 				"mainSectionVisible": func(key string, trip trips.Trip) bool {
 					return trips.MainSectionVisible(key, trip)
 				},
+				"tripSectionEnabled": func(key string, trip trips.Trip) bool {
+					switch key {
+					case trips.MainSectionItinerary:
+						return trip.UIShowItinerary
+					case trips.MainSectionChecklist:
+						return trip.UIShowChecklist
+					case trips.MainSectionStay:
+						return trip.UIShowStay
+					case trips.MainSectionVehicle:
+						return trip.UIShowVehicle
+					case trips.MainSectionFlights:
+						return trip.UIShowFlights
+					case trips.MainSectionSpends:
+						return trip.UIShowSpends
+					default:
+						return true
+					}
+				},
 				"sidebarWidgetVisible": func(key string, trip trips.Trip) bool {
 					return trips.SidebarWidgetVisible(key, trip)
 				},
-				"tripMainSectionLabel":   trips.MainSectionLabel,
-				"tripSidebarWidgetLabel": trips.SidebarWidgetLabel,
+				"tripMainSectionLabel":            trips.MainSectionLabel,
+				"tripSidebarWidgetLabel":          trips.SidebarWidgetLabel,
+				"tripMainSectionVisibilityIcon":   trips.MainSectionVisibilityIcon,
+				"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
+				"googleMapsSearchURL":             googleMapsSearchURL,
+				"abbrevMoney":                     abbrevMoney,
+				"profileInitial": func(u trips.User) string {
+					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
+					return p.InitialForAvatar()
+				},
+				"profileAvatarURL": func(u trips.User) string {
+					s := strings.TrimSpace(u.AvatarPath)
+					if s == "" {
+						return ""
+					}
+					if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+						return s
+					}
+					if strings.HasPrefix(s, "/") {
+						return s
+					}
+					return "/" + s
+				},
+				"sub": func(a, b int) int { return a - b },
 			}).
 			ParseGlob("web/templates/*.html"),
 	)
@@ -198,49 +246,87 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Heartbeat("/healthz"))
 	r.Use(noStoreNonStaticGET)
+	r.Use(a.withSession)
 
-	r.Get("/", a.homePage)
-	r.Get("/settings", a.settingsPage)
-	r.Post("/settings", a.saveSettings)
-	r.Post("/settings/theme", a.saveThemeQuick)
-	r.Post("/trips", a.createTrip)
-	r.Get("/trips/{tripID}", a.tripPage)
-	r.Get("/trips/{tripID}/budget", a.budgetPage)
-	r.Get("/trips/{tripID}/budget/transactions", a.budgetTransactionsRows)
-	r.Get("/trips/{tripID}/budget/export", a.exportBudgetReport)
-	r.Post("/trips/{tripID}/update", a.updateTrip)
-	r.Post("/trips/{tripID}/archive", a.archiveTrip)
-	r.Post("/trips/{tripID}/delete", a.deleteTrip)
-	r.Post("/trips/{tripID}/itinerary", a.addItineraryItem)
-	r.Post("/trips/{tripID}/days/{dayNumber}/label", a.saveTripDayLabel)
-	r.Post("/trips/{tripID}/itinerary/{itemID}/update", a.updateItineraryItem)
-	r.Post("/trips/{tripID}/itinerary/{itemID}/delete", a.deleteItineraryItem)
-	r.Get("/trips/{tripID}/accommodation", a.accommodationPage)
-	r.Get("/trips/{tripID}/vehicle-rental", a.vehicleRentalPage)
-	r.Get("/trips/{tripID}/flights", a.flightsPage)
-	r.Post("/trips/{tripID}/accommodation/{lodgingID}/update", a.updateLodging)
-	r.Post("/trips/{tripID}/accommodation/{lodgingID}/delete", a.deleteLodging)
-	r.Post("/trips/{tripID}/accommodation", a.addLodging)
-	r.Post("/trips/{tripID}/vehicle-rental/{rentalID}/update", a.updateVehicleRental)
-	r.Post("/trips/{tripID}/vehicle-rental/{rentalID}/delete", a.deleteVehicleRental)
-	r.Post("/trips/{tripID}/vehicle-rental", a.addVehicleRental)
-	r.Post("/trips/{tripID}/flights/{flightID}/update", a.updateFlight)
-	r.Post("/trips/{tripID}/flights/{flightID}/delete", a.deleteFlight)
-	r.Post("/trips/{tripID}/flights", a.addFlight)
-	r.Post("/trips/{tripID}/lodging/{lodgingID}/update", a.updateLodging)
-	r.Post("/trips/{tripID}/lodging/{lodgingID}/delete", a.deleteLodging)
-	r.Post("/trips/{tripID}/lodging", a.addLodging)
-	r.Get("/trips/{tripID}/lodging", a.redirectLegacyLodgingPath)
-	r.Post("/trips/{tripID}/expenses", a.addExpense)
-	r.Post("/trips/{tripID}/expenses/{expenseID}/update", a.updateExpense)
-	r.Post("/trips/{tripID}/expenses/{expenseID}/delete", a.deleteExpense)
-	r.Post("/trips/{tripID}/checklist", a.addChecklistItem)
-	r.Post("/checklist/{itemID}/update", a.updateChecklistItem)
-	r.Post("/checklist/{itemID}/delete", a.deleteChecklistItem)
-	r.Post("/checklist/{itemID}/toggle", a.toggleChecklistItem)
+	r.Get("/setup", a.setupPage)
+	r.Post("/setup", a.setupSubmit)
+	r.Get("/login", a.loginPage)
+	r.Post("/login", a.loginSubmit)
+	r.Get("/register", a.registerPage)
+	r.Post("/register", a.registerSubmit)
+	r.Post("/logout", a.logout)
+	r.Get("/verify-email", a.verifyEmailPage)
+	r.Get("/invites/accept", a.inviteAcceptPage)
 
-	r.Get("/api/v1/trips/{tripID}/changes", a.listChanges)
-	r.Post("/api/v1/trips/{tripID}/sync", a.syncChanges)
+	r.Group(func(r chi.Router) {
+		r.Use(a.requireRegisteredUser)
+		r.Use(a.verifyCSRF)
+		r.Post("/invites/accept", a.inviteAcceptSubmit)
+		r.Get("/", a.homePage)
+		r.Get("/profile", a.profilePage)
+		r.Post("/profile", a.profileSave)
+		r.Post("/profile/password", a.profilePassword)
+		r.Post("/profile/resend-verify", a.profileResendVerify)
+		r.Get("/settings", a.settingsPage)
+		r.Post("/settings", a.saveSettings)
+		r.Post("/settings/reset-all", a.resetAllSiteSettings)
+		r.Post("/settings/theme", a.saveThemeQuick)
+		r.Post("/trips", a.createTrip)
+
+		r.Route("/trips/{tripID}", func(r chi.Router) {
+			r.Use(a.tripIDAccessMiddleware)
+			r.Get("/", a.tripPage)
+			r.Get("/settings", a.tripSettingsPage)
+			r.Post("/reset-ui", a.resetTripUIPresets)
+			r.Get("/budget", a.budgetPage)
+			r.Get("/budget/transactions", a.budgetTransactionsRows)
+			r.Get("/budget/export", a.exportBudgetReport)
+			r.Post("/update", a.updateTrip)
+			r.Post("/archive", a.archiveTrip)
+			r.Post("/delete", a.deleteTrip)
+			r.Post("/itinerary", a.addItineraryItem)
+			r.Post("/days/{dayNumber}/label", a.saveTripDayLabel)
+			r.Post("/itinerary/{itemID}/update", a.updateItineraryItem)
+			r.Post("/itinerary/{itemID}/delete", a.deleteItineraryItem)
+			r.Get("/accommodation", a.accommodationPage)
+			r.Get("/vehicle-rental", a.vehicleRentalPage)
+			r.Get("/flights", a.flightsPage)
+			r.Post("/accommodation/{lodgingID}/update", a.updateLodging)
+			r.Post("/accommodation/{lodgingID}/delete", a.deleteLodging)
+			r.Post("/accommodation", a.addLodging)
+			r.Post("/vehicle-rental/{rentalID}/update", a.updateVehicleRental)
+			r.Post("/vehicle-rental/{rentalID}/delete", a.deleteVehicleRental)
+			r.Post("/vehicle-rental", a.addVehicleRental)
+			r.Post("/flights/{flightID}/update", a.updateFlight)
+			r.Post("/flights/{flightID}/delete", a.deleteFlight)
+			r.Post("/flights", a.addFlight)
+			r.Post("/lodging/{lodgingID}/update", a.updateLodging)
+			r.Post("/lodging/{lodgingID}/delete", a.deleteLodging)
+			r.Post("/lodging", a.addLodging)
+			r.Get("/lodging", a.redirectLegacyLodgingPath)
+			r.Post("/expenses", a.addExpense)
+			r.Post("/expenses/{expenseID}/update", a.updateExpense)
+			r.Post("/expenses/{expenseID}/delete", a.deleteExpense)
+			r.Post("/checklist", a.addChecklistItem)
+			r.Post("/invite", a.tripInviteCollaborator)
+			r.Post("/invite-link", a.tripCreateInviteLink)
+			r.Post("/members/remove", a.tripRemoveMember)
+			r.Post("/invites/revoke", a.tripRevokeInvite)
+			r.Post("/leave", a.tripLeaveCollaboration)
+			r.Post("/stop-sharing", a.tripStopSharing)
+			r.Post("/hide-archived", a.tripHideArchived)
+		})
+
+		r.Post("/checklist/{itemID}/update", a.updateChecklistItem)
+		r.Post("/checklist/{itemID}/delete", a.deleteChecklistItem)
+		r.Post("/checklist/{itemID}/toggle", a.toggleChecklistItem)
+
+		r.Route("/api/v1/trips/{tripID}", func(r chi.Router) {
+			r.Use(a.tripIDAccessMiddleware)
+			r.Get("/changes", a.listChanges)
+			r.Post("/sync", a.syncChanges)
+		})
+	})
 
 	r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
 		data, _ := os.ReadFile(filepath.Join(a.staticDir, "manifest.webmanifest"))
@@ -250,41 +336,96 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Get("/sw.js", func(w http.ResponseWriter, r *http.Request) {
 		data, _ := os.ReadFile(filepath.Join(a.staticDir, "sw.js"))
 		w.Header().Set("Content-Type", "text/javascript")
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		_, _ = w.Write(data)
 	})
-	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(a.staticDir))))
+	staticFS := http.FileServer(http.Dir(a.staticDir))
+	r.Handle("/static/*", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".css") {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+		staticFS.ServeHTTP(w, r)
+	})))
 
 	return r
 }
 
 func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
-	list, err := a.tripService.ListTrips(r.Context())
+	uid := CurrentUserID(r.Context())
+	list, err := a.tripService.ListVisibleTrips(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	settings, err := a.tripService.GetAppSettings(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	expenseTotals, err := a.tripService.SumExpensesByTrip(r.Context())
+	allTotals, err := a.tripService.SumExpensesByTrip(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	visibleIDs := make(map[string]struct{}, len(list))
+	for _, t := range list {
+		visibleIDs[t.ID] = struct{}{}
+	}
+	expenseTotals := make(map[string]float64)
+	for id, v := range allTotals {
+		if _, ok := visibleIDs[id]; ok {
+			expenseTotals[id] = v
+		}
 	}
 	travelStats, err := a.tripService.ComputeTravelStats(r.Context(), list)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	rollups := a.loadDashboardBudgetRollups(r.Context(), list)
+	rollups := a.loadDashboardBudgetRollups(r.Context(), uid, list)
 	listLayout := settings.DashboardTripLayout == "list"
-	active, draft, archived := buildDashboardTripGroups(list, expenseTotals, rollups, listLayout, time.Now())
 	sortKey := settings.DashboardTripSort
-	sortDashboardCards(active, sortKey)
-	sortDashboardCards(draft, sortKey)
-	sortDashboardCards(archived, sortKey)
+
+	var ownerTrips, sharedTrips []trips.Trip
+	for _, t := range list {
+		if t.OwnerUserID == uid {
+			ownerTrips = append(ownerTrips, t)
+		} else {
+			sharedTrips = append(sharedTrips, t)
+		}
+	}
+	activeO, draftO, archO := buildDashboardTripGroups(ownerTrips, expenseTotals, rollups, listLayout, time.Now())
+	activeS, draftS, archS := buildDashboardTripGroups(sharedTrips, expenseTotals, rollups, listLayout, time.Now())
+	sortDashboardCards(activeO, sortKey)
+	sortDashboardCards(draftO, sortKey)
+	sortDashboardCards(archO, sortKey)
+	sortDashboardCards(activeS, sortKey)
+	sortDashboardCards(draftS, sortKey)
+	sortDashboardCards(archS, sortKey)
+
+	draftMerged := append(append([]dashboardTripCard{}, draftO...), draftS...)
+	sortDashboardCards(draftMerged, sortKey)
+	archMerged := append(append([]dashboardTripCard{}, archO...), archS...)
+	sortDashboardCards(archMerged, sortKey)
+
+	enrichParty := func(cards []dashboardTripCard) {
+		for i := range cards {
+			n, _ := a.tripService.TripCollaboratorCount(r.Context(), cards[i].ID)
+			cards[i].ActiveCollaborators = n
+			cards[i].ViewerIsOwner = cards[i].OwnerUserID == uid
+			cards[i].HasSharedIcon = cards[i].ViewerIsOwner && n > 0
+			cards[i].Party, _ = a.tripService.TripParty(r.Context(), cards[i].ID)
+		}
+	}
+	enrichParty(activeO)
+	enrichParty(draftO)
+	enrichParty(archO)
+	enrichParty(activeS)
+	enrichParty(draftS)
+	enrichParty(archS)
+	enrichParty(draftMerged)
+	enrichParty(archMerged)
 
 	heroPatternClass := ""
 	heroImageURL := ""
@@ -296,11 +437,14 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = a.templates.ExecuteTemplate(w, "home.html", map[string]any{
-		"ActiveTripCards":     active,
-		"DraftTripCards":      draft,
-		"ArchivedTripCards":   archived,
+		"ActiveTripCards":     activeO,
+		"SharedTripCards":     activeS,
+		"DraftTripCards":      draftMerged,
+		"ArchivedTripCards":   archMerged,
 		"Settings":            settings,
 		"TravelStats":         travelStats,
+		"CSRFToken":           CSRFToken(r.Context()),
+		"CurrentUser":         CurrentUser(r.Context()),
 		"Saved":               r.URL.Query().Get("saved") == "1",
 		"HasError":            false,
 		"ErrorText":           "",
@@ -407,10 +551,10 @@ func budgetRollupFromDetails(details trips.TripDetails) (spent, allocated float6
 	return totalSpent, totalBudgeted, int(budgetProgress + 0.5)
 }
 
-func (a *app) loadDashboardBudgetRollups(ctx context.Context, list []trips.Trip) map[string]dashboardBudgetRollup {
+func (a *app) loadDashboardBudgetRollups(ctx context.Context, userID string, list []trips.Trip) map[string]dashboardBudgetRollup {
 	out := make(map[string]dashboardBudgetRollup, len(list))
 	for _, t := range list {
-		det, err := a.tripService.GetTripDetails(ctx, t.ID)
+		det, err := a.tripService.GetTripDetailsVisible(ctx, t.ID, userID)
 		if err != nil {
 			continue
 		}
@@ -554,21 +698,35 @@ func tripDashboardStatus(t trips.Trip, now time.Time) (label, slug string) {
 }
 
 func (a *app) settingsPage(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.tripService.GetAppSettings(r.Context())
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	tripID := strings.TrimSpace(r.URL.Query().Get("trip_id"))
 	_ = a.templates.ExecuteTemplate(w, "settings.html", map[string]any{
-		"Settings": settings,
-		"Saved":    r.URL.Query().Get("saved") == "1",
-		"TripID":   tripID,
+		"Settings":           settings,
+		"CSRFToken":          CSRFToken(r.Context()),
+		"Saved":              r.URL.Query().Get("saved") == "1",
+		"Reset":              r.URL.Query().Get("reset") == "1",
+		"ClearThemeOverride": r.URL.Query().Get("saved") == "1" || r.URL.Query().Get("reset") == "1",
+		"TripID":             tripID,
 	})
 }
 
 func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
+	uid := CurrentUserID(r.Context())
+	if uid == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if err := a.tripService.EnsureUserSettings(r.Context(), uid); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	mapLat, _ := strconv.ParseFloat(r.FormValue("map_default_latitude"), 64)
 	mapLng, _ := strconv.ParseFloat(r.FormValue("map_default_longitude"), 64)
 	mapZoom, _ := strconv.Atoi(r.FormValue("map_default_zoom"))
@@ -583,21 +741,34 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	err := a.tripService.SaveAppSettings(r.Context(), trips.AppSettings{
-		AppTitle:                defaultIfEmpty(r.FormValue("app_title"), "REMI Trip Planner"),
-		TripDashboardHeading:    strings.TrimSpace(r.FormValue("trip_dashboard_heading")),
-		DefaultCurrencyName:     defaultIfEmpty(r.FormValue("default_currency_name"), "USD"),
-		DefaultCurrencySymbol:   defaultIfEmpty(r.FormValue("default_currency_symbol"), "$"),
-		MapDefaultLatitude:      mapLat,
-		MapDefaultLongitude:     mapLng,
-		MapDefaultZoom:          mapZoom,
-		EnableLocationLookup:    enableLookup,
+	app, err := a.tripService.GetAppSettings(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	app.AppTitle = defaultIfEmpty(r.FormValue("app_title"), "REMI Trip Planner")
+	app.MapDefaultLatitude = mapLat
+	app.MapDefaultLongitude = mapLng
+	app.MapDefaultZoom = mapZoom
+	app.EnableLocationLookup = enableLookup
+	if vals, ok := r.PostForm["site_registration_enabled"]; ok && len(vals) > 0 {
+		app.RegistrationEnabled = vals[len(vals)-1] == "1"
+	}
+	if err := a.tripService.SaveAppSettings(r.Context(), app); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := a.tripService.SaveUserUISettings(r.Context(), uid, trips.UserSettings{
+		UserID:                  uid,
 		ThemePreference:         r.FormValue("theme_preference"),
 		DashboardTripLayout:     r.FormValue("dashboard_trip_layout"),
 		DashboardTripSort:       r.FormValue("dashboard_trip_sort"),
 		DashboardHeroBackground: heroBG,
-	})
-	if err != nil {
+		TripDashboardHeading:    strings.TrimSpace(r.FormValue("trip_dashboard_heading")),
+		DefaultCurrencyName:     defaultIfEmpty(r.FormValue("default_currency_name"), "USD"),
+		DefaultCurrencySymbol:   defaultIfEmpty(r.FormValue("default_currency_symbol"), "$"),
+	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -612,6 +783,39 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, returnTo+joiner+"saved=1", http.StatusSeeOther)
 }
 
+func (a *app) resetAllSiteSettings(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	uid := CurrentUserID(r.Context())
+	if uid == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if err := a.tripService.EnsureUserSettings(r.Context(), uid); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := a.tripService.ResetSiteSettingsToDefaults(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := a.tripService.ResetUserUISettingsToDefaults(r.Context(), uid); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	returnTo := strings.TrimSpace(r.FormValue("return_to"))
+	if returnTo == "" || !strings.HasPrefix(returnTo, "/") {
+		returnTo = "/settings"
+	}
+	joiner := "?"
+	if strings.Contains(returnTo, "?") {
+		joiner = "&"
+	}
+	http.Redirect(w, r, returnTo+joiner+"reset=1", http.StatusSeeOther)
+}
+
 // saveThemeQuick updates only theme preference (header toggle). Expects POST theme_preference=light|dark|system.
 func (a *app) saveThemeQuick(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -622,14 +826,31 @@ func (a *app) saveThemeQuick(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
+	uid := CurrentUserID(r.Context())
+	if uid == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	pref := strings.TrimSpace(r.FormValue("theme_preference"))
-	settings, err := a.tripService.GetAppSettings(r.Context())
+	if err := a.tripService.EnsureUserSettings(r.Context(), uid); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	merged, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	settings.ThemePreference = pref
-	if err := a.tripService.SaveAppSettings(r.Context(), settings); err != nil {
+	if err := a.tripService.SaveUserUISettings(r.Context(), uid, trips.UserSettings{
+		UserID:                  uid,
+		ThemePreference:         pref,
+		DashboardTripLayout:     merged.DashboardTripLayout,
+		DashboardTripSort:       merged.DashboardTripSort,
+		DashboardHeroBackground: merged.DashboardHeroBackground,
+		TripDashboardHeading:    merged.TripDashboardHeading,
+		DefaultCurrencyName:     merged.DefaultCurrencyName,
+		DefaultCurrencySymbol:   merged.DefaultCurrencySymbol,
+	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -641,6 +862,7 @@ func (a *app) createTrip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
+	uid := CurrentUserID(r.Context())
 	id, err := a.tripService.CreateTrip(r.Context(), trips.Trip{
 		Name:           r.FormValue("name"),
 		Description:    r.FormValue("description"),
@@ -648,6 +870,7 @@ func (a *app) createTrip(w http.ResponseWriter, r *http.Request) {
 		EndDate:        r.FormValue("end_date"),
 		CurrencyName:   defaultIfEmpty(r.FormValue("currency_name"), "USD"),
 		CurrencySymbol: defaultIfEmpty(r.FormValue("currency_symbol"), "$"),
+		OwnerUserID:    uid,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -658,9 +881,13 @@ func (a *app) createTrip(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("open")), "edit") {
+		http.Redirect(w, r, "/trips/"+tripID+"/settings", http.StatusSeeOther)
+		return
+	}
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -685,9 +912,9 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	details, err = a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err = a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -738,11 +965,23 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	dayGroups := buildItineraryDayGroups(details.Trip.StartDate, details.Itinerary, details.Lodgings, details.Vehicles, details.Flights, dayLabels)
 	expenseGroups := buildExpenseDayGroups(details.Trip.StartDate, details.Expenses)
 	checklistCategoryGroups := buildChecklistCategoryGroups(details.Checklist, trips.ReminderChecklistCategories)
-	settings, err := a.tripService.GetAppSettings(r.Context())
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	acc, _ := TripAccessFromContext(r.Context())
+	party, _ := a.tripService.TripParty(r.Context(), tripID)
+	pendingInvites, _ := a.tripService.ListPendingTripInvitesForTrip(r.Context(), tripID, uid)
+	nCollab, _ := a.tripService.TripCollaboratorCount(r.Context(), tripID)
+	inviteNotice := strings.TrimSpace(r.URL.Query().Get("invite_notice"))
+	inviteEmail := strings.TrimSpace(r.URL.Query().Get("invite_email"))
+	if inviteNotice != "sent" && inviteNotice != "added" {
+		inviteNotice = ""
+		inviteEmail = ""
+	}
+	archivedHidden, _ := a.tripService.IsArchivedTripHiddenOnDashboard(r.Context(), tripID, uid)
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
 	currencyName := defaultIfEmpty(details.Trip.CurrencyName, "USD")
 	vehicleExpenseLocked := map[string]bool{}
@@ -755,25 +994,34 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	}
 	mainSectionOrder := trips.NormalizeMainSectionOrder(details.Trip.UIMainSectionOrder)
 	sidebarWidgetOrder := trips.NormalizeSidebarWidgetOrder(details.Trip.UISidebarWidgetOrder)
+	customSidebarLinks := trips.ParseCustomSidebarLinksJSON(details.Trip.UICustomSidebarLinks)
 	pageData := map[string]any{
-		"Details":                   details,
-		"DayGroups":                 dayGroups,
-		"ExpenseGroups":             expenseGroups,
-		"Settings":                  settings,
-		"CurrencySymbol":            currencySymbol,
-		"CurrencyName":              currencyName,
-		"TotalExpense":              total,
-		"TotalBudgeted":             totalBudgeted,
-		"BudgetProgress":            budgetProgress,
-		"ExpenseCategories":         trips.QuickExpenseCategories,
-		"ChecklistCategories":       trips.ReminderChecklistCategories,
-		"ChecklistGroups":           checklistCategoryGroups,
-		"VehicleExpenseLocked":      vehicleExpenseLocked,
-		"FlightExpenseLocked":       flightExpenseLocked,
-		"MainSectionOrder":          mainSectionOrder,
-		"SidebarWidgetOrder":        sidebarWidgetOrder,
-		"UIMainSectionOrderValue":   trips.JoinMainSectionOrder(mainSectionOrder),
-		"UISidebarWidgetOrderValue": trips.JoinSidebarWidgetOrder(sidebarWidgetOrder),
+		"Details":                     details,
+		"DayGroups":                   dayGroups,
+		"ExpenseGroups":               expenseGroups,
+		"Settings":                    settings,
+		"CurrencySymbol":              currencySymbol,
+		"CurrencyName":                currencyName,
+		"TotalExpense":                total,
+		"TotalBudgeted":               totalBudgeted,
+		"BudgetProgress":              budgetProgress,
+		"ExpenseCategories":           trips.QuickExpenseCategories,
+		"ChecklistCategories":         trips.ReminderChecklistCategories,
+		"ChecklistGroups":             checklistCategoryGroups,
+		"VehicleExpenseLocked":        vehicleExpenseLocked,
+		"FlightExpenseLocked":         flightExpenseLocked,
+		"MainSectionOrder":            mainSectionOrder,
+		"SidebarWidgetOrder":          sidebarWidgetOrder,
+		"CustomSidebarLinks":          customSidebarLinks,
+		"TripAccess":                  acc,
+		"Party":                       party,
+		"PendingInvites":              pendingInvites,
+		"CollaboratorCount":           nCollab,
+		"InviteNotice":                inviteNotice,
+		"InviteNoticeEmail":           inviteEmail,
+		"ArchivedHiddenFromDashboard": archivedHidden,
+		"CSRFToken":                   CSRFToken(r.Context()),
+		"SidebarNavActive":            "trip",
 	}
 	var buf bytes.Buffer
 	if err := a.templates.ExecuteTemplate(&buf, "trip.html", pageData); err != nil {
@@ -784,11 +1032,57 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, &buf)
 }
 
-func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
+func (a *app) tripSettingsPage(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	t, err := a.tripService.GetTrip(r.Context(), tripID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	currencySymbol := defaultIfEmpty(t.CurrencySymbol, "$")
+	currencyName := defaultIfEmpty(t.CurrencyName, "USD")
+	mainSectionOrder := trips.NormalizeMainSectionOrder(t.UIMainSectionOrder)
+	sidebarWidgetOrder := trips.NormalizeSidebarWidgetOrder(t.UISidebarWidgetOrder)
+	pageData := map[string]any{
+		"Details":                   trips.TripDetails{Trip: t},
+		"Settings":                  settings,
+		"CSRFToken":                 CSRFToken(r.Context()),
+		"CurrencySymbol":            currencySymbol,
+		"CurrencyName":              currencyName,
+		"MainSectionOrder":          mainSectionOrder,
+		"SidebarWidgetOrder":        sidebarWidgetOrder,
+		"UIMainSectionOrderValue":   trips.JoinMainSectionOrder(mainSectionOrder),
+		"UISidebarWidgetOrderValue": trips.JoinSidebarWidgetOrder(sidebarWidgetOrder),
+		"CustomLinkEditorSlots":     trips.CustomLinkEditorSlots(t.UICustomSidebarLinks),
+		"Saved":                     r.URL.Query().Get("saved") == "1",
+		"Reset":                     r.URL.Query().Get("reset") == "1",
+		"HideSettingsNavOnMobile":   true,
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, trips.TripDetails{Trip: t}, pageData, "settings")
+	var buf bytes.Buffer
+	if err := a.templates.ExecuteTemplate(&buf, "trip_settings.html", pageData); err != nil {
+		log.Printf("trip settings page template: %v", err)
+		http.Error(w, "Could not render trip settings.", http.StatusInternalServerError)
+		return
+	}
+	_, _ = io.Copy(w, &buf)
+}
+
+func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
+	if err != nil {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -799,7 +1093,8 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settings, err := a.tripService.GetAppSettings(r.Context())
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1065,9 +1360,10 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 
 	canShowAll := totalTx > len(transactions)
 
-	_ = a.templates.ExecuteTemplate(w, "budget.html", map[string]any{
+	pageData := map[string]any{
 		"Trip":                   details.Trip,
 		"Settings":               settings,
+		"CSRFToken":              CSRFToken(r.Context()),
 		"CurrencySymbol":         currencySymbol,
 		"ExpenseCategories":      trips.QuickExpenseCategories,
 		"TotalSpent":             totalSpent,
@@ -1086,7 +1382,9 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		"HasTransactions":        len(transactions) > 0,
 		"CanShowAllTransactions": canShowAll,
 		"BudgetInitialLimit":     initialLimit,
-	})
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "budget")
+	_ = a.templates.ExecuteTemplate(w, "budget.html", pageData)
 }
 
 func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
@@ -1106,21 +1404,15 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Error(w, "trip not found", http.StatusNotFound)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	settings, err := a.tripService.GetAppSettings(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_ = settings // used only for template consistency
 
 	// Pending vehicle expenses are pay-at-pickup costs that should not be counted as "spent" yet.
 	now := time.Now()
@@ -1218,9 +1510,9 @@ func (a *app) exportBudgetReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Error(w, "trip not found", http.StatusNotFound)
 			return
 		}
@@ -1518,6 +1810,16 @@ func (a *app) redirectIfTripSectionDisabled(w http.ResponseWriter, r *http.Reque
 			http.Redirect(w, r, "/trips/"+trip.ID, http.StatusSeeOther)
 			return true
 		}
+	case "itinerary":
+		if !trip.SectionEnabledItinerary() {
+			http.Redirect(w, r, "/trips/"+trip.ID, http.StatusSeeOther)
+			return true
+		}
+	case "checklist":
+		if !trip.SectionEnabledChecklist() {
+			http.Redirect(w, r, "/trips/"+trip.ID, http.StatusSeeOther)
+			return true
+		}
 	}
 	return false
 }
@@ -1558,10 +1860,34 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	existing.CoverImage = r.FormValue("cover_image_url")
 	existing.CurrencyName = defaultIfEmpty(r.FormValue("currency_name"), "USD")
 	existing.CurrencySymbol = defaultIfEmpty(r.FormValue("currency_symbol"), "$")
-	existing.UIShowStay = formTriSectionOn(r, "ui_show_stay")
-	existing.UIShowVehicle = formTriSectionOn(r, "ui_show_vehicle")
-	existing.UIShowFlights = formTriSectionOn(r, "ui_show_flights")
-	existing.UIShowSpends = formTriSectionOn(r, "ui_show_spends")
+	existing.UIShowItinerary = formTriSectionOn(r, "ui_trip_section_itinerary")
+	existing.UIShowChecklist = formTriSectionOn(r, "ui_trip_section_checklist")
+	var mainHidden []string
+	for _, k := range trips.DefaultMainSectionOrder {
+		switch k {
+		case trips.MainSectionStay:
+			existing.UIShowStay = formTriSectionOn(r, "ui_trip_section_stay")
+		case trips.MainSectionVehicle:
+			existing.UIShowVehicle = formTriSectionOn(r, "ui_trip_section_vehicle")
+		case trips.MainSectionFlights:
+			existing.UIShowFlights = formTriSectionOn(r, "ui_trip_section_flights")
+		case trips.MainSectionSpends:
+			existing.UIShowSpends = formTriSectionOn(r, "ui_trip_section_spends")
+		}
+		visOn := formTriSectionOn(r, "ui_vis_main_"+k)
+		if !visOn {
+			mainHidden = append(mainHidden, k)
+		}
+	}
+	existing.UIMainSectionHidden = strings.Join(mainHidden, ",")
+
+	var sidebarHidden []string
+	for _, k := range trips.DefaultSidebarWidgetOrder {
+		if !formTriSectionOn(r, "ui_vis_sidebar_"+k) {
+			sidebarHidden = append(sidebarHidden, k)
+		}
+	}
+	existing.UISidebarWidgetHidden = strings.Join(sidebarHidden, ",")
 	itExp := strings.ToLower(strings.TrimSpace(r.FormValue("ui_itinerary_expand")))
 	if itExp != "all" && itExp != "none" {
 		itExp = "first"
@@ -1583,6 +1909,13 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	existing.UILabelSpends = strings.TrimSpace(r.FormValue("ui_label_spends"))
 	existing.UIMainSectionOrder = trips.JoinMainSectionOrder(trips.NormalizeMainSectionOrder(r.FormValue("ui_main_section_order")))
 	existing.UISidebarWidgetOrder = trips.JoinSidebarWidgetOrder(trips.NormalizeSidebarWidgetOrder(r.FormValue("ui_sidebar_widget_order")))
+	existing.UIShowCustomLinks = formTriSectionOn(r, "ui_show_custom_links")
+	customLinks, err := trips.CustomSidebarLinksFromForm(r.FormValue("ui_custom_link_slot_order"), func(k string) string { return r.FormValue(k) })
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	existing.UICustomSidebarLinks = trips.EncodeCustomSidebarLinksJSON(customLinks)
 
 	err = a.tripService.UpdateTrip(r.Context(), existing)
 	if err != nil {
@@ -1597,11 +1930,45 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if ret := strings.TrimSpace(r.FormValue("return_to")); ret != "" && isSafeReturnForTrip(ret, tripID) {
+		http.Redirect(w, r, ret, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/trips/"+tripID, http.StatusSeeOther)
+}
+
+func (a *app) resetTripUIPresets(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	if err := a.tripService.ResetTripUIPresets(r.Context(), tripID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	returnTo := strings.TrimSpace(r.FormValue("return_to"))
+	if returnTo != "" && isSafeReturnForTrip(returnTo, tripID) {
+		joiner := "?"
+		if strings.Contains(returnTo, "?") {
+			joiner = "&"
+		}
+		http.Redirect(w, r, returnTo+joiner+"reset=1", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/trips/"+tripID+"/settings?reset=1", http.StatusSeeOther)
 }
 
 func (a *app) archiveTrip(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
+	if acc, ok := TripAccessFromContext(r.Context()); !ok || !acc.IsOwner {
+		http.Error(w, "only the owner can archive this trip", http.StatusForbidden)
+		return
+	}
 	if err := a.tripService.ArchiveTrip(r.Context(), tripID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -1619,6 +1986,10 @@ func (a *app) archiveTrip(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) deleteTrip(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
+	if acc, ok := TripAccessFromContext(r.Context()); !ok || !acc.IsOwner {
+		http.Error(w, "only the owner can delete this trip", http.StatusForbidden)
+		return
+	}
 	if err := a.tripService.DeleteTrip(r.Context(), tripID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -1640,6 +2011,9 @@ func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "itinerary") {
 		return
 	}
 	day, err := dayNumberFromDate(trip.StartDate, trip.EndDate, r.FormValue("itinerary_date"))
@@ -1688,6 +2062,18 @@ func (a *app) saveTripDayLabel(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseMultipartForm(2 << 20)
 	} else {
 		_ = r.ParseForm()
+	}
+	trip, err := a.tripService.GetTrip(r.Context(), tripID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "itinerary") {
+		return
 	}
 	label := strings.TrimSpace(r.FormValue("day_label"))
 	if err := a.tripService.SaveTripDayLabel(r.Context(), tripID, dayNumber, label); err != nil {
@@ -1749,9 +2135,9 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	itemID := chi.URLParam(r, "itemID")
 	_ = r.ParseForm()
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -1759,6 +2145,9 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trip := details.Trip
+	if a.redirectIfTripSectionDisabled(w, r, trip, "itinerary") {
+		return
+	}
 	if l, ok := trips.LodgingByItineraryItemID(details.Lodgings, details.Itinerary)[itemID]; ok && l.ID != "" {
 		http.Error(w, "This stop is linked to Accommodation. Use the accommodation form opened from Edit on this item.", http.StatusBadRequest)
 		return
@@ -1806,13 +2195,16 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 func (a *app) deleteItineraryItem(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	itemID := chi.URLParam(r, "itemID")
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "itinerary") {
 		return
 	}
 	if l, ok := trips.LodgingByItineraryItemID(details.Lodgings, details.Itinerary)[itemID]; ok && l.ID != "" {
@@ -1888,6 +2280,18 @@ func (a *app) deleteExpense(w http.ResponseWriter, r *http.Request) {
 func (a *app) addChecklistItem(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	_ = r.ParseForm()
+	trip, err := a.tripService.GetTrip(r.Context(), tripID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "checklist") {
+		return
+	}
 	category := strings.TrimSpace(r.FormValue("category"))
 	if category == "" {
 		category = "Packing List"
@@ -1943,9 +2347,9 @@ func (a *app) redirectLegacyLodgingPath(w http.ResponseWriter, r *http.Request) 
 
 func (a *app) accommodationPage(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -1955,17 +2359,21 @@ func (a *app) accommodationPage(w http.ResponseWriter, r *http.Request) {
 	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "stay") {
 		return
 	}
-	settings, err := a.tripService.GetAppSettings(r.Context())
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
-	_ = a.templates.ExecuteTemplate(w, "accommodation.html", map[string]any{
+	pageData := map[string]any{
 		"Details":        details,
 		"Settings":       settings,
+		"CSRFToken":      CSRFToken(r.Context()),
 		"CurrencySymbol": currencySymbol,
-	})
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "stay")
+	_ = a.templates.ExecuteTemplate(w, "accommodation.html", pageData)
 }
 
 func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
@@ -2224,9 +2632,9 @@ func (a *app) deleteLodging(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) vehicleRentalPage(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -2239,9 +2647,9 @@ func (a *app) vehicleRentalPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	details, err = a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err = a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -2251,17 +2659,21 @@ func (a *app) vehicleRentalPage(w http.ResponseWriter, r *http.Request) {
 	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "vehicle") {
 		return
 	}
-	settings, err := a.tripService.GetAppSettings(r.Context())
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
-	_ = a.templates.ExecuteTemplate(w, "vehicle_rental.html", map[string]any{
+	pageData := map[string]any{
 		"Details":        details,
 		"Settings":       settings,
+		"CSRFToken":      CSRFToken(r.Context()),
 		"CurrencySymbol": currencySymbol,
-	})
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "vehicle")
+	_ = a.templates.ExecuteTemplate(w, "vehicle_rental.html", pageData)
 }
 
 func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
@@ -2557,9 +2969,9 @@ func (a *app) deleteVehicleRental(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) flightsPage(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	details, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -2572,9 +2984,9 @@ func (a *app) flightsPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	details, err = a.tripService.GetTripDetails(r.Context(), tripID)
+	details, err = a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -2584,17 +2996,21 @@ func (a *app) flightsPage(w http.ResponseWriter, r *http.Request) {
 	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "flights") {
 		return
 	}
-	settings, err := a.tripService.GetAppSettings(r.Context())
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
-	_ = a.templates.ExecuteTemplate(w, "flights.html", map[string]any{
+	pageData := map[string]any{
 		"Details":        details,
 		"Settings":       settings,
+		"CSRFToken":      CSRFToken(r.Context()),
 		"CurrencySymbol": currencySymbol,
-	})
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "flights")
+	_ = a.templates.ExecuteTemplate(w, "flights.html", pageData)
 }
 
 func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
@@ -2887,6 +3303,27 @@ func (a *app) deleteFlight(w http.ResponseWriter, r *http.Request) {
 func (a *app) toggleChecklistItem(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemID")
 	_ = r.ParseForm()
+	item, err := a.tripService.GetChecklistItem(r.Context(), itemID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	trip, err := a.tripService.GetTrip(r.Context(), item.TripID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "checklist") {
+		return
+	}
 	done := r.FormValue("done") == "true"
 	if err := a.tripService.ToggleChecklistItem(r.Context(), itemID, done); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -2906,11 +3343,32 @@ func (a *app) toggleChecklistItem(w http.ResponseWriter, r *http.Request) {
 func (a *app) updateChecklistItem(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemID")
 	_ = r.ParseForm()
+	existing, err := a.tripService.GetChecklistItem(r.Context(), itemID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	trip, err := a.tripService.GetTrip(r.Context(), existing.TripID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "checklist") {
+		return
+	}
 	category := strings.TrimSpace(r.FormValue("category"))
 	if category == "" {
 		category = "Packing List"
 	}
-	if err := a.tripService.UpdateChecklistItem(r.Context(), trips.ChecklistItem{
+	if err = a.tripService.UpdateChecklistItem(r.Context(), trips.ChecklistItem{
 		ID:       itemID,
 		Category: category,
 		Text:     strings.TrimSpace(r.FormValue("text")),
@@ -2931,6 +3389,27 @@ func (a *app) updateChecklistItem(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) deleteChecklistItem(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemID")
+	existing, err := a.tripService.GetChecklistItem(r.Context(), itemID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	trip, err := a.tripService.GetTrip(r.Context(), existing.TripID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "checklist") {
+		return
+	}
 	if err := a.tripService.DeleteChecklistItem(r.Context(), itemID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -2975,6 +3454,22 @@ func (a *app) syncChanges(w http.ResponseWriter, r *http.Request) {
 		"server_changes": changes,
 		"message":        "prototype sync endpoint; client writes can be queued and replayed using last-write-wins",
 	})
+}
+
+// mergeTripSidebarContext adds Details, CustomSidebarLinks, TripAccess, Party, PendingInvites, and SidebarNavActive
+// for shared trip sidebar templates (tripSidebarNav, tripMembersPanel).
+func (a *app) mergeTripSidebarContext(ctx context.Context, r *http.Request, tripID string, details trips.TripDetails, into map[string]any, sidebarNavActive string) {
+	uid := CurrentUserID(ctx)
+	acc, _ := TripAccessFromContext(ctx)
+	party, _ := a.tripService.TripParty(ctx, tripID)
+	pendingInvites, _ := a.tripService.ListPendingTripInvitesForTrip(ctx, tripID, uid)
+	customSidebarLinks := trips.ParseCustomSidebarLinksJSON(details.Trip.UICustomSidebarLinks)
+	into["Details"] = details
+	into["CustomSidebarLinks"] = customSidebarLinks
+	into["TripAccess"] = acc
+	into["Party"] = party
+	into["PendingInvites"] = pendingInvites
+	into["SidebarNavActive"] = sidebarNavActive
 }
 
 func defaultIfEmpty(value, fallback string) string {

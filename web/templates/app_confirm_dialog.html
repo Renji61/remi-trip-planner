@@ -1,0 +1,15 @@
+{{define "appConfirmDialog"}}
+<dialog class="app-confirm-dialog" id="dialog-confirm-action" aria-labelledby="dialog-confirm-action-title">
+  <div class="app-confirm-dialog__panel">
+    <div class="app-confirm-dialog__icon-wrap" aria-hidden="true">
+      <span class="material-symbols-outlined app-confirm-dialog__icon" id="dialog-confirm-action-icon">help</span>
+    </div>
+    <h3 class="app-confirm-dialog__title" id="dialog-confirm-action-title">Confirm</h3>
+    <p class="app-confirm-dialog__body" id="dialog-confirm-action-desc" hidden></p>
+    <div class="app-confirm-dialog__actions">
+      <button type="button" class="secondary-btn app-confirm-dialog__btn" data-confirm-cancel autofocus>Cancel</button>
+      <button type="button" class="btn app-confirm-dialog__btn app-confirm-dialog__btn--danger" id="dialog-confirm-action-ok" data-confirm-ok>Confirm</button>
+    </div>
+  </div>
+</dialog>
+{{end}}

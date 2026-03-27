@@ -56,7 +56,9 @@ func (t Trip) SpendsDayDefaultOpen(index int) bool {
 }
 
 // SectionEnabled reports whether a trip sub-area is shown and reachable.
-func (t Trip) SectionEnabledStay() bool    { return t.UIShowStay }
-func (t Trip) SectionEnabledVehicle() bool { return t.UIShowVehicle }
-func (t Trip) SectionEnabledFlights() bool { return t.UIShowFlights }
-func (t Trip) SectionEnabledSpends() bool  { return t.UIShowSpends }
+func (t Trip) SectionEnabledStay() bool      { return t.UIShowStay }
+func (t Trip) SectionEnabledVehicle() bool   { return t.UIShowVehicle }
+func (t Trip) SectionEnabledFlights() bool   { return t.UIShowFlights }
+func (t Trip) SectionEnabledSpends() bool    { return t.UIShowSpends }
+func (t Trip) SectionEnabledItinerary() bool { return t.UIShowItinerary }
+func (t Trip) SectionEnabledChecklist() bool { return t.UIShowChecklist }

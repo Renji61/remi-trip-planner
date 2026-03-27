@@ -117,29 +117,106 @@ func containsString(ss []string, s string) bool {
 	return false
 }
 
+func parseCommaKeySet(raw string) map[string]bool {
+	m := make(map[string]bool)
+	for _, tok := range strings.Split(raw, ",") {
+		k := strings.ToLower(strings.TrimSpace(tok))
+		if k != "" {
+			m[k] = true
+		}
+	}
+	return m
+}
+
 // MainSectionVisible returns whether a normalized main section should render for this trip.
 func MainSectionVisible(key string, t Trip) bool {
 	switch key {
-	case MainSectionSpends:
-		return t.UIShowSpends
+	case MainSectionItinerary:
+		if !t.UIShowItinerary {
+			return false
+		}
+	case MainSectionChecklist:
+		if !t.UIShowChecklist {
+			return false
+		}
 	case MainSectionStay:
-		return t.UIShowStay
+		if !t.UIShowStay {
+			return false
+		}
 	case MainSectionVehicle:
-		return t.UIShowVehicle
+		if !t.UIShowVehicle {
+			return false
+		}
 	case MainSectionFlights:
-		return t.UIShowFlights
-	default:
-		return true
+		if !t.UIShowFlights {
+			return false
+		}
+	case MainSectionSpends:
+		if !t.UIShowSpends {
+			return false
+		}
 	}
+	if strings.TrimSpace(t.UIMainSectionHidden) != "" {
+		return !parseCommaKeySet(t.UIMainSectionHidden)[key]
+	}
+	return true
 }
 
 // SidebarWidgetVisible returns whether a sidebar widget should render.
 func SidebarWidgetVisible(key string, t Trip) bool {
-	switch key {
-	case SidebarBudget, SidebarQuickSpends:
-		return t.UIShowSpends
-	default:
+	if !t.UIShowItinerary && key == SidebarAddStop {
+		return false
+	}
+	if !t.UIShowChecklist && key == SidebarAddChecklist {
+		return false
+	}
+	if !t.UIShowSpends && (key == SidebarBudget || key == SidebarQuickSpends) {
+		return false
+	}
+	if strings.TrimSpace(t.UISidebarWidgetHidden) != "" {
+		if parseCommaKeySet(t.UISidebarWidgetHidden)[key] {
+			return false
+		}
 		return true
+	}
+	return true
+}
+
+// MainSectionVisibilityIcon is a Material Symbols name for trip settings visibility rows.
+func MainSectionVisibilityIcon(key string) string {
+	switch key {
+	case MainSectionMap:
+		return "map"
+	case MainSectionItinerary:
+		return "route"
+	case MainSectionSpends:
+		return "payments"
+	case MainSectionChecklist:
+		return "checklist"
+	case MainSectionStay:
+		return "hotel"
+	case MainSectionVehicle:
+		return "directions_car"
+	case MainSectionFlights:
+		return "flight"
+	default:
+		return "widgets"
+	}
+}
+
+// SidebarWidgetVisibilityIcon is a Material Symbols name for sidebar visibility rows.
+func SidebarWidgetVisibilityIcon(key string) string {
+	switch key {
+	case SidebarAddStop:
+		return "pin_drop"
+	case SidebarBudget:
+		return "account_balance_wallet"
+	case SidebarQuickSpends:
+		return "receipt_long"
+	case SidebarAddChecklist:
+		return "playlist_add"
+	default:
+		return "widgets"
 	}
 }
 

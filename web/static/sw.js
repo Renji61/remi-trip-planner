@@ -1,4 +1,4 @@
-const CACHE = "remi-trip-planner-v14";
+const CACHE = "remi-trip-planner-v15";
 // Do not precache "/" — HTML must always come from the network so UI updates (templates) are not stuck on an old install snapshot.
 const CORE_ASSETS = [
   "/static/app.css",

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  {{template "themeHeadScript" .}}
+  <title>Sign in | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=42">
+  <script defer src="/static/app.js"></script>
+</head>
+<body class="auth-page">
+  <header class="trip-mobile-header auth-page-mobile-header" aria-label="Sign in">
+    <span class="auth-page-mobile-header-spacer" aria-hidden="true"></span>
+    <h2 class="trip-mobile-header-title">Sign in</h2>
+    <div class="budget-mobile-header-actions">
+      <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+        <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+      </button>
+    </div>
+  </header>
+  <header class="auth-page-desktop-topbar topbar" aria-label="Page tools">
+    <div class="title-group auth-page-desktop-topbar-spacer" aria-hidden="true"></div>
+    <div class="topbar-right topbar-right--tools">
+      <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+        <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+      </button>
+    </div>
+  </header>
+  <main class="auth-card-wrap">
+    <article class="card auth-card">
+      <div class="brand auth-brand">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>Sign in</h1>
+          <p class="muted">{{.Settings.AppTitle}}</p>
+        </div>
+      </div>
+      {{if eq .Error "1"}}<p class="settings-field-hint error" role="alert">Invalid email, username, or password.</p>{{end}}
+      <form method="post" action="/login" class="form-grid">
+        {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
+        <label class="full">Email or username
+          <input type="text" name="identifier" required autocomplete="username">
+        </label>
+        <label class="full">Password
+          <input type="password" name="password" required autocomplete="current-password">
+        </label>
+        <button type="submit" class="full">Sign in</button>
+      </form>
+      {{if .RegistrationEnabled}}
+      <p class="auth-card-footer muted full">New here? <a class="auth-inline-link" href="{{.RegisterURL}}">Register</a> to create an account.</p>
+      {{end}}
+    </article>
+  </main>
+</body>
+</html>

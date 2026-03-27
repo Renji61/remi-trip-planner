@@ -17,21 +17,34 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 	tmpl := template.Must(
 		template.New("").
 			Funcs(template.FuncMap{
-				"formatDateTime":         func(s string) string { return s },
-				"formatUIDate":           func(s string) string { return s },
-				"formatTripDateTime":     func(_ trips.Trip, s string) string { return s },
-				"formatTripClock":        func(_ trips.Trip, s string) string { return s },
-				"formatTripDateRange":    func(a, b string) string { return a + "–" + b },
-				"formatTripDateShort":    func(a, b string) string { return "Jan 1 – 7" },
-				"formatTripMoney":        func(f float64) string { return fmt.Sprintf("%.0f", f) },
-				"expenseCategoryStyle":   func(s string) string { return "" },
-				"expenseCategoryIcon":    func(s string) string { return "" },
-				"listContains":           func(a string, b []string) bool { return false },
-				"hasPrefix":              strings.HasPrefix,
-				"mainSectionVisible":     func(string, trips.Trip) bool { return true },
-				"sidebarWidgetVisible":   func(string, trips.Trip) bool { return true },
-				"tripMainSectionLabel":   func(s string) string { return s },
-				"tripSidebarWidgetLabel": func(s string) string { return s },
+				"formatDateTime":                  func(s string) string { return s },
+				"formatUIDate":                    func(s string) string { return s },
+				"formatTripDateTime":              func(_ trips.Trip, s string) string { return s },
+				"formatTripClock":                 func(_ trips.Trip, s string) string { return s },
+				"formatTripDateRange":             func(a, b string) string { return a + "–" + b },
+				"formatTripDateShort":             func(a, b string) string { return "Jan 1 – 7" },
+				"formatTripMoney":                 func(f float64) string { return fmt.Sprintf("%.0f", f) },
+				"abbrevMoney":                     func(sym string, f float64) string { return sym + fmt.Sprintf("%.2f", f) },
+				"expenseCategoryStyle":            func(s string) string { return "" },
+				"expenseCategoryIcon":             func(s string) string { return "" },
+				"listContains":                    func(a string, b []string) bool { return false },
+				"hasPrefix":                       strings.HasPrefix,
+				"mainSectionVisible":              func(string, trips.Trip) bool { return true },
+				"tripSectionEnabled":              func(string, trips.Trip) bool { return true },
+				"sidebarWidgetVisible":            func(string, trips.Trip) bool { return true },
+				"tripMainSectionLabel":            func(s string) string { return s },
+				"tripSidebarWidgetLabel":          func(s string) string { return s },
+				"tripMainSectionVisibilityIcon":   trips.MainSectionVisibilityIcon,
+				"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
+				"googleMapsSearchURL": func(lat, lng float64, hint string) string {
+					return ""
+				},
+				"profileInitial": func(u trips.User) string {
+					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
+					return p.InitialForAvatar()
+				},
+				"profileAvatarURL": func(u trips.User) string { return "" },
+				"sub":              func(a, b int) int { return a - b },
 			}).
 			ParseGlob(filepath.Join(root, "web", "templates", "*.html")),
 	)
@@ -57,6 +70,7 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 
 	data := map[string]any{
 		"ActiveTripCards":   []dashboardTripCard{card},
+		"SharedTripCards":   []dashboardTripCard(nil),
 		"DraftTripCards":    []dashboardTripCard(nil),
 		"ArchivedTripCards": []dashboardTripCard(nil),
 		"Settings": trips.AppSettings{
@@ -74,6 +88,8 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 		"Saved":               false,
 		"HasError":            false,
 		"ErrorText":           "",
+		"CSRFToken":           "test-csrf",
+		"CurrentUser":         trips.User{DisplayName: "Test", Username: "test"},
 	}
 
 	var buf bytes.Buffer

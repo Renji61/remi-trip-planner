@@ -1,10 +1,13 @@
 bin/
+tmp/
 data/
 server.exe
 *.exe
 
-# IDE / local agent artifacts
-.cursor/
+# IDE / local agent artifacts (keep shared Cursor rules)
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 
 # Runtime-generated uploads
 web/static/uploads/
@@ -21,3 +24,4 @@ coverage.html
 # OS/editor noise
 .DS_Store
 Thumbs.db
+*~

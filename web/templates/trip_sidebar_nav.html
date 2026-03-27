@@ -1,0 +1,13 @@
+{{define "tripSidebarNav"}}
+<ul class="nav-list">
+  <li class="nav-item {{if eq .SidebarNavActive "trip"}}active{{end}}"><a href="/trips/{{.Details.Trip.ID}}" {{if eq .SidebarNavActive "trip"}}aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">luggage</span>My Trip</a></li>
+  {{if .Details.Trip.UIShowStay}}<li class="nav-item {{if eq .SidebarNavActive "stay"}}active{{end}}"><a href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>{{.Details.Trip.StaySectionTitle}}</a></li>{{end}}
+  {{if .Details.Trip.UIShowVehicle}}<li class="nav-item {{if eq .SidebarNavActive "vehicle"}}active{{end}}"><a href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>{{.Details.Trip.VehicleSectionTitle}}</a></li>{{end}}
+  {{if .Details.Trip.UIShowFlights}}<li class="nav-item {{if eq .SidebarNavActive "flights"}}active{{end}}"><a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>{{.Details.Trip.FlightsSectionTitle}}</a></li>{{end}}
+  {{if .Details.Trip.UIShowSpends}}<li class="nav-item {{if eq .SidebarNavActive "budget"}}active{{end}}"><a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined" aria-hidden="true">payments</span>{{.Details.Trip.SpendsSectionTitle}}</a></li>{{end}}
+  {{if and .Details.Trip.UIShowCustomLinks (gt (len .CustomSidebarLinks) 0)}}{{range .CustomSidebarLinks}}
+  <li class="nav-item nav-item--custom-link"><a href="{{.URL}}" target="_blank" rel="noopener noreferrer"><span class="material-symbols-outlined" aria-hidden="true">open_in_new</span><span>{{.Label}}</span></a></li>
+  {{end}}{{end}}
+  <li class="nav-item {{if .HideSettingsNavOnMobile}}nav-item--settings-desktop-only {{end}}{{if eq .SidebarNavActive "settings"}}active{{end}}"><a href="/trips/{{.Details.Trip.ID}}/settings" {{if eq .SidebarNavActive "settings"}}aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">settings</span>Settings</a></li>
+</ul>
+{{end}}

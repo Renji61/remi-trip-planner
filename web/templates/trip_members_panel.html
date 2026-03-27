@@ -1,0 +1,62 @@
+{{define "tripMembersPanel"}}
+<div class="sidebar-trip-members-wrap">
+  <div class="trip-collab-strip sidebar-trip-members" aria-label="Trip members">
+    <span class="sidebar-trip-members-label muted">Trip Members</span>
+    <div class="trip-party-stack sidebar-trip-members-avatars">
+      {{range .Party}}
+        {{if and $.TripAccess.IsOwner (ne .ID $.Details.Trip.OwnerUserID)}}
+        <form method="post" action="/trips/{{$.Details.Trip.ID}}/members/remove" class="trip-member-remove-form" data-app-confirm data-confirm-title="Remove this member?" data-confirm-body="They will lose access to this trip immediately." data-confirm-ok="Remove" data-confirm-icon="person_remove" data-confirm-variant="danger">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="user_id" value="{{.ID}}">
+          <button type="submit" class="trip-party-avatar{{if .AvatarPath}} trip-party-avatar--img{{end}}"{{if .AvatarPath}} style="background-image:url('{{.AvatarPath}}')"{{end}} title="Remove {{.PublicDisplayName}}" aria-label="Remove {{.PublicDisplayName}} from trip">{{if not .AvatarPath}}{{.InitialForAvatar}}{{end}}</button>
+        </form>
+        {{else}}
+          {{if .AvatarPath}}<span class="trip-party-avatar trip-party-avatar--img" style="background-image:url('{{.AvatarPath}}')" title="{{.PublicDisplayName}}"></span>{{else}}<span class="trip-party-avatar" title="{{.PublicDisplayName}}">{{.InitialForAvatar}}</span>{{end}}
+        {{end}}
+      {{end}}
+      {{if $.TripAccess.IsOwner}}{{range $.PendingInvites}}
+        <form method="post" action="/trips/{{$.Details.Trip.ID}}/invites/revoke" class="trip-member-remove-form" data-app-confirm data-confirm-title="Cancel this invite?" data-confirm-body="They will not be able to join using this pending invitation." data-confirm-ok="Cancel invite" data-confirm-icon="event_busy" data-confirm-variant="danger">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="invite_id" value="{{.ID}}">
+          <button type="submit" class="trip-party-avatar trip-party-avatar--pending" title="{{.Email}} (pending)" aria-label="Cancel invite for {{.Email}}">
+            <span class="material-symbols-outlined trip-party-avatar-pending-icon" aria-hidden="true">schedule</span>
+          </button>
+        </form>
+      {{end}}{{end}}
+    </div>
+  </div>
+  {{if .TripAccess.IsOwner}}
+  <div class="sidebar-invite-methods" data-trip-invite-methods data-trip-id="{{.Details.Trip.ID}}" data-csrf="{{.CSRFToken}}">
+    {{/* Invite via email — disabled for now. Re-enable by restoring tabs + email panel below.
+    <div class="sidebar-invite-tabs" role="tablist" aria-label="How to invite">
+      <button type="button" class="sidebar-invite-tab sidebar-invite-tab--active" role="tab" aria-selected="true" data-invite-tab="email">Invite via email</button>
+      <button type="button" class="sidebar-invite-tab" role="tab" aria-selected="false" data-invite-tab="link">Invite via link</button>
+    </div>
+    <div class="sidebar-invite-panel" data-invite-panel="email" role="tabpanel">
+      <form method="post" action="/trips/{{.Details.Trip.ID}}/invite" class="sidebar-trip-invite-form form-grid">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <label class="full sidebar-invite-method-label">Invite via email
+          <span class="sidebar-invite-email-field">
+            <span class="material-symbols-outlined sidebar-invite-email-icon" aria-hidden="true">mail</span>
+            <input type="email" name="email" required placeholder="friend@example.com" autocomplete="email">
+          </span>
+        </label>
+        <button type="submit" class="secondary-btn full sidebar-invite-submit">Add to Trip</button>
+      </form>
+    </div>
+    */}}
+    <div class="sidebar-invite-panel" data-invite-panel="link" role="tabpanel">
+      <div class="sidebar-trip-invite-form form-grid">
+        <label class="full sidebar-invite-method-label">Invite via link
+          <span class="sidebar-invite-link-field">
+            <span class="material-symbols-outlined sidebar-invite-link-icon" aria-hidden="true">content_copy</span>
+            <input type="text" readonly class="sidebar-invite-link-url" value="" placeholder="Creating secure link…" autocomplete="off" aria-label="Invite link URL">
+          </span>
+        </label>
+        <button type="button" class="secondary-btn full sidebar-invite-submit" data-copy-invite-link>Copy Invite Link</button>
+      </div>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{end}}

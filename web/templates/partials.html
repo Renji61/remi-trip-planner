@@ -2,12 +2,18 @@
   <script>
     (function () {
       try {
-        var pref = "{{.Settings.ThemePreference}}";
+        var serverPref = "{{.Settings.ThemePreference}}";
+        {{if .ClearThemeOverride}}
+        try { localStorage.removeItem("remi_theme_override"); } catch (eClear) {}
+        {{end}}
+        var override = "";
+        try { override = (localStorage.getItem("remi_theme_override") || "").trim(); } catch (eOv) {}
+        var effective = (override === "light" || override === "dark") ? override : serverPref;
         try {
-          document.documentElement.setAttribute("data-theme-pref", pref);
+          document.documentElement.setAttribute("data-theme-pref", effective);
         } catch (e0) {}
         function applyTheme() {
-          var p = document.documentElement.getAttribute("data-theme-pref") || pref;
+          var p = document.documentElement.getAttribute("data-theme-pref") || serverPref;
           var dark;
           if (p === "dark") dark = true;
           else if (p === "light") dark = false;
@@ -15,14 +21,12 @@
           document.documentElement.classList.toggle("theme-dark", dark);
         }
         applyTheme();
-        if (pref === "system") {
-          var mq = window.matchMedia("(prefers-color-scheme: dark)");
-          mq.addEventListener("change", function () {
-            var p = document.documentElement.getAttribute("data-theme-pref") || "system";
-            if (p !== "system") return;
-            document.documentElement.classList.toggle("theme-dark", mq.matches);
-          });
-        }
+        var mq = window.matchMedia("(prefers-color-scheme: dark)");
+        mq.addEventListener("change", function () {
+          var p = document.documentElement.getAttribute("data-theme-pref") || serverPref;
+          if (p !== "system") return;
+          document.documentElement.classList.toggle("theme-dark", mq.matches);
+        });
       } catch (e) {}
     })();
   </script>

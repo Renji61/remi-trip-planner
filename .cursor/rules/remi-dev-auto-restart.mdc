@@ -1,0 +1,32 @@
+---
+description: REMI Trip Planner — mandatory rebuild and restart on port 8051 after changes
+globs: "**/REMI Trip Planner/**"
+alwaysApply: true
+---
+
+# Server on port 8051 — mandatory after changes
+
+The user **always** wants the REMI Trip Planner server **rebuilt and restarted on `:8051`** after any agent-made changes that affect the app (Go under `cmd/` or `internal/`, `web/templates`, `web/static`, `migrations`, `go.mod`).
+
+**Do this at the end of the task** unless the user explicitly says not to restart, or they are running **`air`** / `dev-watch` (hot reload) and you know it is already rebuilding for them.
+
+## Windows (PowerShell)
+
+From the **`REMI Trip Planner`** directory (module root with `go.mod`):
+
+```powershell
+$p = Get-NetTCPConnection -LocalPort 8051 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess
+if ($p) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }
+go build -o remi-server.exe ./cmd/server/
+$env:APP_ADDR = ":8051"
+Start-Process -FilePath ".\remi-server.exe" -WorkingDirectory (Get-Location) -WindowStyle Hidden
+```
+
+Confirm listen: `netstat -ano | findstr ":8051"` (or `Get-NetTCPConnection -LocalPort 8051`).
+
+## Do not
+
+- End with “run it yourself” when you changed code — **run the restart** (unless `air` is handling it).
+- Skip restart after template/CSS/JS-only edits — the running binary may not need rebuild, but **restarting** still picks up static files from disk; **rebuild** when Go changed.
+
+Docker deploy (`docker compose`) is optional; the user’s standing preference for local dev is **native `go build` + `APP_ADDR=:8051`**.
