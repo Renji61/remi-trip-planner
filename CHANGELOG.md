@@ -11,6 +11,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Flesh out `POST /api/v1/trips/{tripID}/sync` request handling per [docs/sync_contract.md](docs/sync_contract.md).
 - Richer conflict handling beyond last-write-wins for sync clients.
 
+## [1.1.0] - 2026-03-27
+
+Multi-user accounts, trip collaboration, richer trip layout controls, and an interactive itinerary map. Changes since [5d7e105](https://github.com/Renji61/remi-trip-planner/commit/5d7e105) (v1.0.0 line on `main`).
+
+### Upgrade notes
+
+- **Authentication is now required** for the web UI: first-time **setup**, **register**, and **login** replace the anonymous-only flow from v1.0.0. SQLite databases are migrated on startup; use **HTTPS** and **secure cookies** when exposing the server to a network.
+
+### Added
+
+#### Accounts & access
+
+- **User registration**, **login**, **logout**, and **session** handling with CSRF on POST routes.
+- **First-run setup** and **site settings** integration for an initial admin-style bootstrap path.
+- **Profile** page: display name, avatar path, **password change**, **email verification** request/resend.
+- **Trip access** model: owner/collaborator checks on trip routes; **invite** flows (invite link / email-oriented handlers) and **trip members** UI (`trip_members_panel` partial).
+- **Invite accept** page for pending collaborators.
+- **`cmd/resetpassword`:** CLI to set a user password against the configured SQLite database (operators / recovery).
+
+#### Trip UI & layout
+
+- **Trip settings** page for per-trip options (layout, labels, visibility) aligned with the main trip shell.
+- **Trip sidebar navigation** partial for consistent section links.
+- **Custom sidebar links** (per trip): ordered list of extra shortcuts in the trip rail.
+- **Main section hide/show** and **layout order** persisted per trip (extends v1 layout ordering); templates and services updated for `UIMainSectionHidden` / `UISidebarWidgetHidden` and related order fields.
+- **Shared confirm dialog** partial for destructive actions (`app_confirm_dialog`).
+
+#### Trip map (Leaflet)
+
+- **Per-itinerary-day marker colors** (distinct palette; ordinal mapping across days present on the map).
+- **Marker kinds:** hotel (stays), flight (airports), car (vehicle pick-up), place (generic stops).
+- **Day legend** as **toggle buttons**: show/hide markers per day; map **zooms and pans** to fit **only visible** markers (falls back to card default center when none selected).
+- **No connecting polylines** between stops; markers are independent.
+
+#### HTTP & static assets
+
+- **`Cache-Control: no-cache, must-revalidate`** on `/static/*.js`, `/static/*.css`, and **`/sw.js`** so template query-string bumps and SW updates are picked up reliably.
+- **Service worker** cache revision bumped (`remi-trip-planner-v15`); install precache list unchanged in behavior (network-first for `/static/`).
+
+#### Operations & developer experience
+
+- **Server cwd:** if the binary lives under `bin/`, the process **`chdir`s to the parent** of the executable directory so `web/templates` and `web/static` resolve when running `bin/remi-server.exe`.
+- **`.air.toml`** and **`scripts/run-dev.cmd`** for live reload workflows; **`scripts/deploy-docker.ps1`** helper; **`scripts/dev-watch.ps1`** updates.
+- **Cursor rules** under `.cursor/rules/` for local rebuild/restart on port 8051 (optional for contributors using Cursor).
+
+#### Other
+
+- **Budget formatting** helpers and tests (`budget_format.go`).
+- **Google Maps search URL** helper for itinerary map links (`maps_url.go`).
+
+### Changed
+
+- **`internal/httpapp/routes.go`:** large routing expansion (auth, profile, invites, trip settings, static handler wrapper).
+- **SQLite repository and schema migration path** extended for users, sessions, and trip access (see `repo_auth.go`, `db.go`, `repo.go`).
+- **Trip and user services** split/extended (`service_auth.go`, `access.go`, `users.go`, `defaults_reset.go`).
+- **Templates:** new login, register, setup, profile, verify email, invite accept, trip settings, members panel, sidebar nav; trip/home/settings/partials and entity pages adjusted for auth shell and layout flags.
+- **`go.mod` / `go.sum`:** dependency updates for the above.
+- **`.gitignore`:** ignore backup files (`*~`); existing rules for `bin/`, `.env`, uploads unchanged.
+
+### Security
+
+- **Sessions and passwords** are now part of the threat model: run **HTTPS** in production, configure **secure cookies** for your host, and restrict database file permissions.
+- **Email verification** and **invites** should use trustworthy mail delivery and short-lived tokens where applicable (configure outbound mail / base URL per deployment).
+- Prior v1.0.0 guidance still applies: do not commit `.env` or production databases; keep `data/` and uploads out of git.
+
 ## [1.0.0] - 2026-03-26
 
 First public release: self-hosted trip planner with SQLite, SSR UI, optional Docker deployment, and sync-oriented API stubs.
@@ -97,3 +162,6 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
+
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Renji61/remi-trip-planner/compare/5d7e105...v1.1.0
