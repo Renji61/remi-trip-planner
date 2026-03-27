@@ -11,6 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Flesh out `POST /api/v1/trips/{tripID}/sync` request handling per [docs/sync_contract.md](docs/sync_contract.md).
 - Richer conflict handling beyond last-write-wins for sync clients.
 
+## [1.1.1] - 2026-03-28
+
+### Fixed
+
+- **Docker image build:** builder stage now uses **Go 1.25** (`golang:1.25-alpine`) to match `go 1.25.0` in `go.mod`, fixing `go mod download` failing under the previous Go 1.23 image.
+- **Dockerfile:** copy **`go.sum`** together with `go.mod` before `go mod download` for correct module checksum resolution.
+
 ## [1.1.0] - 2026-03-27
 
 Multi-user accounts, trip collaboration, richer trip layout controls, and an interactive itinerary map. Changes since [5d7e105](https://github.com/Renji61/remi-trip-planner/commit/5d7e105) (v1.0.0 line on `main`).
@@ -163,5 +170,6 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Renji61/remi-trip-planner/compare/5d7e105...v1.1.0
