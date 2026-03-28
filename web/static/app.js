@@ -2203,27 +2203,40 @@ window.addEventListener("load", () => {
     true
   );
 
-  const stopSheetEl = document.getElementById("mobile-sheet-stop");
-  if (stopSheetEl && typeof openMobileSheet === "function") {
-    const openParam = new URLSearchParams(window.location.search).get("open");
-    if (openParam === "stop") {
-      openMobileSheet("mobile-sheet-stop");
-      window.setTimeout(() => {
-        const loc = stopSheetEl.querySelector("[data-location-input]");
-        const focusable = loc || stopSheetEl.querySelector("input, textarea, select");
-        if (focusable && typeof focusable.focus === "function") {
-          focusable.focus();
-        }
-      }, 60);
-      try {
-        const u = new URL(window.location.href);
-        u.searchParams.delete("open");
-        const qs = u.searchParams.toString();
-        window.history.replaceState({}, "", u.pathname + (qs ? `?${qs}` : "") + u.hash);
-      } catch (e) {
-        /* ignore */
-      }
+  const openParamForSheet = new URLSearchParams(window.location.search).get("open");
+  const stripOpenQueryParam = () => {
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete("open");
+      const qs = u.searchParams.toString();
+      window.history.replaceState({}, "", u.pathname + (qs ? `?${qs}` : "") + u.hash);
+    } catch (e) {
+      /* ignore */
     }
+  };
+  const stopSheetEl = document.getElementById("mobile-sheet-stop");
+  if (stopSheetEl && typeof openMobileSheet === "function" && openParamForSheet === "stop") {
+    openMobileSheet("mobile-sheet-stop");
+    window.setTimeout(() => {
+      const loc = stopSheetEl.querySelector("[data-location-input]");
+      const focusable = loc || stopSheetEl.querySelector("input, textarea, select");
+      if (focusable && typeof focusable.focus === "function") {
+        focusable.focus();
+      }
+    }, 60);
+    stripOpenQueryParam();
+  }
+  const checklistSheetEl = document.getElementById("mobile-sheet-checklist");
+  if (checklistSheetEl && typeof openMobileSheet === "function" && openParamForSheet === "checklist") {
+    openMobileSheet("mobile-sheet-checklist");
+    window.setTimeout(() => {
+      const cat = checklistSheetEl.querySelector('select[name="category"]');
+      const focusable = cat || checklistSheetEl.querySelector("input, textarea, select");
+      if (focusable && typeof focusable.focus === "function") {
+        focusable.focus();
+      }
+    }, 60);
+    stripOpenQueryParam();
   }
 
   const tripSearchInput = document.querySelector("[data-dashboard-trip-search]");

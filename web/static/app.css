@@ -3165,11 +3165,6 @@ html.theme-dark .trip-page-summary-item {
     gap: 20px;
     align-items: start;
   }
-  .site-settings-col-rail {
-    position: sticky;
-    top: max(0.75rem, calc(env(safe-area-inset-top, 0px) + 5.5rem));
-    align-self: start;
-  }
   .ssi-general,
   .ssi-appearance,
   .ssi-dashboard,
@@ -3255,12 +3250,6 @@ html.theme-dark .trip-page-summary-item {
     flex-direction: column;
     gap: 20px;
     min-width: 0;
-  }
-  .trip-settings-col-rail {
-    position: sticky;
-    /* Sit below sticky .topbar so rail cards are not covered when scrolling */
-    top: max(0.75rem, calc(env(safe-area-inset-top, 0px) + 5.5rem));
-    align-self: start;
   }
   .tsi-info,
   .tsi-body-pre,
@@ -5246,7 +5235,27 @@ html.theme-dark .bottom-nav {
   }
   .right-col { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
-  .bottom-nav { display: flex; }
+  .bottom-nav {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    touch-action: pan-x;
+  }
+  .bottom-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .bottom-nav a {
+    flex: 0 0 auto;
+    min-width: 52px;
+    max-width: none;
+  }
   .hero-map {
     min-height: 220px;
     border-radius: 24px;
@@ -5775,25 +5784,14 @@ html.theme-dark .bottom-nav {
     font-size: 20px;
   }
   .bottom-nav {
-    justify-content: space-between;
-    gap: 0;
-    overflow-x: auto;
-    overflow-y: visible;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    gap: 4px;
     padding: 8px max(4px, env(safe-area-inset-left, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-right, 0px));
     border-top-left-radius: 20px;
     border-top-right-radius: 20px;
   }
-  .bottom-nav::-webkit-scrollbar {
-    display: none;
-  }
   .bottom-nav a {
-    flex: 1 1 0;
-    min-width: 0;
-    max-width: 100%;
     font-size: 10px;
-    padding-inline: 1px;
+    padding-inline: 4px;
   }
   .bottom-nav a span:last-child {
     display: block;

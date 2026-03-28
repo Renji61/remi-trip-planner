@@ -50,6 +50,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### Trips & dashboard
 
 - Create trips from the home page (optional **place lookup** for trip map center; falls back to site default location); view **active**, **draft**, and **archived** groups.
+- **Dashboard sidebar & mobile bottom bar:** up to **two** shortcuts to trips that are **in progress** or **upcoming** (in that priority order), in addition to **My Trip** and **Settings**.
 - **Dashboard customization:** grid vs list cards, sort order, hero background style, heading text (app settings).
 - Per-trip: name, description, dates, **cover image URL**, **currency**, archive/delete.
 
@@ -75,6 +76,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### Checklist
 
 - **Categorized** reminder items; mark done/undo; add from the trip page (including multi-item draft list).
+- **Mobile:** **Add to Checklist** appears in the trip **FAB** menu when checklist + sidebar widget visibility allow it (same as trip settings); opens the checklist sheet on the main trip page or via `?open=checklist` from subpages.
 
 ### Trip page layout & personalization
 
@@ -84,6 +86,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - **12h / 24h** clock display per trip.
 - **Reorder** main column sections: Trip Map, Itinerary, Spends, Reminder Checklist, Stay, Vehicle, Flights (hero and trip edit panel stay at the top).
 - **Reorder** right-sidebar widgets: Add New Stop, Total Budgeted Cost, Quick Spends, Add to Checklist (wide layouts; budget/quick respect Spends toggle).
+- **Mobile:** the bottom **Trip sections** navigation **scrolls horizontally** when many sections are on, so every tab stays reachable.
 
 ### App-wide settings
 
@@ -91,7 +94,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 ### About & updates
 
-- **About** page with installed version, release notes, and **check for updates** (compares to GitHub Releases for self-hosted instances).
+- **About** page with installed version, release notes, and **check for updates** (compares to **GitHub’s latest Release** for self-hosted instances — publish a Release for each version tag so others see an update).
 
 ### PWA
 
@@ -185,7 +188,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.40.0` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.45.0` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 

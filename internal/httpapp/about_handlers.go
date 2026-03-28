@@ -19,6 +19,7 @@ import (
 )
 
 // sidebarInProgressTrip is shown under My Trip on the dashboard shell (desktop + mobile bottom nav).
+// In-progress trips are listed first; upcoming trips fill remaining slots up to max (see filterDashboardSidebarTrips).
 type sidebarInProgressTrip struct {
 	ID        string
 	Name      string
@@ -42,36 +43,57 @@ func (a *app) sidebarInProgressTrips(ctx context.Context, userID string) ([]side
 	if err != nil {
 		return nil, err
 	}
-	return filterInProgressTripsForSidebar(list, time.Now(), 2), nil
+	return filterDashboardSidebarTrips(list, time.Now(), 2), nil
 }
 
-func filterInProgressTripsForSidebar(list []trips.Trip, now time.Time, max int) []sidebarInProgressTrip {
-	var matched []trips.Trip
+func sortTripsForDashboardSidebar(a, b trips.Trip) bool {
+	ti, okI := parseTripStartForSort(a)
+	tj, okJ := parseTripStartForSort(b)
+	if okI != okJ {
+		return okI
+	}
+	if !okI {
+		return strings.ToLower(strings.TrimSpace(a.Name)) < strings.ToLower(strings.TrimSpace(b.Name))
+	}
+	if !ti.Equal(tj) {
+		return ti.Before(tj)
+	}
+	return strings.ToLower(strings.TrimSpace(a.Name)) < strings.ToLower(strings.TrimSpace(b.Name))
+}
+
+// filterDashboardSidebarTrips returns up to max trips for the dashboard sidebar and mobile bottom nav:
+// all in-progress trips first (earliest start first), then upcoming trips to fill the remainder.
+func filterDashboardSidebarTrips(list []trips.Trip, now time.Time, max int) []sidebarInProgressTrip {
+	if max <= 0 {
+		return nil
+	}
+	var inProg, upcoming []trips.Trip
 	for _, t := range list {
 		_, slug := tripDashboardStatus(t, now)
-		if slug == "in-progress" {
-			matched = append(matched, t)
+		switch slug {
+		case "in-progress":
+			inProg = append(inProg, t)
+		case "upcoming":
+			upcoming = append(upcoming, t)
 		}
 	}
-	sort.Slice(matched, func(i, j int) bool {
-		ti, okI := parseTripStartForSort(matched[i])
-		tj, okJ := parseTripStartForSort(matched[j])
-		if okI != okJ {
-			return okI
+	sort.Slice(inProg, func(i, j int) bool { return sortTripsForDashboardSidebar(inProg[i], inProg[j]) })
+	sort.Slice(upcoming, func(i, j int) bool { return sortTripsForDashboardSidebar(upcoming[i], upcoming[j]) })
+	picked := make([]trips.Trip, 0, max)
+	for _, t := range inProg {
+		if len(picked) >= max {
+			break
 		}
-		if !okI {
-			return strings.ToLower(strings.TrimSpace(matched[i].Name)) < strings.ToLower(strings.TrimSpace(matched[j].Name))
-		}
-		if !ti.Equal(tj) {
-			return ti.Before(tj)
-		}
-		return strings.ToLower(strings.TrimSpace(matched[i].Name)) < strings.ToLower(strings.TrimSpace(matched[j].Name))
-	})
-	if len(matched) > max {
-		matched = matched[:max]
+		picked = append(picked, t)
 	}
-	out := make([]sidebarInProgressTrip, 0, len(matched))
-	for _, t := range matched {
+	for _, t := range upcoming {
+		if len(picked) >= max {
+			break
+		}
+		picked = append(picked, t)
+	}
+	out := make([]sidebarInProgressTrip, 0, len(picked))
+	for _, t := range picked {
 		out = append(out, sidebarInProgressTrip{
 			ID:        t.ID,
 			Name:      t.Name,

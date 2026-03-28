@@ -376,6 +376,7 @@
       {{if .Details.Trip.UIShowStay}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add {{.Details.Trip.StaySectionTitle}}</a>{{end}}
       {{if .Details.Trip.UIShowVehicle}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add {{.Details.Trip.VehicleSectionTitle}}</a>{{end}}
       {{if .Details.Trip.UIShowFlights}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>Add {{.Details.Trip.FlightsSectionTitle}}</a>{{end}}
+      {{if sidebarWidgetVisible "checklist" .Details.Trip}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}?open=checklist"><span class="material-symbols-outlined" aria-hidden="true">playlist_add</span>Add to Checklist</a>{{end}}
     </div>
   </div>
   <nav class="bottom-nav" aria-label="Trip sections">

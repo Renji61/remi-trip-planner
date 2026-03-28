@@ -1035,6 +1035,10 @@
         <span class="material-symbols-outlined">flight</span>
         Add {{.Details.Trip.FlightsSectionTitle}}
       </button>{{end}}
+      {{if sidebarWidgetVisible "checklist" .Details.Trip}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-checklist">
+        <span class="material-symbols-outlined">playlist_add</span>
+        Add to Checklist
+      </button>{{end}}
     </div>
   </div>
   <div class="mobile-sheet-backdrop hidden" data-mobile-sheet-backdrop></div>
@@ -1161,6 +1165,35 @@
       <label class="full">Attach Flight Document<input type="file" name="flight_document" accept=".pdf,image/*"></label>
       <label class="full">Notes<input type="text" name="notes" placeholder="Optional details"></label>
       <button class="full" type="submit">Add {{.Details.Trip.FlightsSectionTitle}}</button>
+    </form>
+  </section>
+  {{end}}
+  {{if sidebarWidgetVisible "checklist" .Details.Trip}}
+  <section id="mobile-sheet-checklist" class="mobile-sheet hidden" aria-hidden="true">
+    <div class="mobile-sheet-head">
+      <h3>Add to Checklist</h3>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add checklist">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/checklist" class="form-grid" data-checklist-builder>
+      <label class="full">Category
+        <select name="category" required>
+          <option value="" disabled selected>Select category</option>
+          {{range .ChecklistCategories}}
+          <option value="{{.}}">{{.}}</option>
+          {{end}}
+        </select>
+      </label>
+      <div class="inline-form full">
+        <input type="text" data-checklist-item-input placeholder="Add item..." autocomplete="off">
+        <button type="button" data-checklist-add-btn>Add</button>
+      </div>
+      <p class="muted full checklist-builder-empty" data-checklist-draft-empty>No items added yet.</p>
+      <ul class="list full checklist-draft-list hidden" data-checklist-draft-list></ul>
+      <input type="hidden" name="items_json" value="[]" data-checklist-items-json>
+      <p class="location-hint full" data-checklist-builder-status></p>
+      <button class="full" type="submit">Save</button>
     </form>
   </section>
   {{end}}

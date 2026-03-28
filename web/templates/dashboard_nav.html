@@ -9,7 +9,7 @@
       <ul class="nav-list">
         <li class="nav-item{{if eq .SidebarNavActive "home"}} active{{end}}"><a href="/"{{if eq .SidebarNavActive "home"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">luggage</span>My Trip</a></li>
         {{if .SidebarInProgressTrips}}
-        <li class="sidebar-in-progress-wrap" aria-label="Trips in progress">
+        <li class="sidebar-in-progress-wrap" aria-label="In progress and upcoming trips">
           <ul class="sidebar-in-progress-list">
             {{range .SidebarInProgressTrips}}
             <li class="sidebar-in-progress-item">

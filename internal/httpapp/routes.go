@@ -483,7 +483,7 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 		heroImageURL = bg
 	}
 
-	inProg := filterInProgressTripsForSidebar(list, time.Now(), 2)
+	inProg := filterDashboardSidebarTrips(list, time.Now(), 2)
 	_ = a.templates.ExecuteTemplate(w, "home.html", map[string]any{
 		"ActiveTripCards":        activeO,
 		"SharedTripCards":        activeS,

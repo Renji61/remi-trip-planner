@@ -11,6 +11,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Flesh out `POST /api/v1/trips/{tripID}/sync` request handling per [docs/sync_contract.md](docs/sync_contract.md).
 - Richer conflict handling beyond last-write-wins for sync clients.
 
+## [1.45.0] - 2026-03-28
+
+### Added
+
+- **Dashboard navigation:** the sidebar and mobile bottom bar still show up to **two** trip shortcuts, but they now prefer **in-progress** trips first (by start date), then **upcoming** scheduled trips to fill any remaining slots (draft/archived/completed are excluded as before).
+- **Trip details (mobile):** **Add to Checklist** in the floating action menu on the main trip page and on **Budget**, **Stay**, **Vehicle**, **Flights**, and **Trip settings** — same visibility rules as trip settings (**Reminder Checklist** section on + **Add to Checklist** sidebar widget not hidden). On the main trip page the action opens a **checklist sheet**; elsewhere it links to the trip with `?open=checklist` so the sheet opens there.
+
+### Changed
+
+- **Mobile “Trip sections” bottom bar** (trip shell): when many sections are enabled, the bar **scrolls horizontally** instead of shrinking labels with no way to reach the last tabs.
+- **Trip settings (wide layout):** the right column (**Trip sections** + assist card) no longer uses a **nested scroll area**; it scrolls with the main page so the full list is reachable with normal document scrolling.
+
+### Notes for self-hosters
+
+- **Update notification:** the About page and `GET /api/about/update-check` compare this build’s version to **GitHub’s latest Release**. After upgrading, publish GitHub Release **`v1.45.0`** (and image tag if you use GHCR) so older instances detect the update.
+
 ## [1.40.0] - 2026-03-28
 
 ### Added
@@ -223,7 +239,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.40.0...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.45.0...HEAD
+[1.45.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.40.0...v1.45.0
 [1.40.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.3.0...v1.40.0
 [1.3.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.1...v1.2.0
