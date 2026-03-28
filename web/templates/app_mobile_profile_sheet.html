@@ -1,0 +1,19 @@
+{{define "appMobileProfileSheet"}}
+<dialog class="trip-mobile-profile-sheet" id="app-mobile-profile-sheet" aria-label="Account menu">
+  <div class="trip-mobile-profile-sheet__panel">
+    <div class="trip-mobile-profile-sheet__head">
+      <span class="trip-mobile-profile-sheet__title">Account</span>
+      <button type="button" class="icon-btn trip-mobile-profile-sheet__close" data-mobile-profile-close aria-label="Close menu">
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+    </div>
+    <nav class="trip-mobile-profile-sheet__nav" aria-label="Account actions">
+      <a class="trip-mobile-profile-sheet__link" href="/settings{{if .TripID}}?trip_id={{.TripID}}{{end}}">App settings</a>
+      <form method="post" action="/logout" class="trip-mobile-profile-sheet__logout-form">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit" class="trip-mobile-profile-sheet__link trip-mobile-profile-sheet__link--button">Log out</button>
+      </form>
+    </nav>
+  </div>
+</dialog>
+{{end}}

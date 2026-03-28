@@ -146,14 +146,20 @@ type budgetCategoryGroupView struct {
 }
 
 type budgetTransactionRowView struct {
-	DateLabel    string
-	CategoryName string
-	CategoryIcon string
-	// CategoryStyle matches the existing expense category icon color scheme.
+	ExpenseID     string
+	DateLabel     string
+	CategoryName  string
+	CategoryIcon  string
 	CategoryStyle string
 	Description   string
 	Method        string
 	Amount        float64
+	SpentOn       string
+	NotesRaw      string
+	LodgingID     string
+	VehicleLocked bool
+	FlightLocked  bool
+	CanEdit       bool
 }
 
 // noStoreNonStaticGET prevents proxies and browsers from caching HTML/API responses;
@@ -211,6 +217,8 @@ func NewRouter(deps Dependencies) http.Handler {
 				"tripMainSectionVisibilityIcon":   trips.MainSectionVisibilityIcon,
 				"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
 				"googleMapsSearchURL":             googleMapsSearchURL,
+				"locationLineBeforeComma":         locationLineBeforeComma,
+				"itineraryGeocodeQuery":           itineraryGeocodeQuery,
 				"abbrevMoney":                     abbrevMoney,
 				"profileInitial": func(u trips.User) string {
 					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
@@ -1137,6 +1145,14 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 	// Budgeted cost uses itinerary-planned costs + manually entered, non-booking expenses.
 	vehicleByExpenseID := trips.VehicleRentalByExpenseID(details.Vehicles)
 	flightByExpenseID := trips.FlightByExpenseID(details.Flights)
+	vehicleExpenseLocked := map[string]bool{}
+	for id := range vehicleByExpenseID {
+		vehicleExpenseLocked[id] = true
+	}
+	flightExpenseLocked := map[string]bool{}
+	for id := range flightByExpenseID {
+		flightExpenseLocked[id] = true
+	}
 	nonLodgingExpenses := 0.0
 	for _, e := range details.Expenses {
 		if e.LodgingID == "" && vehicleByExpenseID[e.ID].ID == "" && flightByExpenseID[e.ID].ID == "" {
@@ -1331,7 +1347,11 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(desc) == "" {
 			desc = "—"
 		}
+		vLocked := vehicleExpenseLocked[e.ID]
+		fLocked := flightExpenseLocked[e.ID]
+		canEdit := !details.Trip.IsArchived && e.LodgingID == "" && !vLocked && !fLocked
 		transactions = append(transactions, budgetTransactionRowView{
+			ExpenseID:     e.ID,
 			DateLabel:     dateLabel,
 			CategoryName:  e.Category,
 			CategoryIcon:  expenseCategoryIcon(e.Category),
@@ -1339,6 +1359,12 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 			Description:   desc,
 			Method:        defaultIfEmpty(e.PaymentMethod, "Cash"),
 			Amount:        e.Amount,
+			SpentOn:       e.SpentOn,
+			NotesRaw:      e.Notes,
+			LodgingID:     e.LodgingID,
+			VehicleLocked: vLocked,
+			FlightLocked:  fLocked,
+			CanEdit:       canEdit,
 		})
 	}
 
@@ -1382,6 +1408,8 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		"HasTransactions":        len(transactions) > 0,
 		"CanShowAllTransactions": canShowAll,
 		"BudgetInitialLimit":     initialLimit,
+		"VehicleExpenseLocked":   vehicleExpenseLocked,
+		"FlightExpenseLocked":    flightExpenseLocked,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "budget")
 	_ = a.templates.ExecuteTemplate(w, "budget.html", pageData)
@@ -1469,6 +1497,16 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 	window := spentExpenses[start:end]
 
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
+	vehicleByExpenseID := trips.VehicleRentalByExpenseID(details.Vehicles)
+	flightByExpenseID := trips.FlightByExpenseID(details.Flights)
+	vehicleExpenseLocked := map[string]bool{}
+	for id := range vehicleByExpenseID {
+		vehicleExpenseLocked[id] = true
+	}
+	flightExpenseLocked := map[string]bool{}
+	for id := range flightByExpenseID {
+		flightExpenseLocked[id] = true
+	}
 
 	transactions := make([]budgetTransactionRowView, 0, len(window))
 	for _, e := range window {
@@ -1480,7 +1518,11 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(desc) == "" {
 			desc = "—"
 		}
+		vLocked := vehicleExpenseLocked[e.ID]
+		fLocked := flightExpenseLocked[e.ID]
+		canEdit := !details.Trip.IsArchived && e.LodgingID == "" && !vLocked && !fLocked
 		transactions = append(transactions, budgetTransactionRowView{
+			ExpenseID:     e.ID,
 			DateLabel:     dateLabel,
 			CategoryName:  e.Category,
 			CategoryIcon:  expenseCategoryIcon(e.Category),
@@ -1488,13 +1530,25 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 			Description:   desc,
 			Method:        defaultIfEmpty(e.PaymentMethod, "Cash"),
 			Amount:        e.Amount,
+			SpentOn:       e.SpentOn,
+			NotesRaw:      e.Notes,
+			LodgingID:     e.LodgingID,
+			VehicleLocked: vLocked,
+			FlightLocked:  fLocked,
+			CanEdit:       canEdit,
 		})
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = a.templates.ExecuteTemplate(w, "budget_transactions_rows.html", map[string]any{
-		"CurrencySymbol": currencySymbol,
-		"Transactions":   transactions,
+	_ = a.templates.ExecuteTemplate(w, "budget_transactions_rows", map[string]any{
+		"Trip":                 details.Trip,
+		"Details":              details,
+		"CSRFToken":            CSRFToken(r.Context()),
+		"CurrencySymbol":       currencySymbol,
+		"ExpenseCategories":    trips.QuickExpenseCategories,
+		"Transactions":         transactions,
+		"VehicleExpenseLocked": vehicleExpenseLocked,
+		"FlightExpenseLocked":  flightExpenseLocked,
 	})
 }
 
@@ -1636,6 +1690,21 @@ func computeTotalBudgeted(items []trips.ItineraryItem, lodgings []trips.Lodging,
 		sum += i.EstCost
 	}
 	return sum
+}
+
+// itineraryGeocodeQuery returns the best free-text location for client-side geocoding (itinerary connectors).
+func itineraryGeocodeQuery(v itineraryItemView) string {
+	if v.Lodging.ID != "" {
+		if a := strings.TrimSpace(v.Lodging.Address); a != "" {
+			return a
+		}
+	}
+	if v.Vehicle.ID != "" {
+		if p := strings.TrimSpace(v.Vehicle.PickUpLocation); p != "" {
+			return p
+		}
+	}
+	return strings.TrimSpace(v.Item.Location)
 }
 
 func buildItineraryDayGroups(startDate string, items []trips.ItineraryItem, lodgings []trips.Lodging, vehicles []trips.VehicleRental, flights []trips.Flight, dayLabels map[int]string) []itineraryDayGroup {

@@ -1,6 +1,6 @@
 {{define "tripMembersPanel"}}
 <div class="sidebar-trip-members-wrap">
-  <div class="trip-collab-strip sidebar-trip-members" aria-label="Trip members">
+  <div class="trip-collab-strip sidebar-trip-members{{if le (len .Party) 1}} trip-collab-strip--solo-mobile{{end}}" aria-label="Trip members">
     <span class="sidebar-trip-members-label muted">Trip Members</span>
     <div class="trip-party-stack sidebar-trip-members-avatars">
       {{range .Party}}
@@ -47,13 +47,14 @@
     */}}
     <div class="sidebar-invite-panel" data-invite-panel="link" role="tabpanel">
       <div class="sidebar-trip-invite-form form-grid">
-        <label class="full sidebar-invite-method-label">Invite via link
+        <span class="full sidebar-invite-method-label">Invite via link</span>
+        <div class="full sidebar-invite-link-row">
           <span class="sidebar-invite-link-field">
             <span class="material-symbols-outlined sidebar-invite-link-icon" aria-hidden="true">content_copy</span>
             <input type="text" readonly class="sidebar-invite-link-url" value="" placeholder="Creating secure link…" autocomplete="off" aria-label="Invite link URL">
           </span>
-        </label>
-        <button type="button" class="secondary-btn full sidebar-invite-submit" data-copy-invite-link>Copy Invite Link</button>
+          <button type="button" class="secondary-btn sidebar-invite-submit" data-copy-invite-link>Copy Invite Link</button>
+        </div>
       </div>
     </div>
   </div>

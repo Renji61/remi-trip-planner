@@ -48,9 +48,9 @@
           <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
-          <a class="budget-mobile-header-btn" href="/settings{{if .TripID}}?trip_id={{.TripID}}{{end}}" aria-label="Site settings" title="Site settings" aria-current="page">
-            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-          </a>
+          <button type="button" class="budget-mobile-header-btn" data-mobile-profile-open data-mobile-profile-target="#app-mobile-profile-sheet" aria-label="Open account menu">
+            <span class="material-symbols-outlined" aria-hidden="true">person</span>
+          </button>
         </div>
       </header>
 
@@ -252,6 +252,7 @@
     <a href="/"><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>Spends</span></a>
     <a class="active" href="/settings"><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>Settings</span></a>
   </nav>
+  {{template "appMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}
 </body>
 </html>

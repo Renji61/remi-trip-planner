@@ -1,0 +1,14 @@
+.git
+.github
+*.md
+!README.md
+.env
+.env.*
+!.env.example
+data
+*.db
+terminals
+.cursor
+**/__pycache__
+*.exe
+bin/

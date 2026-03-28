@@ -10,13 +10,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=71">
+  <link rel="stylesheet" href="/static/app.css?v=86">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js?v=67"></script>
+  <script defer src="/static/app.js?v=83"></script>
 </head>
 <body>
-  <main class="app-shell" aria-label="{{.Trip.SpendsSectionTitle}}">
+  <main class="app-shell budget-page" aria-label="{{.Trip.SpendsSectionTitle}}" data-long-press-sheet-root>
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -44,9 +44,9 @@
           <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
-          <a class="budget-mobile-header-btn" href="/trips/{{.Trip.ID}}/settings" aria-label="Open trip settings" title="Open trip settings">
-            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-          </a>
+          <button type="button" class="budget-mobile-header-btn" data-trip-mobile-profile-open aria-label="Open account menu">
+            <span class="material-symbols-outlined" aria-hidden="true">person</span>
+          </button>
         </div>
       </header>
       <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
@@ -112,7 +112,6 @@
       <section class="card budget-mobile-categories" aria-labelledby="budget-mobile-cat-title">
         <div class="budget-mobile-section-head">
           <h3 id="budget-mobile-cat-title">By Category</h3>
-          <span>Details</span>
         </div>
         <div class="budget-mobile-categories-grid">
           <div class="budget-donut-wrapper">
@@ -157,19 +156,36 @@
         {{if .HasTransactions}}
         <ul class="list budget-mobile-tx-list">
           {{range .Transactions}}
-          <li class="budget-mobile-tx-item">
-            <div class="budget-mobile-tx-left">
-              <span class="budget-table-icon expense-cat-icon expense-cat-icon--{{.CategoryStyle}}" aria-hidden="true">
-                <span class="material-symbols-outlined" aria-hidden="true">{{.CategoryIcon}}</span>
-              </span>
-              <div>
-                <strong>{{if .Description}}{{.Description}}{{else}}{{.CategoryName}}{{end}}</strong>
-                <p>{{if .DateLabel}}{{.DateLabel}}{{else}}--{{end}}{{if .Method}} · {{.Method}}{{end}}</p>
+          <li class="budget-mobile-tx-item" data-budget-tx-view="{{.ExpenseID}}">
+            <div class="budget-mobile-tx-row">
+              <div class="budget-mobile-tx-left">
+                <span class="budget-table-icon expense-cat-icon expense-cat-icon--{{.CategoryStyle}}" aria-hidden="true">
+                  <span class="material-symbols-outlined" aria-hidden="true">{{.CategoryIcon}}</span>
+                </span>
+                <div>
+                  <strong>{{if .Description}}{{.Description}}{{else}}{{.CategoryName}}{{end}}</strong>
+                  <p>{{if .DateLabel}}{{.DateLabel}}{{else}}--{{end}}{{if .Method}} · {{.Method}}{{end}}</p>
+                </div>
               </div>
-            </div>
-            <div class="budget-mobile-tx-right">
-              <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</strong>
-              <span>{{.CategoryName}}</span>
+              <div class="budget-mobile-tx-right">
+                <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</strong>
+                <span>{{.CategoryName}}</span>
+              </div>
+              {{if .CanEdit}}
+              <details class="trip-inline-actions-dropdown budget-inline-actions budget-inline-actions--mobile-sr-only">
+                <summary class="trip-inline-actions-summary">
+                  <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
+                  <span class="trip-inline-actions-summary-label">Transaction actions</span>
+                </summary>
+                <div class="trip-inline-actions-buttons">
+                  <button type="button" class="item-action-btn" data-inline-edit-open="expense-edit-budget-{{.ExpenseID}}">Edit</button>
+                  <form method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ExpenseID}}/delete" data-app-confirm data-confirm-title="Delete this spend?" data-confirm-body="This expense will be removed from your trip." data-confirm-ok="Delete spend" data-confirm-icon="receipt_long" data-confirm-variant="danger" data-ajax-submit data-toast-message="Spend deleted.">
+                    <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/budget">
+                    <button type="submit" class="item-action-btn danger">Delete</button>
+                  </form>
+                </div>
+              </details>
+              {{end}}
             </div>
           </li>
           {{end}}
@@ -297,31 +313,15 @@
                 <th scope="col">Description</th>
                 <th scope="col">Method</th>
                 <th scope="col" class="budget-table-right">Amount</th>
+                <th scope="col" class="budget-table-actions-col"><span class="visually-hidden">Actions</span></th>
               </tr>
             </thead>
             <tbody id="budget-transactions-tbody">
               {{if .HasTransactions}}
-              {{range .Transactions}}
-              <tr>
-                <td class="budget-table-date">{{if .DateLabel}}{{.DateLabel}}{{else}}--{{end}}</td>
-                <td class="budget-table-category">
-                  <div class="budget-table-cat">
-                    <span class="budget-table-icon expense-cat-icon expense-cat-icon--{{.CategoryStyle}}" aria-hidden="true">
-                      <span class="material-symbols-outlined">{{.CategoryIcon}}</span>
-                    </span>
-                    <div class="budget-table-cat-text">
-                      <strong>{{.CategoryName}}</strong>
-                    </div>
-                  </div>
-                </td>
-                <td class="budget-table-description">{{if .Description}}{{.Description}}{{else}}--{{end}}</td>
-                <td class="budget-table-method">{{.Method}}</td>
-                <td class="budget-table-amount budget-table-right">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</td>
-              </tr>
-              {{end}}
+              {{template "budget_transactions_rows" .}}
               {{else}}
               <tr>
-                <td colspan="5">
+                <td colspan="6">
                   <div class="budget-empty">No transactions yet.</div>
                 </td>
               </tr>
@@ -388,6 +388,18 @@
       <div class="budget-spacer"></div>
     </section>
   </main>
+  <dialog id="budget-mobile-expense-edit" class="budget-mobile-expense-edit-dialog" aria-labelledby="budget-mobile-expense-edit-title">
+    <div class="budget-mobile-expense-edit-dialog__panel">
+      <div class="budget-mobile-expense-edit-dialog__head">
+        <h3 id="budget-mobile-expense-edit-title">Edit {{.Trip.SpendsSectionTitle}}</h3>
+        <button type="button" class="icon-btn" data-budget-mobile-edit-close aria-label="Close editor">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+      <div class="budget-mobile-expense-edit-dialog__body" data-budget-mobile-edit-slot></div>
+    </div>
+  </dialog>
+
   <nav class="bottom-nav" aria-label="Trip sections">
     <a href="/trips/{{.Trip.ID}}"><span class="material-symbols-outlined" aria-hidden="true">map</span><span>My Trip</span></a>
     {{if .Trip.UIShowStay}}<a href="/trips/{{.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span><span>{{.Trip.StaySectionTitle}}</span></a>{{end}}
@@ -395,6 +407,8 @@
     {{if .Trip.UIShowFlights}}<a href="/trips/{{.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span><span>{{.Trip.FlightsSectionTitle}}</span></a>{{end}}
     {{if .Trip.UIShowSpends}}<a class="active" href="/trips/{{.Trip.ID}}/budget"><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>{{.Trip.SpendsSectionTitle}}</span></a>{{end}}
   </nav>
+  {{template "tripLongPressSheet"}}
+  {{template "tripMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}
 </body>
 </html>

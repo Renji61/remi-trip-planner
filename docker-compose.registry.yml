@@ -1,0 +1,55 @@
+# REMI Trip Planner — install from a pre-built registry image (no git clone required).
+#
+# 1. Copy this file and .env.example next to each other (or merge into one directory).
+# 2. Create .env with at least:
+#      REMI_IMAGE=ghcr.io/YOUR_GITHUB_USER/remi-trip-planner:latest
+#    (Use the exact image you publish — see docs/self-hosting.md.)
+# 3. Start:
+#      docker compose -f docker-compose.registry.yml up -d
+#
+# Manual update (pull latest image tag / digest):
+#   docker compose -f docker-compose.registry.yml pull
+#   docker compose -f docker-compose.registry.yml up -d
+#
+# Auto-updates (Watchtower polls the registry and recreates labeled containers):
+#   docker compose -f docker-compose.registry.yml --profile watchtower up -d
+#
+# Private registry: docker login … before pull/up, or configure a credentials helper.
+
+services:
+  remi:
+    image: ${REMI_IMAGE:?Set REMI_IMAGE in .env, e.g. ghcr.io/your-org/remi-trip-planner:latest}
+    container_name: remi-trip-planner
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${REMI_PORT:-8080}:8080"
+    environment:
+      APP_ADDR: ":8080"
+      SQLITE_PATH: /app/data/trips.db
+    volumes:
+      - remi-data:/app/data
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  watchtower:
+    profiles: ["watchtower"]
+    image: containrrr/watchtower:1.7.1
+    container_name: remi-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "${WATCHTOWER_POLL_INTERVAL:-3600}"
+      TZ: "${TZ:-UTC}"
+
+volumes:
+  remi-data:

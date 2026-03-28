@@ -1,12 +1,37 @@
+# REMI Trip Planner — self-hosted stack (build from this repository).
+#
+# Quick start:
+#   cp .env.example .env   # optional: set REMI_PORT, etc.
+#   docker compose up -d --build
+#
+# Manual update (rebuild from latest git):
+#   git pull && docker compose up -d --build
+#
+# Auto-updates (Watchtower) apply to registry-based installs only — see
+# docker-compose.registry.yml + docs/self-hosting.md (avoids pulling the wrong
+# image for a local-only tag).
+
 services:
-  app:
-    build: .
+  remi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: remi-trip-planner:latest
     container_name: remi-trip-planner
-    ports:
-      - "8051:8080"
-    volumes:
-      - trip_data:/app/data
     restart: unless-stopped
+    ports:
+      - "${REMI_PORT:-8080}:8080"
+    environment:
+      APP_ADDR: ":8080"
+      SQLITE_PATH: /app/data/trips.db
+    volumes:
+      - remi-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
-  trip_data:
+  remi-data:

@@ -21,3 +21,13 @@ func googleMapsSearchURL(lat, lng float64, hint string) string {
 	}
 	return "https://www.google.com/maps/search/?api=1&query=" + url.QueryEscape(hint)
 }
+
+// locationLineBeforeComma returns the substring before the first comma, trimmed,
+// or the full string if there is no comma (for compact airport/address labels).
+func locationLineBeforeComma(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, ","); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
+}

@@ -13,7 +13,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - [Requirements](#requirements)
 - [Configuration](#configuration)
 - [Run locally](#run-locally)
-- [Docker](#docker)
+- [Docker & self-hosting](#docker--self-hosting)
 - [Development](#development)
 - [Deployment & HTTPS](#deployment--https)
 - [PWA & offline](#pwa--offline)
@@ -175,17 +175,28 @@ go test ./...
 
 ---
 
-## Docker
+## Docker & self-hosting
 
-Build and run with Compose (host **8051** → container **8080**):
+### Quick start (build from clone)
 
 ```bash
-docker compose up --build
+cp .env.example .env   # optional: REMI_PORT=8051 maps host → container 8080
+docker compose up -d --build
 ```
 
-Then open [http://localhost:8051](http://localhost:8051).
+Open [http://localhost:8080](http://localhost:8080) (or your `REMI_PORT`).
 
-The database persists in the **`trip_data`** volume at `/app/data/trips.db` inside the container.
+- **Data:** named volume **`remi-data`** → `/app/data/trips.db` in the container.
+- **Health:** image includes `wget` and a `HEALTHCHECK` on `GET /healthz` (also declared in Compose).
+- **Manual update (git):** `git pull && docker compose up -d --build`
+- **Install without git:** use `docker-compose.registry.yml` + `REMI_IMAGE=ghcr.io/<owner>/remi-trip-planner:latest` in `.env`.
+- **Auto-updates (registry installs):** `docker-compose.registry.yml` includes an optional Watchtower profile — see [docs/self-hosting.md](docs/self-hosting.md). The default `docker-compose.yml` is build-from-git only (manual rebuild) so Watchtower does not pull a random `remi-trip-planner` image from Docker Hub.
+
+Full instructions, GHCR publishing, backups, and Watchtower notes: **[docs/self-hosting.md](docs/self-hosting.md)**.
+
+The workflow **[.github/workflows/docker-publish.yml](.github/workflows/docker-publish.yml)** pushes to `ghcr.io/<lowercase-owner>/remi-trip-planner` on pushes to `main` and on SemVer tags `v*.*.*`.
+
+**Publishing for others:** only you (or your CI) can push to your registry — see **[docs/publish-image.md](docs/publish-image.md)** (GitHub Actions, manual `docker push`, and making GHCR packages **public** for homelab `docker pull` without login).
 
 ---
 

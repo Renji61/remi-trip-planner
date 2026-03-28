@@ -1,5 +1,5 @@
-{{range .Transactions}}
-<tr>
+{{define "budget_transactions_rows"}}{{range .Transactions}}
+<tr class="budget-tx-view" data-budget-tx-view="{{.ExpenseID}}">
   <td class="budget-table-date">{{if .DateLabel}}{{.DateLabel}}{{else}}--{{end}}</td>
   <td class="budget-table-category">
     <div class="budget-table-cat">
@@ -14,6 +14,62 @@
   <td class="budget-table-description">{{if .Description}}{{.Description}}{{else}}--{{end}}</td>
   <td class="budget-table-method">{{.Method}}</td>
   <td class="budget-table-amount budget-table-right">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</td>
+  <td class="budget-table-actions">
+    {{if .CanEdit}}
+    <details class="trip-inline-actions-dropdown budget-inline-actions">
+      <summary class="trip-inline-actions-summary">
+        <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
+        <span class="trip-inline-actions-summary-label">Transaction actions</span>
+      </summary>
+      <div class="trip-inline-actions-buttons">
+        <button type="button" class="item-action-btn" data-inline-edit-open="expense-edit-budget-{{.ExpenseID}}">Edit</button>
+        <form method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ExpenseID}}/delete" data-app-confirm data-confirm-title="Delete this spend?" data-confirm-body="This expense will be removed from your trip." data-confirm-ok="Delete spend" data-confirm-icon="receipt_long" data-confirm-variant="danger" data-ajax-submit data-toast-message="Spend deleted.">
+          <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/budget">
+          <button type="submit" class="item-action-btn danger">Delete</button>
+        </form>
+      </div>
+    </details>
+    {{else}}
+    <span class="budget-table-actions-muted muted">—</span>
+    {{end}}
+  </td>
+</tr>
+{{if .CanEdit}}
+<tr class="budget-expense-edit-row hidden" data-budget-edit-for="{{.ExpenseID}}">
+  <td colspan="6" class="budget-expense-edit-cell">
+    <form id="expense-edit-budget-{{.ExpenseID}}" method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ExpenseID}}/update" class="form-grid item-edit budget-expense-edit-form hidden full" data-ajax-submit data-toast-message="Spend updated." data-budget-expense-id="{{.ExpenseID}}">
+      <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/budget">
+      {{$curCat := .CategoryName}}
+      {{$curMethod := .Method}}
+      <label>Category
+        <select name="category" required>
+          {{range $.ExpenseCategories}}
+          <option value="{{.}}" {{if eq . $curCat}}selected{{end}}>{{.}}</option>
+          {{end}}
+          {{if and $curCat (not (listContains $.ExpenseCategories $curCat))}}
+          <option value="{{$curCat}}" selected>{{$curCat}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Payment Method
+        <select name="payment_method" required>
+          <option value="Cash" {{if or (eq $curMethod "") (eq $curMethod "Cash")}}selected{{end}}>Cash</option>
+          <option value="Credit Card" {{if eq $curMethod "Credit Card"}}selected{{end}}>Credit Card</option>
+          <option value="Crypto" {{if eq $curMethod "Crypto"}}selected{{end}}>Crypto</option>
+          <option value="Debit Card" {{if eq $curMethod "Debit Card"}}selected{{end}}>Debit Card</option>
+          <option value="Digital Wallet" {{if eq $curMethod "Digital Wallet"}}selected{{end}}>Digital Wallet</option>
+          <option value="Mobile Payment" {{if eq $curMethod "Mobile Payment"}}selected{{end}}>Mobile Payment</option>
+        </select>
+      </label>
+      <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" .Amount}}" required></label>
+      <label>Date<input type="date" name="spent_on" value="{{.SpentOn}}"></label>
+      <label class="full">Notes<input type="text" name="notes" value="{{.NotesRaw}}"></label>
+      <div class="full expense-edit-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="secondary-btn" data-inline-edit-cancel="expense-edit-budget-{{.ExpenseID}}">Cancel</button>
+      </div>
+    </form>
+  </td>
 </tr>
 {{end}}
-
+{{end}}{{end}}
