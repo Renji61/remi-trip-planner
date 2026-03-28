@@ -21,13 +21,15 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 	}
 	settings, _ := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	verified := !u.EmailVerifiedAt.IsZero()
-	_ = a.templates.ExecuteTemplate(w, "profile.html", map[string]any{
-		"User":          u,
-		"Settings":      settings,
-		"CSRFToken":     CSRFToken(r.Context()),
-		"EmailVerified": verified,
-		"Saved":         r.URL.Query().Get("saved") == "1",
-	})
+	data := map[string]any{
+		"User": u, "Settings": settings, "CSRFToken": CSRFToken(r.Context()),
+		"EmailVerified": verified, "Saved": r.URL.Query().Get("saved") == "1",
+	}
+	if err := a.mergeDashboardShell(r.Context(), uid, "profile", "", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = a.templates.ExecuteTemplate(w, "profile.html", data)
 }
 
 func (a *app) profileSave(w http.ResponseWriter, r *http.Request) {
@@ -42,10 +44,15 @@ func (a *app) profileSave(w http.ResponseWriter, r *http.Request) {
 	u, err := a.tripService.UpdateUserProfile(r.Context(), uid, email, username, displayName)
 	if err != nil {
 		settings, _ := a.tripService.MergedSettingsForUI(r.Context(), uid)
-		_ = a.templates.ExecuteTemplate(w, "profile.html", map[string]any{
+		data := map[string]any{
 			"User": u, "Settings": settings, "CSRFToken": CSRFToken(r.Context()),
 			"Error": err.Error(), "EmailVerified": !u.EmailVerifiedAt.IsZero(),
-		})
+		}
+		if err2 := a.mergeDashboardShell(r.Context(), uid, "profile", "", data); err2 != nil {
+			http.Error(w, err2.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = a.templates.ExecuteTemplate(w, "profile.html", data)
 		return
 	}
 	if u.EmailVerifiedAt.IsZero() && strings.TrimSpace(email) != "" {
@@ -66,10 +73,15 @@ func (a *app) profilePassword(w http.ResponseWriter, r *http.Request) {
 	if nw != confirm {
 		u, _ := a.tripService.GetUserByID(r.Context(), uid)
 		settings, _ := a.tripService.MergedSettingsForUI(r.Context(), uid)
-		_ = a.templates.ExecuteTemplate(w, "profile.html", map[string]any{
+		data := map[string]any{
 			"User": u, "Settings": settings, "CSRFToken": CSRFToken(r.Context()),
 			"PasswordError": "Passwords do not match.", "EmailVerified": !u.EmailVerifiedAt.IsZero(),
-		})
+		}
+		if err := a.mergeDashboardShell(r.Context(), uid, "profile", "", data); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = a.templates.ExecuteTemplate(w, "profile.html", data)
 		return
 	}
 	if err := a.tripService.UpdateUserPassword(r.Context(), uid, cur, nw); err != nil {
@@ -83,6 +95,10 @@ func (a *app) profilePassword(w http.ResponseWriter, r *http.Request) {
 			data["CurrentPasswordError"] = trips.ErrWrongCurrentPassword.Error()
 		} else {
 			data["PasswordError"] = err.Error()
+		}
+		if err2 := a.mergeDashboardShell(r.Context(), uid, "profile", "", data); err2 != nil {
+			http.Error(w, err2.Error(), http.StatusInternalServerError)
+			return
 		}
 		_ = a.templates.ExecuteTemplate(w, "profile.html", data)
 		return

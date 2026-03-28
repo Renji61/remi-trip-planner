@@ -594,13 +594,211 @@ window.addEventListener("load", () => {
       return [];
     }
     return data
-      .map((item) => ({
-        lat: parseFloat(item.lat || "0"),
-        lng: parseFloat(item.lon || "0"),
-        displayName: item.display_name || ""
-      }))
-      .filter((item) => item.displayName && !Number.isNaN(item.lat) && !Number.isNaN(item.lng));
+      .map((item) => {
+        const lat = parseFloat(item.lat || "0");
+        const lng = parseFloat(item.lon || "0");
+        const displayName = item.display_name || "";
+        const name = item.name && String(item.name).trim() ? String(item.name).trim() : "";
+        const shortName = name || (displayName ? displayName.split(",")[0].trim() : "") || displayName;
+        return { lat, lng, displayName, shortName };
+      })
+      .filter((item) => (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng));
   };
+
+  document.querySelectorAll("form[data-dashboard-trip-place]").forEach((heroForm) => {
+    const shell = document.querySelector("main.app-shell");
+    const lookupEnabled = shell ? shell.getAttribute("data-location-lookup-enabled") !== "false" : true;
+    const nameInput = heroForm.querySelector("[data-dashboard-trip-name-input]");
+    const latInput = heroForm.querySelector("[data-home-map-lat]");
+    const lngInput = heroForm.querySelector("[data-home-map-lng]");
+    if (!nameInput || !latInput || !lngInput) {
+      return;
+    }
+
+    let timer = null;
+    let token = 0;
+    let suggestionsHost = null;
+    let pickedLabel = null;
+
+    const ensureHost = () => {
+      if (suggestionsHost) return suggestionsHost;
+      suggestionsHost = document.createElement("div");
+      suggestionsHost.className = "location-suggestions hidden";
+      suggestionsHost.setAttribute("role", "listbox");
+      const wrap = nameInput.closest(".hero-trip-name-field") || nameInput.parentElement;
+      if (wrap) wrap.appendChild(suggestionsHost);
+      return suggestionsHost;
+    };
+
+    const hide = () => {
+      const host = ensureHost();
+      host.classList.add("hidden");
+      host.innerHTML = "";
+      nameInput.setAttribute("aria-expanded", "false");
+    };
+
+    const clearCoords = () => {
+      latInput.value = "";
+      lngInput.value = "";
+      pickedLabel = null;
+    };
+
+    nameInput.addEventListener("input", () => {
+      if (!lookupEnabled) {
+        return;
+      }
+      if (pickedLabel !== null && nameInput.value.trim() !== pickedLabel) {
+        clearCoords();
+      }
+      if (timer) clearTimeout(timer);
+      const query = nameInput.value.trim();
+      if (query.length < 3) {
+        hide();
+        return;
+      }
+      timer = window.setTimeout(async () => {
+        const current = ++token;
+        const host = ensureHost();
+        const suggestions = await searchLocations(query);
+        if (current !== token) return;
+        host.innerHTML = "";
+        if (!suggestions.length) {
+          hide();
+          return;
+        }
+        suggestions.forEach((s) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "location-suggestion-btn dashboard-trip-place-suggest";
+          const title = document.createElement("span");
+          title.className = "dashboard-trip-place-suggest__title";
+          title.textContent = s.shortName || s.displayName;
+          btn.appendChild(title);
+          if (s.displayName && s.displayName !== title.textContent) {
+            const sub = document.createElement("span");
+            sub.className = "dashboard-trip-place-suggest__detail";
+            sub.textContent = s.displayName;
+            btn.appendChild(sub);
+          }
+          btn.addEventListener("click", () => {
+            const label = (s.shortName || s.displayName || "").trim();
+            nameInput.value = label;
+            latInput.value = String(s.lat);
+            lngInput.value = String(s.lng);
+            pickedLabel = label;
+            hide();
+          });
+          host.appendChild(btn);
+        });
+        host.classList.remove("hidden");
+        nameInput.setAttribute("aria-expanded", "true");
+      }, 300);
+    });
+
+    nameInput.addEventListener("blur", () => {
+      window.setTimeout(hide, 180);
+    });
+  });
+
+  document.querySelectorAll("form[data-site-settings-map-form]").forEach((mapForm) => {
+    const shell = mapForm.closest(".app-shell");
+    const lookupEnabled = shell ? shell.getAttribute("data-location-lookup-enabled") !== "false" : true;
+    const nameInput = mapForm.querySelector("[data-site-settings-map-name]");
+    const latInput = mapForm.querySelector("[data-site-settings-map-lat]");
+    const lngInput = mapForm.querySelector("[data-site-settings-map-lng]");
+    if (!nameInput || !latInput || !lngInput) {
+      return;
+    }
+
+    let timer = null;
+    let token = 0;
+    let suggestionsHost = null;
+    let pickedLabel = (nameInput.value || "").trim() || null;
+
+    const ensureHost = () => {
+      if (suggestionsHost) return suggestionsHost;
+      suggestionsHost = document.createElement("div");
+      suggestionsHost.className = "location-suggestions hidden";
+      suggestionsHost.setAttribute("role", "listbox");
+      const wrap = nameInput.closest(".site-settings-default-place-field") || nameInput.parentElement;
+      if (wrap) wrap.appendChild(suggestionsHost);
+      return suggestionsHost;
+    };
+
+    const hide = () => {
+      const host = ensureHost();
+      host.classList.add("hidden");
+      host.innerHTML = "";
+      nameInput.setAttribute("aria-expanded", "false");
+    };
+
+    const clearCoords = () => {
+      latInput.value = "";
+      lngInput.value = "";
+      pickedLabel = null;
+    };
+
+    nameInput.addEventListener("input", () => {
+      const query = nameInput.value.trim();
+      if (query === "") {
+        clearCoords();
+        hide();
+        return;
+      }
+      if (!lookupEnabled) {
+        return;
+      }
+      if (pickedLabel !== null && query !== pickedLabel) {
+        clearCoords();
+      }
+      if (timer) clearTimeout(timer);
+      if (query.length < 3) {
+        hide();
+        return;
+      }
+      timer = window.setTimeout(async () => {
+        const current = ++token;
+        const host = ensureHost();
+        const suggestions = await searchLocations(query);
+        if (current !== token) return;
+        host.innerHTML = "";
+        if (!suggestions.length) {
+          hide();
+          return;
+        }
+        suggestions.forEach((s) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "location-suggestion-btn dashboard-trip-place-suggest";
+          const title = document.createElement("span");
+          title.className = "dashboard-trip-place-suggest__title";
+          title.textContent = s.shortName || s.displayName;
+          btn.appendChild(title);
+          if (s.displayName && s.displayName !== title.textContent) {
+            const sub = document.createElement("span");
+            sub.className = "dashboard-trip-place-suggest__detail";
+            sub.textContent = s.displayName;
+            btn.appendChild(sub);
+          }
+          btn.addEventListener("click", () => {
+            const label = (s.shortName || s.displayName || "").trim();
+            nameInput.value = label;
+            latInput.value = String(s.lat);
+            lngInput.value = String(s.lng);
+            pickedLabel = label;
+            hide();
+          });
+          host.appendChild(btn);
+        });
+        host.classList.remove("hidden");
+        nameInput.setAttribute("aria-expanded", "true");
+      }, 300);
+    });
+
+    nameInput.addEventListener("blur", () => {
+      window.setTimeout(hide, 180);
+    });
+  });
 
   const editPanel = document.querySelector("[data-edit-panel]");
   const openEditBtn = document.querySelector("[data-edit-toggle='open']");
@@ -2086,11 +2284,11 @@ window.addEventListener("load", () => {
   const mapEl = document.getElementById("map");
   if (!mapEl || typeof L === "undefined") return;
 
-  const defaultLat = parseFloat(mapEl.getAttribute("data-map-lat") || "14.5995");
-  const defaultLng = parseFloat(mapEl.getAttribute("data-map-lng") || "120.9842");
+  const defaultLat = parseFloat(mapEl.getAttribute("data-map-lat") || "35.6762");
+  const defaultLng = parseFloat(mapEl.getAttribute("data-map-lng") || "139.6503");
   const defaultZoom = parseInt(mapEl.getAttribute("data-map-zoom") || "6", 10);
-  const startLat = Number.isNaN(defaultLat) ? 14.5995 : defaultLat;
-  const startLng = Number.isNaN(defaultLng) ? 120.9842 : defaultLng;
+  const startLat = Number.isNaN(defaultLat) ? 35.6762 : defaultLat;
+  const startLng = Number.isNaN(defaultLng) ? 139.6503 : defaultLng;
   const startZoom = Number.isNaN(defaultZoom) ? 6 : defaultZoom;
 
   const map = L.map("map").setView([startLat, startLng], startZoom);

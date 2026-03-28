@@ -49,7 +49,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 ### Trips & dashboard
 
-- Create trips from the home page; view **active**, **draft**, and **archived** groups.
+- Create trips from the home page (optional **place lookup** for trip map center; falls back to site default location); view **active**, **draft**, and **archived** groups.
 - **Dashboard customization:** grid vs list cards, sort order, hero background style, heading text (app settings).
 - Per-trip: name, description, dates, **cover image URL**, **currency**, archive/delete.
 
@@ -87,7 +87,11 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 ### App-wide settings
 
-- App title, default currency, map defaults, theme (light / dark / system), location lookup, dashboard presentation options — via **Settings** and quick theme POST from the trip shell.
+- App title, default currency, **default map location** (place search with short name stored; Tokyo fallback), map zoom, theme (light / dark / system), location lookup, dashboard presentation options — via **Settings** and quick theme POST from the trip shell.
+
+### About & updates
+
+- **About** page with installed version, release notes, and **check for updates** (compares to GitHub Releases for self-hosted instances).
 
 ### PWA
 
@@ -133,7 +137,7 @@ Environment variables (all optional except as noted):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `APP_ADDR` | `:8080` | HTTP listen address (inside container use `:8080`; map host port in Compose). |
+| `APP_ADDR` | `:4122` | HTTP listen address for **native** runs. Inside Docker the image uses `:8080`; map host port in Compose (default **4122**). |
 | `SQLITE_PATH` | `./data/trips.db` | SQLite database file path. |
 | `REMI_ROOT` | _(unset)_ | Absolute path to repo root if the process cwd is not the module directory. |
 
@@ -152,18 +156,18 @@ mkdir -p data
 go run ./cmd/server
 ```
 
-Open [http://localhost:8080](http://localhost:8080).
+Open [http://localhost:4122](http://localhost:4122).
 
 Use another port:
 
 ```bash
 # Unix / Git Bash
-APP_ADDR=:8051 go run ./cmd/server
+APP_ADDR=:9090 go run ./cmd/server
 ```
 
 ```powershell
 # Windows PowerShell
-$env:APP_ADDR=":8051"; go run ./cmd/server
+$env:APP_ADDR=":9090"; go run ./cmd/server
 ```
 
 If you open the IDE at a **parent** folder (e.g. a folder containing several projects), the server tries to `chdir` into the checkout that contains `module remi-trip-planner` in `go.mod`, or set `REMI_ROOT` explicitly.
@@ -181,7 +185,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.2.0` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.40.0` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 
@@ -196,12 +200,12 @@ Or copy [`docker-compose.install.yml`](docker-compose.install.yml) from this rep
 docker compose -f docker-compose.install.yml up -d
 ```
 
-Open [http://localhost:8080](http://localhost:8080). Edit **`8080:8080`** in the file to change the host port.
+Open [http://localhost:4122](http://localhost:4122). Edit **`4122:8080`** in the file to change the host port (left side = host, right = container).
 
 ### Build from clone (developers)
 
 ```bash
-cp .env.example .env   # optional: REMI_PORT=8051 maps host → container 8080
+cp .env.example .env   # optional: REMI_PORT maps host → container 8080 (default 4122)
 docker compose up -d --build
 ```
 
@@ -211,10 +215,9 @@ docker compose up -d --build
 
 ### Registry compose (optional `.env` overrides)
 
-[`docker-compose.registry.yml`](docker-compose.registry.yml) defaults to the same official image and port **8080** — **no `.env` required**. Set `REMI_IMAGE` or `REMI_PORT` in `.env` only if you fork the image or need another port.
+[`docker-compose.registry.yml`](docker-compose.registry.yml) defaults to the same official image and host port **4122** (→ container **8080**) — **no `.env` required**. Set `REMI_IMAGE` or `REMI_PORT` in `.env` only if you fork the image or need another port.
 
-- **Auto-updates:** optional Watchtower profile — `docker compose -f docker-compose.registry.yml --profile watchtower up -d` — see [docs/self-hosting.md](docs/self-hosting.md).
-- The default **`docker-compose.yml`** (build path) does **not** include Watchtower so a local image tag is not replaced from Docker Hub by mistake.
+Compose files **do not** include Watchtower or other auto-update sidecars; pull/rebuild when you want a new version, or add your own tooling.
 
 Full instructions: **[docs/self-hosting.md](docs/self-hosting.md)**.
 
@@ -266,7 +269,7 @@ CI: **[.github/workflows/docker-publish.yml](.github/workflows/docker-publish.ym
 
 ## Security notes
 
-- This release has **no built-in user accounts**. Do not expose the app to the public internet without **network isolation**, **VPN**, or **proxy authentication**.
+- Use **strong passwords**, **HTTPS** in production, and **secure cookies** when exposing the app beyond localhost. Restrict who can reach the server (VPN, firewall, or authenticated reverse proxy).
 - Keep **secrets** out of git (`.env` is gitignored). Use strong host permissions on the SQLite file.
 
 ---

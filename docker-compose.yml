@@ -7,9 +7,7 @@
 # Manual update (rebuild from latest git):
 #   git pull && docker compose up -d --build
 #
-# Auto-updates (Watchtower) apply to registry-based installs only — see
-# docker-compose.registry.yml + docs/self-hosting.md (avoids pulling the wrong
-# image for a local-only tag).
+# Default host port is 4122 → container 8080 (override with REMI_PORT in .env).
 
 services:
   remi:
@@ -20,7 +18,7 @@ services:
     container_name: remi-trip-planner
     restart: unless-stopped
     ports:
-      - "${REMI_PORT:-8080}:8080"
+      - "${REMI_PORT:-4122}:8080"
     environment:
       APP_ADDR: ":8080"
       SQLITE_PATH: /app/data/trips.db

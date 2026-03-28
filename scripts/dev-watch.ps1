@@ -1,4 +1,4 @@
-# Watch REMI Trip Planner sources and rebuild + restart the server on :8051.
+# Watch REMI Trip Planner sources and rebuild + restart the server on :4122.
 # Run from repo root:  .\scripts\dev-watch.ps1
 # Ctrl+C stops the watcher and the server on this port.
 
@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $Root
 
-$Port = 8051
+$Port = 4122
 $DebounceMs = 1200
 
 function Stop-ServerOnPort {
@@ -20,6 +20,9 @@ function Stop-ServerOnPort {
 function Test-WatchedPath {
     param([string]$FullPath)
     if ($FullPath -match '[\\/]\.git[\\/]') { return $false }
+    if ($FullPath -match '[\\/]tmp[\\/]') { return $false }
+    if ($FullPath -match '[\\/]bin[\\/]') { return $false }
+    if ($FullPath -match '[\\/]web[\\/]static[\\/]uploads[\\/]') { return $false }
     $ext = [System.IO.Path]::GetExtension($FullPath).ToLowerInvariant()
     return @(".go", ".html", ".css", ".js", ".sql") -contains $ext
 }

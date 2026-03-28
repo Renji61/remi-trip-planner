@@ -11,14 +11,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Flesh out `POST /api/v1/trips/{tripID}/sync` request handling per [docs/sync_contract.md](docs/sync_contract.md).
 - Richer conflict handling beyond last-write-wins for sync clients.
 
+## [1.40.0] - 2026-03-28
+
+### Added
+
+- **Site settings — default map location:** single **Default location** field with place suggestions (same pattern as the dashboard); stores a **short place name** and coordinates. **Tokyo** is the default when the field is cleared or when a new trip is created without picking a place on the dashboard (trip map uses app defaults).
+- **Database:** `map_default_place_label` on `app_settings` (migrated on startup); `INSERT` in base migration kept compatible with existing databases before the new column exists.
+- **Mobile account menu:** **Profile** as the first action; **App settings** / **Trip settings** and **Log out** with clearer layout, icons, and separator.
+
+### Changed
+
+- **Default ports:** native `go run` / `APP_ADDR` default **`:4122`**; Docker Compose default host mapping **`4122:8080`** (`REMI_PORT` default **4122**; container still listens on **8080** inside the image).
+- **Docker Compose:** **Watchtower** (and related labels/env) **removed** from all compose files — add your own auto-update tooling if desired.
+
+### Removed
+
+- Watchtower service and `com.centurylinklabs.watchtower.enable` labels from `docker-compose.yml`, `docker-compose.registry.yml`, and `docker-compose.install.yml`.
+
+### Notes for self-hosters
+
+- **Update notification:** the About page and `GET /api/about/update-check` compare the running build to **GitHub Releases**. Publish tag **`v1.40.0`** (and the corresponding image tag if you use GHCR) so instances on older versions see a newer release.
+
+## [1.3.0] - 2026-03-28
+
+### Added
+
+- **About** page (`/about`): installed version, optional **Check for updates** (and automatic check on load via GitHub Releases), release notes from the bundled changelog for this version, and a plain-language **feature** list.
+- **Dashboard navigation:** **Discover** and **Spends** removed from the sidebar; **About**, **Profile**, and **Logout** use icons; up to **two in-progress trips** (by trip dates, not archived) appear under **My Trip** and in the **mobile bottom bar** in place of the old Explore/Spends slots.
+- **API:** `GET /api/about/update-check` (authenticated) returns current vs latest release metadata for the UI.
+
+### Changed
+
+- **Support** renamed to **About** (sidebar and trip sidebars link to `/about`).
+- **Trip** sidebars: **Logout** uses a proper POST form with CSRF; **About** includes an icon.
+
 ## [1.2.0] - 2026-03-28
 
 ### Added
 
 - **Public container image** on GitHub Container Registry: `ghcr.io/renji61/remi-trip-planner:latest` (and SemVer tags from `v*.*.*` via CI).
 - **`docker-compose.install.yml`** — single-file homelab install with **no `.env` required** (literal image and port).
-- **`docker-compose.registry.yml`** — same stack with **optional** `.env` overrides (`REMI_IMAGE` defaults to the official image; `REMI_PORT` defaults to 8080).
-- **`docker-compose.yml`** — build from clone; healthchecks via `wget`; Watchtower intentionally omitted (see self-hosting docs).
+- **`docker-compose.registry.yml`** — same stack with **optional** `.env` overrides (`REMI_IMAGE` defaults to the official image; host port default later standardized to **4122** in v1.40.0).
+- **`docker-compose.yml`** — build from clone; healthchecks via `wget`.
 - **`.github/workflows/docker-publish.yml`** — build and push to GHCR on `main` and SemVer tags.
 - **Docs:** [docs/self-hosting.md](docs/self-hosting.md), [docs/publish-image.md](docs/publish-image.md); **`.env.example`**, **`.dockerignore`**; **`scripts/publish-ghcr.ps1`** / **`scripts/publish-ghcr.sh`**.
 
@@ -81,7 +115,6 @@ Multi-user accounts, trip collaboration, richer trip layout controls, and an int
 
 - **Server cwd:** if the binary lives under `bin/`, the process **`chdir`s to the parent** of the executable directory so `web/templates` and `web/static` resolve when running `bin/remi-server.exe`.
 - **`.air.toml`** and **`scripts/run-dev.cmd`** for live reload workflows; **`scripts/deploy-docker.ps1`** helper; **`scripts/dev-watch.ps1`** updates.
-- **Cursor rules** under `.cursor/rules/` for local rebuild/restart on port 8051 (optional for contributors using Cursor).
 
 #### Other
 
@@ -182,7 +215,7 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 
 ### Changed
 
-- README expanded for Docker vs local Go, ports (`8051:8080` in Compose), and environment variables.
+- README expanded for Docker vs local Go, ports, and environment variables.
 - Trip page template pipeline hardened (buffered render + error handling) to avoid truncated HTML on template errors.
 
 ### Security
@@ -190,7 +223,9 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.40.0...HEAD
+[1.40.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.3.0...v1.40.0
+[1.3.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Renji61/remi-trip-planner/compare/5d7e105...v1.1.0

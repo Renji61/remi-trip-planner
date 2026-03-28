@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  {{template "themeHeadScript" .}}
+  <title>About | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=87">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="/static/app.js"></script>
+</head>
+<body class="page-about">
+  <main class="app-shell" aria-label="About">
+    <aside class="sidebar">
+      {{template "dashboardShellSidebar" .}}
+    </aside>
+
+    <section class="main about-main" aria-label="About this app">
+      <header class="trip-mobile-header site-settings-mobile-header">
+        <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
+          <span class="material-symbols-outlined" aria-hidden="true">home</span>
+        </a>
+        <h2 class="trip-mobile-header-title">About</h2>
+        <div class="budget-mobile-header-actions">
+          <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+          <button type="button" class="budget-mobile-header-btn" data-mobile-profile-open data-mobile-profile-target="#app-mobile-profile-sheet" aria-label="Open account menu">
+            <span class="material-symbols-outlined" aria-hidden="true">person</span>
+          </button>
+        </div>
+      </header>
+
+      <header class="topbar trip-mobile-topbar">
+        <div class="title-group">
+          <h2>About</h2>
+          <p>Version information and what you can do with {{.Settings.AppTitle}}.</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">
+          <a href="/" class="icon-btn" aria-label="Go to dashboard">
+            <span class="material-symbols-outlined" aria-hidden="true">home</span>
+          </a>
+          <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="about-page-stack">
+        <section class="card about-version-card" aria-labelledby="about-version-title">
+          <h3 id="about-version-title">This install</h3>
+          <p class="about-version-line"><strong>Version</strong> <span class="about-version-tag" data-app-version>{{.AppVersion}}</span></p>
+          <p class="muted about-version-hint" id="about-update-status" data-about-update-status aria-live="polite">Checking for updates…</p>
+          <button type="button" class="secondary-btn about-check-update-btn" id="about-check-update-btn">Check for updates</button>
+        </section>
+
+        <section class="card about-changelog-card" aria-labelledby="about-changelog-title">
+          <h3 id="about-changelog-title">Release notes (v{{.AppVersion}})</h3>
+          {{if .ChangelogHTML}}
+          <div class="about-changelog-body">{{.ChangelogHTML}}</div>
+          {{else}}
+          <p class="muted">No detailed notes are bundled for this version. See the project changelog online for history.</p>
+          {{end}}
+        </section>
+
+        <section class="card about-features-card" aria-labelledby="about-features-title">
+          <h3 id="about-features-title">What you can do with REMI Trip Planner</h3>
+          <ul class="about-features-list">
+            <li>Create and organize trips with dates, description, cover image, and currency.</li>
+            <li>See trips grouped as active, draft, or archived on your personal dashboard.</li>
+            <li>Invite others by email or shareable link and plan together.</li>
+            <li>Build a day-by-day itinerary with stops, notes, optional costs, and a map with pins and routes.</li>
+            <li>Turn location lookup on or off when adding places.</li>
+            <li>Track spending against a budget, with categories and a dedicated budget view per trip.</li>
+            <li>Record stays, vehicle rentals, and flights with details and attachments.</li>
+            <li>Use reminder checklists so nothing important is forgotten.</li>
+            <li>Customize each trip: which sections appear, labels, layout order, and light or dark theme.</li>
+            <li>Add custom links in the trip sidebar for quick references.</li>
+            <li>Install as an app (PWA) for a more app-like experience on your device.</li>
+          </ul>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  {{template "dashboardBottomNav" .}}
+  {{template "appMobileProfileSheet" .}}
+  {{template "appConfirmDialog"}}
+
+  <script>
+  (function () {
+    var statusEl = document.getElementById("about-update-status");
+    var btn = document.getElementById("about-check-update-btn");
+    function setStatus(text) {
+      if (statusEl) statusEl.textContent = text;
+    }
+    function render(data) {
+      if (!data || !data.check_ok) {
+        setStatus(data && data.message ? data.message : "Could not check for updates.");
+        return;
+      }
+      if (data.update_available) {
+        setStatus("Update available: latest release is v" + data.latest + ". Ask your server admin to deploy the new version.");
+      } else {
+        setStatus("You are up to date with the latest published release (v" + data.latest + ").");
+      }
+    }
+    function run() {
+      setStatus("Checking for updates…");
+      fetch("/api/about/update-check", { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(render)
+        .catch(function () { setStatus("Could not check for updates."); });
+    }
+    if (btn) btn.addEventListener("click", run);
+    run();
+  })();
+  </script>
+</body>
+</html>

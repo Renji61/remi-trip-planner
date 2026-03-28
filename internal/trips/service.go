@@ -22,10 +22,13 @@ type Trip struct {
 	CoverImage     string
 	CurrencyName   string
 	CurrencySymbol string
-	IsArchived     bool
-	OwnerUserID    string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// HomeMapLatitude/Longitude: optional center from dashboard “Trip name” place pick (0 = use app map defaults).
+	HomeMapLatitude  float64
+	HomeMapLongitude float64
+	IsArchived       bool
+	OwnerUserID      string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 	// Per-trip UI: section visibility on trip page and nav (default all enabled).
 	UIShowStay      bool
 	UIShowVehicle   bool
@@ -250,6 +253,7 @@ type AppSettings struct {
 	TripDashboardHeading    string // main heading on the home dashboard (e.g. "Trip Dashboard")
 	DefaultCurrencyName     string
 	DefaultCurrencySymbol   string
+	MapDefaultPlaceLabel    string // short name shown in settings (e.g. Tokyo)
 	MapDefaultLatitude      float64
 	MapDefaultLongitude     float64
 	MapDefaultZoom          int
@@ -1671,6 +1675,13 @@ func (s *Service) GetAppSettings(ctx context.Context) (AppSettings, error) {
 	if settings.MapDefaultZoom < 1 {
 		settings.MapDefaultZoom = 6
 	}
+	if strings.TrimSpace(settings.MapDefaultPlaceLabel) == "" {
+		settings.MapDefaultPlaceLabel = DefaultMapPlaceLabel
+	}
+	if settings.MapDefaultLatitude == 0 && settings.MapDefaultLongitude == 0 {
+		settings.MapDefaultLatitude = DefaultMapLatitude
+		settings.MapDefaultLongitude = DefaultMapLongitude
+	}
 	settings.ThemePreference = normalizeThemePreference(settings.ThemePreference)
 	settings.DashboardTripLayout = normalizeDashboardLayout(settings.DashboardTripLayout)
 	settings.DashboardTripSort = normalizeDashboardSort(settings.DashboardTripSort)
@@ -1694,6 +1705,13 @@ func (s *Service) SaveAppSettings(ctx context.Context, settings AppSettings) err
 	}
 	if settings.MapDefaultZoom < 1 || settings.MapDefaultZoom > 20 {
 		settings.MapDefaultZoom = 6
+	}
+	if strings.TrimSpace(settings.MapDefaultPlaceLabel) == "" {
+		settings.MapDefaultPlaceLabel = DefaultMapPlaceLabel
+	}
+	if settings.MapDefaultLatitude == 0 && settings.MapDefaultLongitude == 0 {
+		settings.MapDefaultLatitude = DefaultMapLatitude
+		settings.MapDefaultLongitude = DefaultMapLongitude
 	}
 	settings.ThemePreference = normalizeThemePreference(settings.ThemePreference)
 	settings.DashboardTripLayout = normalizeDashboardLayout(settings.DashboardTripLayout)

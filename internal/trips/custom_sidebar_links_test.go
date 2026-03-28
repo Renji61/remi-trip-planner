@@ -48,8 +48,11 @@ func TestCustomSidebarLinksFromForm(t *testing.T) {
 
 func TestDefaultAppSettings(t *testing.T) {
 	d := DefaultAppSettings()
-	if d.AppTitle == "" || d.MapDefaultZoom == 0 {
+	if d.AppTitle == "" || d.MapDefaultZoom == 0 || d.MapDefaultPlaceLabel != DefaultMapPlaceLabel {
 		t.Fatalf("%+v", d)
+	}
+	if d.MapDefaultLatitude != DefaultMapLatitude || d.MapDefaultLongitude != DefaultMapLongitude {
+		t.Fatalf("map defaults want Tokyo coords, got %+v", d)
 	}
 }
 

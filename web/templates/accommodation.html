@@ -28,7 +28,11 @@
       {{template "tripMembersPanel" .}}
       <div class="sidebar-bottom">
         <a class="btn" href="/">Back to Dashboard</a>
-        <a class="support-link" href="/">Support</a>
+        <a class="support-link sidebar-icon-link" href="/about"><span class="material-symbols-outlined" aria-hidden="true">info</span>About</a>
+        <form method="post" action="/logout" class="sidebar-logout-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button type="submit" class="logout-link sidebar-icon-link"><span class="material-symbols-outlined" aria-hidden="true">logout</span>Logout</button>
+        </form>
       </div>
     </aside>
 

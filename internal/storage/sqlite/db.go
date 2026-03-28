@@ -117,6 +117,17 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	if err := migrateAuthAndSharing(db); err != nil {
 		return nil, err
 	}
+	for _, stmt := range []string{
+		`ALTER TABLE trips ADD COLUMN home_map_latitude REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE trips ADD COLUMN home_map_longitude REAL NOT NULL DEFAULT 0`,
+	} {
+		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+	}
+	if _, err = db.Exec(`ALTER TABLE app_settings ADD COLUMN map_default_place_label TEXT NOT NULL DEFAULT 'Tokyo'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
 	return db, nil
 }
 

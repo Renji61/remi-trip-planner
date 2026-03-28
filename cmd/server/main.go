@@ -91,7 +91,7 @@ func main() {
 	chdirToModuleRoot()
 
 	dbPath := envOrDefault("SQLITE_PATH", "./data/trips.db")
-	addr := envOrDefault("APP_ADDR", ":8080")
+	addr := envOrDefault("APP_ADDR", ":4122")
 
 	db, err := sqlite.OpenAndMigrate(dbPath, "migrations/001_init.sql")
 	if err != nil {

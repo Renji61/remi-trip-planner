@@ -4,7 +4,7 @@ data/
 server.exe
 *.exe
 
-# IDE / local agent artifacts (keep shared Cursor rules)
+# Optional editor-specific rules (unignore the rules folder if you use it)
 .cursor/*
 !.cursor/rules/
 !.cursor/rules/**
@@ -20,6 +20,9 @@ web/static/uploads/
 # Tests / tooling
 coverage.out
 coverage.html
+
+# VS Code workspace (local)
+.vscode/
 
 # OS/editor noise
 .DS_Store

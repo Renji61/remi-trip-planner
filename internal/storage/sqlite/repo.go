@@ -27,7 +27,7 @@ func sqliteBool(b bool) int {
 	return 0
 }
 
-const tripSelectCols = `id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived, owner_user_id,
+const tripSelectCols = `id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, home_map_latitude, home_map_longitude, is_archived, owner_user_id,
 		ui_show_stay, ui_show_vehicle, ui_show_flights, ui_show_spends, ui_show_itinerary, ui_show_checklist,
 		ui_itinerary_expand, ui_spends_expand, ui_time_format,
 		ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends,
@@ -40,7 +40,7 @@ func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
 	var t trips.Trip
 	var ss, sv, sf, sp, sit, sck, scl int
 	err := scan(
-		&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.IsArchived, &t.OwnerUserID,
+		&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.HomeMapLatitude, &t.HomeMapLongitude, &t.IsArchived, &t.OwnerUserID,
 		&ss, &sv, &sf, &sp, &sit, &sck,
 		&t.UIItineraryExpand, &t.UISpendsExpand, &t.UITimeFormat,
 		&t.UILabelStay, &t.UILabelVehicle, &t.UILabelFlights, &t.UILabelSpends,
@@ -69,7 +69,7 @@ func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) (string, erro
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO trips (
-			id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, is_archived, owner_user_id,
+			id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, home_map_latitude, home_map_longitude, is_archived, owner_user_id,
 			ui_show_stay, ui_show_vehicle, ui_show_flights, ui_show_spends, ui_show_itinerary, ui_show_checklist,
 			ui_itinerary_expand, ui_spends_expand, ui_time_format,
 			ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends,
@@ -77,8 +77,8 @@ func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) (string, erro
 			ui_main_section_hidden, ui_sidebar_widget_hidden,
 			ui_show_custom_links, ui_custom_sidebar_links,
 			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 'first', 'first', '12h', '', '', '', '', '', '', '', '', 1, '', ?, ?)`,
-		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.IsArchived, t.OwnerUserID, now, now,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 'first', 'first', '12h', '', '', '', '', '', '', '', '', 1, '', ?, ?)`,
+		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude, t.IsArchived, t.OwnerUserID, now, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, t.ID, "trip", t.ID, "create", map[string]any{"name": t.Name})
@@ -113,6 +113,7 @@ func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE trips
 		SET name = ?, description = ?, start_date = ?, end_date = ?, cover_image_url = ?, currency_name = ?, currency_symbol = ?,
+		    home_map_latitude = ?, home_map_longitude = ?,
 		    ui_show_stay = ?, ui_show_vehicle = ?, ui_show_flights = ?, ui_show_spends = ?, ui_show_itinerary = ?, ui_show_checklist = ?,
 		    ui_itinerary_expand = ?, ui_spends_expand = ?, ui_time_format = ?,
 		    ui_label_stay = ?, ui_label_vehicle = ?, ui_label_flights = ?, ui_label_spends = ?,
@@ -121,7 +122,7 @@ func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
 		    ui_show_custom_links = ?, ui_custom_sidebar_links = ?,
 		    updated_at = ?
 		WHERE id = ?`,
-		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol,
+		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude,
 		sqliteBool(t.UIShowStay), sqliteBool(t.UIShowVehicle), sqliteBool(t.UIShowFlights), sqliteBool(t.UIShowSpends),
 		sqliteBool(t.UIShowItinerary), sqliteBool(t.UIShowChecklist),
 		t.UIItineraryExpand, t.UISpendsExpand, t.UITimeFormat,
@@ -688,7 +689,9 @@ func (r *Repository) logChange(ctx context.Context, tripID, entity, entityID, op
 func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, error) {
 	var settings trips.AppSettings
 	err := r.db.QueryRowContext(ctx, `
-		SELECT app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
+		SELECT app_title, default_currency_name, default_currency_symbol,
+		       COALESCE(NULLIF(TRIM(map_default_place_label), ''), 'Tokyo'),
+		       map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
 		       COALESCE(registration_enabled, 1),
 		       COALESCE(theme_preference, 'system'), COALESCE(dashboard_trip_layout, 'grid'), COALESCE(dashboard_trip_sort, 'name'), COALESCE(dashboard_hero_background, 'default'),
 		       COALESCE(NULLIF(TRIM(trip_dashboard_heading), ''), 'Trip Dashboard')
@@ -698,6 +701,7 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 			&settings.AppTitle,
 			&settings.DefaultCurrencyName,
 			&settings.DefaultCurrencySymbol,
+			&settings.MapDefaultPlaceLabel,
 			&settings.MapDefaultLatitude,
 			&settings.MapDefaultLongitude,
 			&settings.MapDefaultZoom,
@@ -719,14 +723,15 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO app_settings
-			(id, app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
+			(id, app_title, default_currency_name, default_currency_symbol, map_default_place_label, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
 			 registration_enabled, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background, trip_dashboard_heading, updated_at)
 		VALUES
-			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			app_title = excluded.app_title,
 			default_currency_name = excluded.default_currency_name,
 			default_currency_symbol = excluded.default_currency_symbol,
+			map_default_place_label = excluded.map_default_place_label,
 			map_default_latitude = excluded.map_default_latitude,
 			map_default_longitude = excluded.map_default_longitude,
 			map_default_zoom = excluded.map_default_zoom,
@@ -742,6 +747,7 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 		settings.AppTitle,
 		settings.DefaultCurrencyName,
 		settings.DefaultCurrencySymbol,
+		settings.MapDefaultPlaceLabel,
 		settings.MapDefaultLatitude,
 		settings.MapDefaultLongitude,
 		settings.MapDefaultZoom,

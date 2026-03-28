@@ -10,33 +10,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=24">
+  <link rel="stylesheet" href="/static/app.css?v=88">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js"></script>
+  <script defer src="/static/app.js?v=88"></script>
 </head>
 <body>
-  <main class="app-shell">
+  <main class="app-shell" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}">
     <aside class="sidebar">
-      <a class="brand" href="/" aria-label="Go to dashboard">
-        <div class="brand-logo">R</div>
-        <div>
-          <h1>{{.Settings.AppTitle}}</h1>
-          <p>Serene Navigator</p>
-        </div>
-      </a>
-      <ul class="nav-list">
-        <li class="nav-item active"><a href="/"><span class="material-symbols-outlined">luggage</span>My Trip</a></li>
-        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">explore</span>Discover</a></li>
-        <li class="nav-item"><a href="/"><span class="material-symbols-outlined">payments</span>Spends</a></li>
-        <li class="nav-item"><a href="/settings"><span class="material-symbols-outlined">settings</span>Settings</a></li>
-      </ul>
-      <div class="sidebar-bottom">
-        <a class="btn" href="/">Plan New Trip</a>
-        <a class="support-link" href="/">Support</a>
-        <a class="support-link" href="/profile">Profile</a>
-        <form method="post" action="/logout" style="margin:0;"><button type="submit" class="logout-link" style="background:none;border:none;padding:0;cursor:pointer;font:inherit;color:inherit;width:100%;text-align:left;">Logout</button></form>
-      </div>
+      {{template "dashboardShellSidebar" .}}
     </aside>
 
     <section class="main">
@@ -74,9 +56,13 @@
                   <span class="material-symbols-outlined dashboard-hero-glass__spark" aria-hidden="true">auto_awesome</span>
                   <span class="dashboard-hero-glass__title">Start a New Adventure</span>
                 </div>
-                <form method="post" action="/trips" class="hero-adventure-form form-grid">
-                  <label class="full hero-adventure-label">Trip Name
-                    <input type="text" name="name" placeholder="e.g. Philippines" required autocomplete="off">
+                <form method="post" action="/trips" class="hero-adventure-form form-grid" data-dashboard-trip-place>
+                  <label class="full hero-adventure-label hero-trip-name-label">Trip name
+                    <span class="hero-trip-name-field">
+                      <input type="text" name="name" placeholder="Search places or type a name" required autocomplete="off" data-dashboard-trip-name-input aria-autocomplete="list" aria-expanded="false">
+                      <input type="hidden" name="home_map_latitude" value="" data-home-map-lat>
+                      <input type="hidden" name="home_map_longitude" value="" data-home-map-lng>
+                    </span>
                   </label>
                   <label class="full hero-adventure-label">Description
                     <input type="text" name="description" placeholder="What is this trip about?">
@@ -90,7 +76,7 @@
                     </label>
                   </div>
                   <div class="hero-adventure-currency">
-                    <label class="hero-adventure-label">Currency Name
+                    <label class="hero-adventure-label">Trip currency
                       <input type="text" name="currency_name" placeholder="e.g. PHP" value="{{.Settings.DefaultCurrencyName}}">
                     </label>
                     <label class="hero-adventure-label">Currency Symbol
@@ -224,12 +210,7 @@
     </section>
   </main>
 
-  <nav class="bottom-nav">
-    <a class="active" href="/"><span class="material-symbols-outlined">map</span><span>My Trip</span></a>
-    <a href="/"><span class="material-symbols-outlined">explore</span><span>Explore</span></a>
-    <a href="/"><span class="material-symbols-outlined">payments</span><span>Spends</span></a>
-    <a href="/settings"><span class="material-symbols-outlined">settings</span><span>Settings</span></a>
-  </nav>
+  {{template "dashboardBottomNav" .}}
 
 {{define "dashboardTripCard"}}
               {{if .DashboardListLayout}}

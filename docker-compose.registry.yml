@@ -1,7 +1,7 @@
 # REMI Trip Planner — install from a pre-built registry image (no git clone required).
 #
-# No .env file is required: defaults point at the official public image and port 8080.
-# Optional .env overrides: REMI_IMAGE, REMI_PORT, WATCHTOWER_POLL_INTERVAL, TZ
+# No .env file is required: defaults point at the official public image and host port 4122.
+# Optional .env overrides: REMI_IMAGE, REMI_PORT, TZ
 #
 # Start:
 #   docker compose -f docker-compose.registry.yml up -d
@@ -9,9 +9,6 @@
 # Manual update:
 #   docker compose -f docker-compose.registry.yml pull
 #   docker compose -f docker-compose.registry.yml up -d
-#
-# Auto-updates (Watchtower):
-#   docker compose -f docker-compose.registry.yml --profile watchtower up -d
 #
 # Copy-paste / Dockhand with zero env: use docker-compose.install.yml instead.
 
@@ -22,33 +19,18 @@ services:
     restart: unless-stopped
     pull_policy: always
     ports:
-      - "${REMI_PORT:-8080}:8080"
+      - "${REMI_PORT:-4122}:8080"
     environment:
       APP_ADDR: ":8080"
       SQLITE_PATH: /app/data/trips.db
     volumes:
       - remi-data:/app/data
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
-
-  watchtower:
-    profiles: ["watchtower"]
-    image: containrrr/watchtower:1.7.1
-    container_name: remi-watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      WATCHTOWER_LABEL_ENABLE: "true"
-      WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_POLL_INTERVAL: "${WATCHTOWER_POLL_INTERVAL:-3600}"
-      TZ: "${TZ:-UTC}"
 
 volumes:
   remi-data:

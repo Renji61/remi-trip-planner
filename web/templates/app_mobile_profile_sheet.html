@@ -8,10 +8,21 @@
       </button>
     </div>
     <nav class="trip-mobile-profile-sheet__nav" aria-label="Account actions">
-      <a class="trip-mobile-profile-sheet__link" href="/settings{{if .TripID}}?trip_id={{.TripID}}{{end}}">App settings</a>
+      <a class="trip-mobile-profile-sheet__link" href="/profile">
+        <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">account_circle</span>
+        <span class="trip-mobile-profile-sheet__link-text">Profile</span>
+      </a>
+      <a class="trip-mobile-profile-sheet__link" href="/settings{{if .TripID}}?trip_id={{.TripID}}{{end}}">
+        <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">settings</span>
+        <span class="trip-mobile-profile-sheet__link-text">App settings</span>
+      </a>
+      <hr class="trip-mobile-profile-sheet__sep" aria-hidden="true">
       <form method="post" action="/logout" class="trip-mobile-profile-sheet__logout-form">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <button type="submit" class="trip-mobile-profile-sheet__link trip-mobile-profile-sheet__link--button">Log out</button>
+        <button type="submit" class="trip-mobile-profile-sheet__link trip-mobile-profile-sheet__link--button trip-mobile-profile-sheet__link--logout">
+          <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">logout</span>
+          <span class="trip-mobile-profile-sheet__link-text">Log out</span>
+        </button>
       </form>
     </nav>
   </div>

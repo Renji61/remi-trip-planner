@@ -1,6 +1,6 @@
 # Self-hosting REMI Trip Planner (Docker)
 
-This guide covers running REMI with **Docker Compose**, keeping **SQLite data** on a volume, **updating manually**, and optional **Watchtower** auto-updates from a registry.
+This guide covers running REMI with **Docker Compose**, keeping **SQLite data** on a volume, and **updating manually** by rebuilding or pulling a new image.
 
 ## Requirements
 
@@ -12,11 +12,11 @@ This guide covers running REMI with **Docker Compose**, keeping **SQLite data** 
 ```bash
 git clone <your-fork-or-upstream-url>
 cd remi-trip-planner
-cp .env.example .env   # optional: set REMI_PORT=8051 etc.
+cp .env.example .env   # optional: set REMI_PORT if not using default 4122
 docker compose up -d --build
 ```
 
-Open `http://localhost:8080` (or the host port set in `REMI_PORT`).
+Open `http://localhost:4122` (or the host port set in `REMI_PORT`). The app listens on **8080 inside the container**; Compose maps **host:4122 → 8080** by default.
 
 Data lives in the **`remi-data`** Docker volume (`/app/data/trips.db` inside the container).
 
@@ -27,32 +27,28 @@ git pull
 docker compose up -d --build
 ```
 
-Watchtower is **not** required for this path; you pick up changes when you pull and rebuild.
-
-The default **`docker-compose.yml` does not run Watchtower**, so a local tag like `remi-trip-planner:latest` is never replaced by an image pulled from Docker Hub by mistake.
-
 ## Option B — Install from the official registry image (no git clone, no `.env` required)
 
-The **public** image is **`ghcr.io/renji61/remi-trip-planner:latest`** (SemVer tags like `:v1.2.0` are published from Git tags).
+The **public** image is **`ghcr.io/renji61/remi-trip-planner:latest`** (SemVer tags like `:v1.40.0` are published from Git tags).
 
 ### B1 — One file, zero env (Dockhand / copy-paste)
 
-Use **`docker-compose.install.yml`** from this repo (fixed image and port in the file):
+Use **`docker-compose.install.yml`** from this repo (fixed image and **4122:8080** in the file):
 
 ```bash
 curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/Renji61/remi-trip-planner/main/docker-compose.install.yml
 docker compose -f docker-compose.yml up -d
 ```
 
-Edit **`8080:8080`** in the YAML if you want another host port.
+Edit **`4122:8080`** in the YAML if you want another host port.
 
 ### B2 — Registry compose with optional overrides
 
-Use **`docker-compose.registry.yml`**. It defaults to the same official image and port **8080** — **no `.env` file is required**. Add `.env` only to override, for example:
+Use **`docker-compose.registry.yml`**. It defaults to the same official image and host port **4122** — **no `.env` file is required**. Add `.env` only to override, for example:
 
 ```env
 REMI_IMAGE=ghcr.io/your-github-username/remi-trip-planner:latest
-REMI_PORT=8080
+REMI_PORT=4122
 ```
 
 (Forks or private mirrors: set `REMI_IMAGE` to your image reference.)
@@ -72,19 +68,11 @@ docker compose -f docker-compose.registry.yml up -d
 
 This fetches the newest image for your tag (e.g. `:latest`) and recreates the container. Your database remains in the **`remi-data`** volume.
 
-### Auto-updates with Watchtower
+**Pinning:** For production, consider pinning `REMI_IMAGE` to a version tag (e.g. `:v1.40.0`) instead of `:latest`, and bump when you choose.
 
-Watchtower recreates containers when the **registry digest** for the image changes.
+### Optional auto-updates
 
-```bash
-docker compose -f docker-compose.registry.yml --profile watchtower up -d
-```
-
-- Only containers with the label `com.centurylinklabs.watchtower.enable=true` are managed (the `remi` service has this label).
-- Default poll interval is **3600** seconds; override with `WATCHTOWER_POLL_INTERVAL` in `.env`.
-- **Private GHCR**: run `docker login ghcr.io` on the host (or configure a credential helper) before Watchtower can pull.
-
-**Caution:** `:latest` will auto-deploy whatever you last pushed to that tag. For stricter control, pin `REMI_IMAGE` to a version tag (e.g. `:v1.2.3`) and bump it when you choose.
+This repository **does not** ship a Watchtower (or similar) service. If you want containers recreated when the registry image changes, add your own sidecar or host automation (e.g. Watchtower, systemd timer + `docker compose pull`).
 
 ## Health checks
 
@@ -107,7 +95,7 @@ Official upstream: **`ghcr.io/renji61/remi-trip-planner`**. The registry Compose
 
 ## TLS and reverse proxy
 
-For production, terminate HTTPS in front of the app (Caddy, Traefik, nginx). Proxy to the container port you mapped (default **8080** on the container). See [deploy/remote_access.md](../deploy/remote_access.md) and [Deployment & HTTPS](../README.md#deployment--https) in the README.
+For production, terminate HTTPS in front of the app (Caddy, Traefik, nginx). Proxy to the **container** port you mapped (the image listens on **8080** inside the container; the default host mapping is **4122**). See [deploy/remote_access.md](../deploy/remote_access.md) and [Deployment & HTTPS](../README.md#deployment--https) in the README.
 
 ## Backup
 

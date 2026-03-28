@@ -6,7 +6,7 @@ Nobody can push to **your** GitHub Container Registry (GHCR) or Docker Hub accou
 
 ### If `git push` is rejected for the workflow file
 
-GitHub may show: *refusing to allow an OAuth App to create or update workflow … without `workflow` scope* (common with Cursor/VS Code or Git Credential Manager using a limited OAuth token).
+GitHub may show: *refusing to allow an OAuth App to create or update workflow … without `workflow` scope* (common when Git Credential Manager or an editor’s sign-in uses a limited OAuth token).
 
 **Fix one of:**
 
@@ -22,7 +22,7 @@ After the workflow exists on `main`, routine pushes that do not touch workflow f
 3. In the repo: **Settings → Actions → General** — allow **read and write** for workflows (needed for `GITHUB_TOKEN` to push packages).
 4. In **Packages** settings for the org/user, allow Actions to publish if prompted.
 5. Push to **`main`** → image **`ghcr.io/<lowercase-owner>/remi-trip-planner:latest`** is built and pushed.
-6. Tag **`v1.2.0`** (SemVer `v*.*.*`) → additional version tags are pushed alongside `latest`.
+6. Tag **`v1.40.0`** (SemVer `v*.*.*`) → additional version tags are pushed alongside `latest`.
 
 **Manual run:** **Actions → Docker Publish → Run workflow**.
 

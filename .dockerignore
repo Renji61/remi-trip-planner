@@ -2,6 +2,7 @@
 .github
 *.md
 !README.md
+!CHANGELOG.md
 .env
 .env.*
 !.env.example

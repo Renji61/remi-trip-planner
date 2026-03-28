@@ -76,6 +76,43 @@ func geocodeLocation(ctx context.Context, query string) (lat, lng float64) {
 	return lat, lng
 }
 
+func parseMapCoord(s string) (v float64, ok bool) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, false
+	}
+	return v, true
+}
+
+// applyMapDefaultPlaceFromForm sets app map defaults from POST: short place label + hidden lat/lng, or Tokyo when empty; geocodes when label set but coords missing.
+func applyMapDefaultPlaceFromForm(ctx context.Context, app *trips.AppSettings, r *http.Request) {
+	placeLabel := strings.TrimSpace(r.FormValue("map_default_place_label"))
+	lat, latOK := parseMapCoord(r.FormValue("map_default_latitude"))
+	lng, lngOK := parseMapCoord(r.FormValue("map_default_longitude"))
+
+	if placeLabel == "" {
+		app.MapDefaultPlaceLabel = trips.DefaultMapPlaceLabel
+		app.MapDefaultLatitude = trips.DefaultMapLatitude
+		app.MapDefaultLongitude = trips.DefaultMapLongitude
+		return
+	}
+	app.MapDefaultPlaceLabel = placeLabel
+	if latOK && lngOK && (lat != 0 || lng != 0) {
+		app.MapDefaultLatitude = lat
+		app.MapDefaultLongitude = lng
+		return
+	}
+	gLat, gLng := geocodeLocation(ctx, placeLabel)
+	if gLat == 0 && gLng == 0 {
+		app.MapDefaultPlaceLabel = trips.DefaultMapPlaceLabel
+		app.MapDefaultLatitude = trips.DefaultMapLatitude
+		app.MapDefaultLongitude = trips.DefaultMapLongitude
+		return
+	}
+	app.MapDefaultLatitude = gLat
+	app.MapDefaultLongitude = gLng
+}
+
 type itineraryItemView struct {
 	Item    trips.ItineraryItem
 	Lodging trips.Lodging
@@ -275,6 +312,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/profile", a.profileSave)
 		r.Post("/profile/password", a.profilePassword)
 		r.Post("/profile/resend-verify", a.profileResendVerify)
+		r.Get("/about", a.aboutPage)
+		r.Get("/api/about/update-check", a.aboutUpdateCheck)
 		r.Get("/settings", a.settingsPage)
 		r.Post("/settings", a.saveSettings)
 		r.Post("/settings/reset-all", a.resetAllSiteSettings)
@@ -444,21 +483,26 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 		heroImageURL = bg
 	}
 
+	inProg := filterInProgressTripsForSidebar(list, time.Now(), 2)
 	_ = a.templates.ExecuteTemplate(w, "home.html", map[string]any{
-		"ActiveTripCards":     activeO,
-		"SharedTripCards":     activeS,
-		"DraftTripCards":      draftMerged,
-		"ArchivedTripCards":   archMerged,
-		"Settings":            settings,
-		"TravelStats":         travelStats,
-		"CSRFToken":           CSRFToken(r.Context()),
-		"CurrentUser":         CurrentUser(r.Context()),
-		"Saved":               r.URL.Query().Get("saved") == "1",
-		"HasError":            false,
-		"ErrorText":           "",
-		"DashboardListLayout": settings.DashboardTripLayout == "list",
-		"HeroPatternClass":    heroPatternClass,
-		"HeroImageURL":        heroImageURL,
+		"ActiveTripCards":        activeO,
+		"SharedTripCards":        activeS,
+		"DraftTripCards":         draftMerged,
+		"ArchivedTripCards":      archMerged,
+		"Settings":               settings,
+		"TravelStats":            travelStats,
+		"CSRFToken":              CSRFToken(r.Context()),
+		"CurrentUser":            CurrentUser(r.Context()),
+		"Saved":                  r.URL.Query().Get("saved") == "1",
+		"HasError":               false,
+		"ErrorText":              "",
+		"DashboardListLayout":    settings.DashboardTripLayout == "list",
+		"HeroPatternClass":       heroPatternClass,
+		"HeroImageURL":           heroImageURL,
+		"SidebarNavActive":       "home",
+		"SidebarInProgressTrips": inProg,
+		"SidebarTripID":          "",
+		"TripID":                 "",
 	})
 }
 
@@ -713,14 +757,19 @@ func (a *app) settingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tripID := strings.TrimSpace(r.URL.Query().Get("trip_id"))
-	_ = a.templates.ExecuteTemplate(w, "settings.html", map[string]any{
+	data := map[string]any{
 		"Settings":           settings,
 		"CSRFToken":          CSRFToken(r.Context()),
 		"Saved":              r.URL.Query().Get("saved") == "1",
 		"Reset":              r.URL.Query().Get("reset") == "1",
 		"ClearThemeOverride": r.URL.Query().Get("saved") == "1" || r.URL.Query().Get("reset") == "1",
 		"TripID":             tripID,
-	})
+	}
+	if err := a.mergeDashboardShell(r.Context(), uid, "settings", tripID, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = a.templates.ExecuteTemplate(w, "settings.html", data)
 }
 
 func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
@@ -735,8 +784,6 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mapLat, _ := strconv.ParseFloat(r.FormValue("map_default_latitude"), 64)
-	mapLng, _ := strconv.ParseFloat(r.FormValue("map_default_longitude"), 64)
 	mapZoom, _ := strconv.Atoi(r.FormValue("map_default_zoom"))
 	enableLookup := r.FormValue("enable_location_lookup") == "true"
 
@@ -755,8 +802,7 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.AppTitle = defaultIfEmpty(r.FormValue("app_title"), "REMI Trip Planner")
-	app.MapDefaultLatitude = mapLat
-	app.MapDefaultLongitude = mapLng
+	applyMapDefaultPlaceFromForm(r.Context(), &app, r)
 	app.MapDefaultZoom = mapZoom
 	app.EnableLocationLookup = enableLookup
 	if vals, ok := r.PostForm["site_registration_enabled"]; ok && len(vals) > 0 {
@@ -871,14 +917,33 @@ func (a *app) createTrip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := CurrentUserID(r.Context())
+	hmLat, hmLng := 0.0, 0.0
+	if s := strings.TrimSpace(r.FormValue("home_map_latitude")); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err == nil && math.IsInf(v, 0) == false && !math.IsNaN(v) {
+			hmLat = v
+		}
+	}
+	if s := strings.TrimSpace(r.FormValue("home_map_longitude")); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err == nil && math.IsInf(v, 0) == false && !math.IsNaN(v) {
+			hmLng = v
+		}
+	}
+	if hmLat == 0 && hmLng == 0 {
+		if app, err := a.tripService.GetAppSettings(r.Context()); err == nil {
+			hmLat = app.MapDefaultLatitude
+			hmLng = app.MapDefaultLongitude
+		}
+	}
 	id, err := a.tripService.CreateTrip(r.Context(), trips.Trip{
-		Name:           r.FormValue("name"),
-		Description:    r.FormValue("description"),
-		StartDate:      r.FormValue("start_date"),
-		EndDate:        r.FormValue("end_date"),
-		CurrencyName:   defaultIfEmpty(r.FormValue("currency_name"), "USD"),
-		CurrencySymbol: defaultIfEmpty(r.FormValue("currency_symbol"), "$"),
-		OwnerUserID:    uid,
+		Name:             strings.TrimSpace(r.FormValue("name")),
+		Description:      r.FormValue("description"),
+		StartDate:        r.FormValue("start_date"),
+		EndDate:          r.FormValue("end_date"),
+		CurrencyName:     defaultIfEmpty(r.FormValue("currency_name"), "USD"),
+		CurrencySymbol:   defaultIfEmpty(r.FormValue("currency_symbol"), "$"),
+		HomeMapLatitude:  hmLat,
+		HomeMapLongitude: hmLng,
+		OwnerUserID:      uid,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1003,6 +1068,13 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	mainSectionOrder := trips.NormalizeMainSectionOrder(details.Trip.UIMainSectionOrder)
 	sidebarWidgetOrder := trips.NormalizeSidebarWidgetOrder(details.Trip.UISidebarWidgetOrder)
 	customSidebarLinks := trips.ParseCustomSidebarLinksJSON(details.Trip.UICustomSidebarLinks)
+	mapViewLat := settings.MapDefaultLatitude
+	mapViewLng := settings.MapDefaultLongitude
+	mapViewZoom := settings.MapDefaultZoom
+	if math.Abs(details.Trip.HomeMapLatitude) > 1e-9 || math.Abs(details.Trip.HomeMapLongitude) > 1e-9 {
+		mapViewLat = details.Trip.HomeMapLatitude
+		mapViewLng = details.Trip.HomeMapLongitude
+	}
 	pageData := map[string]any{
 		"Details":                     details,
 		"DayGroups":                   dayGroups,
@@ -1030,6 +1102,9 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		"ArchivedHiddenFromDashboard": archivedHidden,
 		"CSRFToken":                   CSRFToken(r.Context()),
 		"SidebarNavActive":            "trip",
+		"MapViewLatitude":             mapViewLat,
+		"MapViewLongitude":            mapViewLng,
+		"MapViewZoom":                 mapViewZoom,
 	}
 	var buf bytes.Buffer
 	if err := a.templates.ExecuteTemplate(&buf, "trip.html", pageData); err != nil {

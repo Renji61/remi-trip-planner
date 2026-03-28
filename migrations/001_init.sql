@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS trips (
   cover_image_url TEXT NOT NULL DEFAULT '',
   currency_name TEXT NOT NULL DEFAULT 'USD',
   currency_symbol TEXT NOT NULL DEFAULT '$',
+  home_map_latitude REAL NOT NULL DEFAULT 0,
+  home_map_longitude REAL NOT NULL DEFAULT 0,
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL
@@ -68,17 +70,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
   app_title TEXT NOT NULL DEFAULT 'REMI Trip Planner',
   default_currency_name TEXT NOT NULL DEFAULT 'USD',
   default_currency_symbol TEXT NOT NULL DEFAULT '$',
-  map_default_latitude REAL NOT NULL DEFAULT 14.5995,
-  map_default_longitude REAL NOT NULL DEFAULT 120.9842,
+  map_default_place_label TEXT NOT NULL DEFAULT 'Tokyo',
+  map_default_latitude REAL NOT NULL DEFAULT 35.6762,
+  map_default_longitude REAL NOT NULL DEFAULT 139.6503,
   map_default_zoom INTEGER NOT NULL DEFAULT 6,
   enable_location_lookup BOOLEAN NOT NULL DEFAULT TRUE,
   updated_at DATETIME NOT NULL
 );
 
+-- Omit map_default_place_label so this INSERT still works on legacy app_settings rows before db.go adds that column; new installs get DEFAULT 'Tokyo' from CREATE TABLE.
 INSERT OR IGNORE INTO app_settings
   (id, app_title, default_currency_name, default_currency_symbol, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup, updated_at)
 VALUES
-  (1, 'REMI Trip Planner', 'USD', '$', 14.5995, 120.9842, 6, TRUE, CURRENT_TIMESTAMP);
+  (1, 'REMI Trip Planner', 'USD', '$', 35.6762, 139.6503, 6, TRUE, CURRENT_TIMESTAMP);
 
 CREATE TABLE IF NOT EXISTS lodging_entries (
   id TEXT PRIMARY KEY,

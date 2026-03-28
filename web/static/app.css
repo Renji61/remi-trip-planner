@@ -231,6 +231,139 @@ html.theme-dark a.brand:hover {
   font: inherit;
 }
 
+.sidebar-icon-link {
+  gap: 10px;
+}
+.sidebar-icon-link .material-symbols-outlined {
+  font-size: 22px;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.support-link.sidebar-icon-link {
+  text-decoration: none;
+}
+.logout-link.sidebar-icon-link {
+  justify-content: flex-start;
+}
+.support-link--active {
+  background: rgba(122, 241, 252, 0.14);
+  color: var(--secondary);
+}
+
+.sidebar-in-progress-wrap {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sidebar-in-progress-list {
+  list-style: none;
+  margin: 0 0 6px 0;
+  padding: 0 0 0 10px;
+  border-left: 2px solid rgba(122, 241, 252, 0.22);
+}
+.sidebar-in-progress-item a {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--on-surface-variant);
+  font-weight: 600;
+  font-size: 13px;
+  font-family: "Manrope", sans-serif;
+  text-decoration: none;
+}
+.sidebar-in-progress-item a:hover {
+  background: rgba(122, 241, 252, 0.1);
+  color: var(--secondary);
+}
+.sidebar-in-progress-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sidebar-in-progress-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-in-progress-dates {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.about-page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 720px;
+}
+.about-version-line {
+  margin: 0 0 6px;
+}
+.about-version-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--surface-low);
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 0.95em;
+}
+.about-version-hint {
+  margin: 8px 0 0;
+  min-height: 1.25em;
+}
+.about-check-update-btn {
+  margin-top: 12px;
+}
+.about-changelog-body {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.about-changelog-body code {
+  font-size: 0.9em;
+  padding: 0.12em 0.35em;
+  border-radius: 6px;
+  background: var(--surface-low);
+  font-family: ui-monospace, "Cascadia Code", monospace;
+}
+.about-changelog-body a {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.about-changelog-body a:hover {
+  color: var(--secondary);
+}
+.about-changelog-subhead {
+  margin: 14px 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: "Manrope", sans-serif;
+}
+.about-changelog-list {
+  margin: 0 0 10px 18px;
+  padding: 0;
+}
+.about-changelog-list li {
+  margin-bottom: 4px;
+}
+.about-changelog-p {
+  margin: 0 0 8px;
+}
+.about-features-list {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.55;
+}
+.about-features-list li {
+  margin-bottom: 8px;
+}
+
 .btn,
 button {
   border: 0;
@@ -531,6 +664,36 @@ html.theme-dark .dashboard-hero-glass__title {
 .hero-adventure-form.form-grid {
   grid-template-columns: 1fr;
   gap: 14px;
+}
+.hero-trip-name-field {
+  position: relative;
+  display: block;
+}
+.hero-trip-name-field .location-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 50;
+  max-height: 220px;
+}
+.dashboard-trip-place-suggest {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.dashboard-trip-place-suggest__title {
+  font-weight: 700;
+}
+.dashboard-trip-place-suggest__detail {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 .hero-adventure-form .hero-adventure-label {
   color: #3d4a5c;
@@ -6510,35 +6673,66 @@ html.theme-dark .trip-invite-flash {
 }
 .trip-mobile-profile-sheet__panel {
   background: var(--surface, #fff);
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 18px;
+  padding: 18px 16px 16px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--outline-variant, rgba(0, 0, 0, 0.08));
 }
 html.theme-dark .trip-mobile-profile-sheet__panel {
   background: var(--surface, #1c1b1f);
+  border-color: var(--outline-variant, rgba(255, 255, 255, 0.08));
 }
 .trip-mobile-profile-sheet__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--outline-variant, rgba(0, 0, 0, 0.08));
+}
+html.theme-dark .trip-mobile-profile-sheet__head {
+  border-bottom-color: var(--outline-variant, rgba(255, 255, 255, 0.08));
 }
 .trip-mobile-profile-sheet__title {
   font-weight: 700;
-  font-size: 18px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
 }
 .trip-mobile-profile-sheet__nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+}
+.trip-mobile-profile-sheet__sep {
+  border: 0;
+  border-top: 1px solid var(--outline-variant, rgba(0, 0, 0, 0.1));
+  margin: 10px 0 8px;
+}
+html.theme-dark .trip-mobile-profile-sheet__sep {
+  border-top-color: var(--outline-variant, rgba(255, 255, 255, 0.1));
 }
 .trip-mobile-profile-sheet__link {
-  display: block;
-  padding: 12px 10px;
-  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px;
+  border-radius: 12px;
   text-decoration: none;
   color: inherit;
   font-weight: 600;
+  font-size: 15px;
+  transition: background 0.12s ease;
+}
+.trip-mobile-profile-sheet__link-icon {
+  font-size: 22px;
+  width: 24px;
+  text-align: center;
+  opacity: 0.88;
+  flex-shrink: 0;
+}
+.trip-mobile-profile-sheet__link-text {
+  flex: 1;
+  text-align: left;
 }
 .trip-mobile-profile-sheet__link:hover {
   background: var(--surface-container-high, rgba(0, 0, 0, 0.06));
@@ -6551,8 +6745,27 @@ html.theme-dark .trip-mobile-profile-sheet__panel {
   font: inherit;
   cursor: pointer;
 }
+.trip-mobile-profile-sheet__link--logout {
+  color: var(--on-surface-variant, rgba(0, 0, 0, 0.65));
+}
+html.theme-dark .trip-mobile-profile-sheet__link--logout {
+  color: var(--on-surface-variant, rgba(255, 255, 255, 0.7));
+}
 .trip-mobile-profile-sheet__logout-form {
   margin: 0;
+}
+
+/* Site settings: default location combobox (same suggestion pattern as dashboard) */
+.site-settings-default-place-field {
+  margin-top: 6px;
+}
+.site-settings-default-place-field .location-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 50;
+  max-height: 220px;
 }
 
 /* Budget: desktop row actions (hover / focus) */

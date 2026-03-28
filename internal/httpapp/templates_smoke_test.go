@@ -3,7 +3,7 @@ package httpapp
 import (
 	"bytes"
 	"fmt"
-	"html/template"
+	ht "html/template"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +14,9 @@ import (
 
 func TestDashboardTripCardTemplateRenders(t *testing.T) {
 	root := findModuleRoot(t)
-	tmpl := template.Must(
-		template.New("").
-			Funcs(template.FuncMap{
+	tmpl := ht.Must(
+		ht.New("").
+			Funcs(ht.FuncMap{
 				"formatDateTime":                  func(s string) string { return s },
 				"formatUIDate":                    func(s string) string { return s },
 				"formatTripDateTime":              func(_ trips.Trip, s string) string { return s },
@@ -39,6 +39,8 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 				"googleMapsSearchURL": func(lat, lng float64, hint string) string {
 					return ""
 				},
+				"locationLineBeforeComma": func(s string) string { return s },
+				"itineraryGeocodeQuery":   func(any) string { return "" },
 				"profileInitial": func(u trips.User) string {
 					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
 					return p.InitialForAvatar()
@@ -81,15 +83,19 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 			ThemePreference:       "light",
 			DashboardTripLayout:   "grid",
 		},
-		"TravelStats":         trips.TravelStats{MilesDisplay: "0"},
-		"DashboardListLayout": false,
-		"HeroPatternClass":    "",
-		"HeroImageURL":        "",
-		"Saved":               false,
-		"HasError":            false,
-		"ErrorText":           "",
-		"CSRFToken":           "test-csrf",
-		"CurrentUser":         trips.User{DisplayName: "Test", Username: "test"},
+		"TravelStats":            trips.TravelStats{MilesDisplay: "0"},
+		"DashboardListLayout":    false,
+		"HeroPatternClass":       "",
+		"HeroImageURL":           "",
+		"Saved":                  false,
+		"HasError":               false,
+		"ErrorText":              "",
+		"CSRFToken":              "test-csrf",
+		"CurrentUser":            trips.User{DisplayName: "Test", Username: "test"},
+		"SidebarNavActive":       "home",
+		"SidebarInProgressTrips": []sidebarInProgressTrip{{ID: "live", Name: "Live Trip", DateRange: "Jan 1 – 7"}},
+		"SidebarTripID":          "",
+		"TripID":                 "",
 	}
 
 	var buf bytes.Buffer
@@ -114,6 +120,68 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 	}
 	if !strings.Contains(out, `trip-list-row-mobile`) {
 		t.Fatalf("expected mobile list row markup in output")
+	}
+}
+
+func TestAboutPageTemplateRenders(t *testing.T) {
+	root := findModuleRoot(t)
+	tmpl := ht.Must(
+		ht.New("").
+			Funcs(ht.FuncMap{
+				"hasPrefix":                       strings.HasPrefix,
+				"formatDateTime":                  func(s string) string { return s },
+				"formatUIDate":                    func(s string) string { return s },
+				"formatTripDateTime":              func(_ trips.Trip, s string) string { return s },
+				"formatTripClock":                 func(_ trips.Trip, s string) string { return s },
+				"formatTripDateRange":             func(a, b string) string { return a + "–" + b },
+				"formatTripDateShort":             func(a, b string) string { return "Jan 1 – 7" },
+				"formatTripMoney":                 func(f float64) string { return fmt.Sprintf("%.0f", f) },
+				"abbrevMoney":                     func(sym string, f float64) string { return sym + fmt.Sprintf("%.2f", f) },
+				"expenseCategoryStyle":            func(s string) string { return "" },
+				"expenseCategoryIcon":             func(s string) string { return "" },
+				"listContains":                    func(a string, b []string) bool { return false },
+				"mainSectionVisible":              func(string, trips.Trip) bool { return true },
+				"tripSectionEnabled":              func(string, trips.Trip) bool { return true },
+				"sidebarWidgetVisible":            func(string, trips.Trip) bool { return true },
+				"tripMainSectionLabel":            func(s string) string { return s },
+				"tripSidebarWidgetLabel":          func(s string) string { return s },
+				"tripMainSectionVisibilityIcon":   trips.MainSectionVisibilityIcon,
+				"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
+				"googleMapsSearchURL":             func(lat, lng float64, hint string) string { return "" },
+				"locationLineBeforeComma":         func(s string) string { return s },
+				"itineraryGeocodeQuery":           func(any) string { return "" },
+				"profileInitial": func(u trips.User) string {
+					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
+					return p.InitialForAvatar()
+				},
+				"profileAvatarURL": func(u trips.User) string { return "" },
+				"sub":              func(a, b int) int { return a - b },
+			}).
+			ParseGlob(filepath.Join(root, "web", "templates", "*.html")),
+	)
+	data := map[string]any{
+		"Settings": trips.AppSettings{
+			AppTitle:             "App",
+			ThemePreference:      "light",
+			TripDashboardHeading: "Trips",
+		},
+		"ClearThemeOverride":     false,
+		"CSRFToken":              "test-csrf",
+		"CurrentUser":            trips.User{DisplayName: "Test"},
+		"AppVersion":             "9.9.9",
+		"ChangelogHTML":          ht.HTML("<p class=\"t\">Note</p>"),
+		"SidebarNavActive":       "about",
+		"SidebarInProgressTrips": []sidebarInProgressTrip(nil),
+		"SidebarTripID":          "",
+		"TripID":                 "",
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "about.html", data); err != nil {
+		t.Fatalf("execute about: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "9.9.9") || !strings.Contains(out, "about-check-update-btn") {
+		t.Fatalf("unexpected about output: %s", truncate(out, 500))
 	}
 }
 

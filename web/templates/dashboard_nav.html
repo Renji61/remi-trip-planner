@@ -1,0 +1,49 @@
+{{define "dashboardShellSidebar"}}
+      <a class="brand" href="/" aria-label="Go to dashboard">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </a>
+      <ul class="nav-list">
+        <li class="nav-item{{if eq .SidebarNavActive "home"}} active{{end}}"><a href="/"{{if eq .SidebarNavActive "home"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">luggage</span>My Trip</a></li>
+        {{if .SidebarInProgressTrips}}
+        <li class="sidebar-in-progress-wrap" aria-label="Trips in progress">
+          <ul class="sidebar-in-progress-list">
+            {{range .SidebarInProgressTrips}}
+            <li class="sidebar-in-progress-item">
+              <a href="/trips/{{.ID}}"><span class="material-symbols-outlined" aria-hidden="true">today</span><span class="sidebar-in-progress-text"><span class="sidebar-in-progress-name">{{.Name}}</span><span class="sidebar-in-progress-dates muted">{{.DateRange}}</span></span></a>
+            </li>
+            {{end}}
+          </ul>
+        </li>
+        {{end}}
+        <li class="nav-item{{if eq .SidebarNavActive "settings"}} active{{end}}"><a href="/settings{{if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}"{{if eq .SidebarNavActive "settings"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">settings</span>Settings</a></li>
+      </ul>
+      <div class="sidebar-bottom">
+        {{if eq .SidebarNavActive "profile"}}
+        <a class="btn" href="/">Dashboard</a>
+        {{else if .SidebarTripID}}
+        <a class="btn" href="/trips/{{.SidebarTripID}}">Back to My Trip</a>
+        {{else}}
+        <a class="btn" href="/">Plan New Trip</a>
+        {{end}}
+        <a class="support-link sidebar-icon-link{{if eq .SidebarNavActive "about"}} support-link--active{{end}}" href="/about"{{if eq .SidebarNavActive "about"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">info</span>About</a>
+        <a class="support-link sidebar-icon-link{{if eq .SidebarNavActive "profile"}} support-link--active{{end}}" href="/profile"{{if eq .SidebarNavActive "profile"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">person</span>Profile</a>
+        <form method="post" action="/logout" class="sidebar-logout-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button type="submit" class="logout-link sidebar-icon-link"><span class="material-symbols-outlined" aria-hidden="true">logout</span>Logout</button>
+        </form>
+      </div>
+{{end}}
+
+{{define "dashboardBottomNav"}}
+  <nav class="bottom-nav" aria-label="Main navigation">
+    <a class="{{if eq .SidebarNavActive "home"}}active {{end}}" href="/"><span class="material-symbols-outlined" aria-hidden="true">map</span><span>My Trip</span></a>
+    {{range .SidebarInProgressTrips}}
+    <a href="/trips/{{.ID}}"><span class="material-symbols-outlined" aria-hidden="true">luggage</span><span>{{.Name}}</span></a>
+    {{end}}
+    <a class="{{if eq .SidebarNavActive "settings"}}active {{end}}" href="/settings{{if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}"><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>Settings</span></a>
+  </nav>
+{{end}}

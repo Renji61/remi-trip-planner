@@ -11,6 +11,7 @@ WORKDIR /app
 COPY --from=builder /bin/trip-planner /app/trip-planner
 COPY migrations /app/migrations
 COPY web /app/web
+COPY CHANGELOG.md /app/CHANGELOG.md
 RUN mkdir -p /app/data
 EXPOSE 8080
 ENV APP_ADDR=:8080
