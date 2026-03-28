@@ -36,7 +36,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 | Layer | Technology |
 |--------|------------|
-| Language & HTTP | Go 1.23, [chi](https://github.com/go-chi/chi) router |
+| Language & HTTP | Go 1.25, [chi](https://github.com/go-chi/chi) router |
 | UI | HTML templates, [HTMX](https://htmx.org/) for partial updates and forms |
 | Data | SQLite ([modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)), WAL mode |
 | Maps | [Leaflet](https://leafletjs.com/) + OpenStreetMap / Nominatim (optional geocoding) |
@@ -112,14 +112,17 @@ migrations/          # Base schema; extra columns migrated in code
 web/templates/       # HTML templates
 web/static/          # CSS, JS, manifest, service worker (uploads at runtime)
 deploy/              # Caddyfile and remote access notes
-docs/                # Sync contract, CI workflow template (github-actions-ci.yml), etc.
+docs/                # Self-hosting, publish-image, sync contract, CI template, etc.
+docker-compose.yml   # Build from clone
+docker-compose.registry.yml   # Pull image (defaults to official GHCR; optional .env)
+docker-compose.install.yml    # Homelab one-file install (no .env)
 ```
 
 ---
 
 ## Requirements
 
-- **Go 1.23+** (see `go.mod`) for local builds.
+- **Go 1.25+** (see `go.mod`) for local builds.
 - **Docker** / **Docker Compose** optional, for containerized runs.
 
 ---
@@ -177,26 +180,47 @@ go test ./...
 
 ## Docker & self-hosting
 
-### Quick start (build from clone)
+**Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.2.0` (and other SemVer tags published by CI).
+
+### Quick start — homelab (no `.env`, no git)
+
+```bash
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/Renji61/remi-trip-planner/main/docker-compose.install.yml
+docker compose -f docker-compose.yml up -d
+```
+
+Or copy [`docker-compose.install.yml`](docker-compose.install.yml) from this repo and run:
+
+```bash
+docker compose -f docker-compose.install.yml up -d
+```
+
+Open [http://localhost:8080](http://localhost:8080). Edit **`8080:8080`** in the file to change the host port.
+
+### Build from clone (developers)
 
 ```bash
 cp .env.example .env   # optional: REMI_PORT=8051 maps host → container 8080
 docker compose up -d --build
 ```
 
-Open [http://localhost:8080](http://localhost:8080) (or your `REMI_PORT`).
-
 - **Data:** named volume **`remi-data`** → `/app/data/trips.db` in the container.
 - **Health:** image includes `wget` and a `HEALTHCHECK` on `GET /healthz` (also declared in Compose).
 - **Manual update (git):** `git pull && docker compose up -d --build`
-- **Install without git:** use `docker-compose.registry.yml` + `REMI_IMAGE=ghcr.io/<owner>/remi-trip-planner:latest` in `.env`.
-- **Auto-updates (registry installs):** `docker-compose.registry.yml` includes an optional Watchtower profile — see [docs/self-hosting.md](docs/self-hosting.md). The default `docker-compose.yml` is build-from-git only (manual rebuild) so Watchtower does not pull a random `remi-trip-planner` image from Docker Hub.
 
-Full instructions, GHCR publishing, backups, and Watchtower notes: **[docs/self-hosting.md](docs/self-hosting.md)**.
+### Registry compose (optional `.env` overrides)
 
-The workflow **[.github/workflows/docker-publish.yml](.github/workflows/docker-publish.yml)** pushes to `ghcr.io/<lowercase-owner>/remi-trip-planner` on pushes to `main` and on SemVer tags `v*.*.*`.
+[`docker-compose.registry.yml`](docker-compose.registry.yml) defaults to the same official image and port **8080** — **no `.env` required**. Set `REMI_IMAGE` or `REMI_PORT` in `.env` only if you fork the image or need another port.
 
-**Publishing for others:** only you (or your CI) can push to your registry — see **[docs/publish-image.md](docs/publish-image.md)** (GitHub Actions, manual `docker push`, and making GHCR packages **public** for homelab `docker pull` without login).
+- **Auto-updates:** optional Watchtower profile — `docker compose -f docker-compose.registry.yml --profile watchtower up -d` — see [docs/self-hosting.md](docs/self-hosting.md).
+- The default **`docker-compose.yml`** (build path) does **not** include Watchtower so a local image tag is not replaced from Docker Hub by mistake.
+
+Full instructions: **[docs/self-hosting.md](docs/self-hosting.md)**.
+
+CI: **[.github/workflows/docker-publish.yml](.github/workflows/docker-publish.yml)** pushes `ghcr.io/renji61/remi-trip-planner` on `main` and on SemVer tags `v*.*.*`.
+
+**Publishing / forks:** **[docs/publish-image.md](docs/publish-image.md)** (Actions permissions, PAT `workflow` scope, manual `docker push`).
 
 ---
 

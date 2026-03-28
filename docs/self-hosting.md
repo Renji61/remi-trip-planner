@@ -31,23 +31,37 @@ Watchtower is **not** required for this path; you pick up changes when you pull 
 
 The default **`docker-compose.yml` does not run Watchtower**, so a local tag like `remi-trip-planner:latest` is never replaced by an image pulled from Docker Hub by mistake.
 
-## Option B — Install from a registry image (no git clone)
+## Option B — Install from the official registry image (no git clone, no `.env` required)
 
-1. Publish an image (e.g. `ghcr.io/your-org/remi-trip-planner:latest`) — see below.
-2. On the server, create a directory with:
-   - `docker-compose.registry.yml` (from this repo)
-   - `.env` containing at least:
+The **public** image is **`ghcr.io/renji61/remi-trip-planner:latest`** (SemVer tags like `:v1.2.0` are published from Git tags).
 
-     ```env
-     REMI_IMAGE=ghcr.io/your-org/remi-trip-planner:latest
-     REMI_PORT=8080
-     ```
+### B1 — One file, zero env (Dockhand / copy-paste)
 
-3. Start:
+Use **`docker-compose.install.yml`** from this repo (fixed image and port in the file):
 
-   ```bash
-   docker compose -f docker-compose.registry.yml up -d
-   ```
+```bash
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/Renji61/remi-trip-planner/main/docker-compose.install.yml
+docker compose -f docker-compose.yml up -d
+```
+
+Edit **`8080:8080`** in the YAML if you want another host port.
+
+### B2 — Registry compose with optional overrides
+
+Use **`docker-compose.registry.yml`**. It defaults to the same official image and port **8080** — **no `.env` file is required**. Add `.env` only to override, for example:
+
+```env
+REMI_IMAGE=ghcr.io/your-github-username/remi-trip-planner:latest
+REMI_PORT=8080
+```
+
+(Forks or private mirrors: set `REMI_IMAGE` to your image reference.)
+
+Start:
+
+```bash
+docker compose -f docker-compose.registry.yml up -d
+```
 
 ### Manual update (pull latest image)
 
@@ -89,7 +103,7 @@ Images use:
 
 `ghcr.io/<lowercase-github-username-or-org>/remi-trip-planner`
 
-Set `REMI_IMAGE` in `.env` to that path plus `:latest` or a version tag.
+Official upstream: **`ghcr.io/renji61/remi-trip-planner`**. The registry Compose file defaults to that; set **`REMI_IMAGE`** in `.env` only for a fork or private mirror.
 
 ## TLS and reverse proxy
 

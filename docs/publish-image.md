@@ -22,7 +22,7 @@ After the workflow exists on `main`, routine pushes that do not touch workflow f
 3. In the repo: **Settings → Actions → General** — allow **read and write** for workflows (needed for `GITHUB_TOKEN` to push packages).
 4. In **Packages** settings for the org/user, allow Actions to publish if prompted.
 5. Push to **`main`** → image **`ghcr.io/<lowercase-owner>/remi-trip-planner:latest`** is built and pushed.
-6. Tag **`v1.0.0`** (SemVer) → additional version tags are pushed.
+6. Tag **`v1.2.0`** (SemVer `v*.*.*`) → additional version tags are pushed alongside `latest`.
 
 **Manual run:** **Actions → Docker Publish → Run workflow**.
 
@@ -32,10 +32,14 @@ By default GHCR packages may be **private**. For homelab users who run `docker c
 
 1. GitHub → **Packages** → **remi-trip-planner** → **Package settings** → **Change visibility** → **Public** (or grant access to collaborators only).
 
-### Homelab `.env` after publish
+### Homelab install after publish
+
+**No `.env` required** for the official image: use [`docker-compose.install.yml`](../docker-compose.install.yml) or [`docker-compose.registry.yml`](../docker-compose.registry.yml) (defaults to **`ghcr.io/renji61/remi-trip-planner:latest`**).
+
+Optional `.env` for forks or custom tags:
 
 ```env
-REMI_IMAGE=ghcr.io/your-github-username/remi-trip-planner:latest
+REMI_IMAGE=ghcr.io/your-lowercase-github-username/remi-trip-planner:latest
 ```
 
 Use your **lowercase** GitHub username or org as shown under the package on GitHub.
@@ -100,7 +104,7 @@ The default GitHub Actions workflow builds for the **runner** architecture (usua
 ## Verify
 
 ```bash
-docker pull ghcr.io/your-github-username/remi-trip-planner:latest
+docker pull ghcr.io/renji61/remi-trip-planner:latest
 ```
 
-Then use [`docker-compose.registry.yml`](../docker-compose.registry.yml) as documented in [self-hosting.md](self-hosting.md).
+Then use [`docker-compose.install.yml`](../docker-compose.install.yml) or [`docker-compose.registry.yml`](../docker-compose.registry.yml) as documented in [self-hosting.md](self-hosting.md).

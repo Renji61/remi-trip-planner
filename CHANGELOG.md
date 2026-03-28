@@ -11,6 +11,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Flesh out `POST /api/v1/trips/{tripID}/sync` request handling per [docs/sync_contract.md](docs/sync_contract.md).
 - Richer conflict handling beyond last-write-wins for sync clients.
 
+## [1.2.0] - 2026-03-28
+
+### Added
+
+- **Public container image** on GitHub Container Registry: `ghcr.io/renji61/remi-trip-planner:latest` (and SemVer tags from `v*.*.*` via CI).
+- **`docker-compose.install.yml`** — single-file homelab install with **no `.env` required** (literal image and port).
+- **`docker-compose.registry.yml`** — same stack with **optional** `.env` overrides (`REMI_IMAGE` defaults to the official image; `REMI_PORT` defaults to 8080).
+- **`docker-compose.yml`** — build from clone; healthchecks via `wget`; Watchtower intentionally omitted (see self-hosting docs).
+- **`.github/workflows/docker-publish.yml`** — build and push to GHCR on `main` and SemVer tags.
+- **Docs:** [docs/self-hosting.md](docs/self-hosting.md), [docs/publish-image.md](docs/publish-image.md); **`.env.example`**, **`.dockerignore`**; **`scripts/publish-ghcr.ps1`** / **`scripts/publish-ghcr.sh`**.
+
+### Changed
+
+- **Dockerfile:** Alpine runtime includes **`wget`**, **`HEALTHCHECK`** on `GET /healthz`.
+- **README:** Docker & self-hosting section aligned with GHCR install paths.
+
+### Notes for installers
+
+- Default GitHub Actions build targets **linux/amd64**; ARM homelabs may need `platform:` in Compose or multi-arch builds (see [docs/publish-image.md](docs/publish-image.md)).
+
 ## [1.1.1] - 2026-03-28
 
 ### Fixed
@@ -170,6 +190,7 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Renji61/remi-trip-planner/compare/5d7e105...v1.1.0
