@@ -4,6 +4,19 @@ Nobody can push to **your** GitHub Container Registry (GHCR) or Docker Hub accou
 
 ## Path A — GitHub Actions (recommended)
 
+### If `git push` is rejected for the workflow file
+
+GitHub may show: *refusing to allow an OAuth App to create or update workflow … without `workflow` scope* (common with Cursor/VS Code or Git Credential Manager using a limited OAuth token).
+
+**Fix one of:**
+
+1. **Classic PAT with `workflow` scope** — [Create a token](https://github.com/settings/tokens) with **`repo`** and **`workflow`** (and **`write:packages`** if you also push images manually). Update the remote to use it, or sign in again in Git Credential Manager and choose PAT.
+2. **GitHub web UI** — Repository → **Add file** → upload [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) (same contents as in this repo).
+
+After the workflow exists on `main`, routine pushes that do not touch workflow files usually work with your existing credential.
+
+---
+
 1. Push this repository to GitHub (your fork or the canonical repo).
 2. Ensure [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) is on the default branch.
 3. In the repo: **Settings → Actions → General** — allow **read and write** for workflows (needed for `GITHUB_TOKEN` to push packages).
