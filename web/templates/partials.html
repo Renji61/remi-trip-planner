@@ -26,6 +26,9 @@
           var p = document.documentElement.getAttribute("data-theme-pref") || serverPref;
           if (p !== "system") return;
           document.documentElement.classList.toggle("theme-dark", mq.matches);
+          try {
+            document.dispatchEvent(new CustomEvent("remi:themechange", { detail: { dark: mq.matches } }));
+          } catch (eMq) {}
         });
       } catch (e) {}
     })();

@@ -1410,16 +1410,16 @@ html.theme-dark .trip-list-budget-bar-fill--draft {
     padding-top: 2px;
   }
   .trip-list-mobile-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 8px 10px;
     width: 100%;
     min-width: 0;
   }
   .trip-list-mobile-top .trip-status-badge--mobile-list {
     flex-shrink: 0;
+    justify-self: start;
     position: static !important;
     top: auto;
     left: auto;
@@ -1441,17 +1441,13 @@ html.theme-dark .trip-list-budget-bar-fill--draft {
     color: #fbcfe8;
   }
   .trip-list-mobile-dates {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 58%;
     font-size: 12px;
     font-weight: 500;
-    line-height: 1.3;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.35;
     text-align: right;
-    margin-left: 8px;
+    justify-self: end;
+    min-width: 0;
+    max-width: 100%;
   }
   .trip-list-mobile-title {
     margin: 0;
@@ -1856,6 +1852,21 @@ input, select {
   letter-spacing: normal;
   font-weight: 500;
 }
+
+/* Native <select> dropdown lists (especially Chromium on Windows) can render a light menu while
+   inheriting light text from the closed control — white-on-white. Force dark scheme on the control
+   and give options explicit surfaces so every page’s selects stay readable in dark mode. */
+html.theme-dark select {
+  color-scheme: dark;
+  background-color: var(--surface-low);
+  color: var(--on-surface);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+html.theme-dark option,
+html.theme-dark optgroup {
+  background-color: var(--surface);
+  color: var(--on-surface);
+}
 .full { grid-column: 1 / -1; }
 .location-hint {
   margin: 0;
@@ -2195,6 +2206,7 @@ html.theme-dark .timeline-connector-dropdown {
   flex: 1;
   min-width: 0;
 }
+.itinerary-booking-view,
 .itinerary-vehicle-view {
   display: flex;
   align-items: flex-start;
@@ -2216,6 +2228,24 @@ html.theme-dark .timeline-connector-dropdown {
   border-radius: 12px;
   border: 1px solid rgba(196, 198, 207, 0.35);
   background: var(--surface-low);
+}
+.vehicle-thumb--doc {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  padding: 8px;
+  text-decoration: none;
+  color: var(--on-surface-variant);
+  background: linear-gradient(135deg, rgba(0, 32, 70, 0.12), rgba(0, 105, 112, 0.1));
+}
+.vehicle-thumb--doc .material-symbols-outlined {
+  font-size: 22px;
+}
+.vehicle-thumb--doc small {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .vehicle-thumb-block {
   margin-top: 10px;
@@ -2320,6 +2350,25 @@ html.theme-dark .timeline-connector-dropdown {
   place-items: center;
   background: linear-gradient(135deg, rgba(0, 32, 70, 0.14), rgba(0, 105, 112, 0.12));
   color: var(--primary);
+}
+.vehicle-card-image--doc {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  text-align: center;
+  text-decoration: none;
+  color: var(--on-surface);
+  background: linear-gradient(135deg, rgba(0, 32, 70, 0.16), rgba(0, 105, 112, 0.12));
+  padding: 14px;
+}
+.vehicle-card-image--doc .material-symbols-outlined {
+  font-size: 42px;
+  color: var(--primary);
+}
+.vehicle-card-image--doc strong {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 .vehicle-card-image--placeholder .material-symbols-outlined {
   font-size: 46px;
@@ -4102,6 +4151,52 @@ html.theme-dark .trip-layout-reorder-list--settings .trip-layout-reorder-item {
   .site-settings-main,
   .profile-settings-main {
     padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 920px) {
+  .page-site-settings .trip-settings-subcard[data-mobile-settings-accordion],
+  .page-trip-settings .trip-settings-subcard[data-mobile-settings-accordion] {
+    overflow: hidden;
+  }
+  .page-site-settings .settings-mobile-accordion-trigger,
+  .page-trip-settings .settings-mobile-accordion-trigger {
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+    margin-bottom: 0;
+    position: relative;
+    padding-right: 34px;
+  }
+  .page-site-settings .settings-mobile-accordion-trigger::after,
+  .page-trip-settings .settings-mobile-accordion-trigger::after {
+    content: "expand_more";
+    font-family: "Material Symbols Outlined";
+    font-size: 22px;
+    line-height: 1;
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--on-surface-variant);
+    transition: transform 0.18s ease;
+  }
+  .page-site-settings .trip-settings-subcard.settings-mobile-accordion-open .settings-mobile-accordion-trigger::after,
+  .page-trip-settings .trip-settings-subcard.settings-mobile-accordion-open .settings-mobile-accordion-trigger::after {
+    transform: translateY(-50%) rotate(180deg);
+  }
+  .page-site-settings .trip-settings-subcard[data-mobile-settings-accordion] > h3.settings-mobile-accordion-trigger,
+  .page-trip-settings .trip-settings-subcard[data-mobile-settings-accordion] > h3.settings-mobile-accordion-trigger {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--primary);
+  }
+  .page-site-settings .settings-mobile-accordion-panel,
+  .page-trip-settings .settings-mobile-accordion-panel {
+    margin-top: 12px;
   }
 }
 .settings-success {
@@ -6980,6 +7075,10 @@ html.theme-dark .trip-invite-flash {
     margin-top: 4px;
     margin-bottom: 0;
   }
+  /* Trip settings: invite link sits above accordion cards — keep clear separation from first section (Trip information). */
+  .page-trip-settings .trip-members-mobile-shell {
+    margin-bottom: 20px;
+  }
 }
 
 .avatar-link {
@@ -7063,8 +7162,9 @@ html.theme-dark .trip-invite-flash {
     scroll-snap-type: x mandatory;
     scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
-    /* Let vertical pans scroll the page; horizontal pans stay on the carousel (iOS/WebKit). */
-    touch-action: pan-x;
+    /* Keep horizontal carousel swipes, but allow normal vertical page scrolling from card touch areas. */
+    touch-action: auto;
+    overscroll-behavior-x: contain;
     scrollbar-width: none;
     min-width: 0;
     width: 100%;
@@ -8611,14 +8711,11 @@ html.theme-dark .tab-settlement-view-all {
 }
 
 .trip-party-avatar.trip-party-avatar--guest-chip {
-  background: #e2e8f0 !important;
-  color: #475569;
+  /* Opaque fills so stacked avatars (negative overlap) do not show through. */
+  background: var(--surface-high) !important;
+  color: var(--on-surface-variant) !important;
   font-size: 12px;
   font-weight: 800;
-}
-html.theme-dark .trip-party-avatar.trip-party-avatar--guest-chip {
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: #cbd5e1;
 }
 .trip-settings-people-cols {
   display: grid;
@@ -8677,6 +8774,14 @@ html.theme-dark .trip-party-avatar.trip-party-avatar--guest-chip {
 .trip-role-pill--owner {
   background: rgba(26, 46, 76, 0.12);
   color: var(--brand-navy, #1a2e4c);
+}
+html.theme-dark .trip-role-pill {
+  background: var(--surface-high);
+  color: var(--on-surface);
+}
+html.theme-dark .trip-role-pill--owner {
+  background: rgba(168, 199, 255, 0.22);
+  color: var(--primary);
 }
 .trip-settings-guest-remove {
   margin: 0;

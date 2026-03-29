@@ -33,6 +33,13 @@ func geocodeCoords(ctx context.Context, query, googleAPIKey string) (lat, lng fl
 }
 
 func geocodeNominatim(ctx context.Context, query string) (lat, lng float64) {
+	cacheKey := globalMapsLocationCache.geoKeyNominatim(query)
+	if la, ln, hit, ok := globalMapsLocationCache.geoGet(cacheKey); ok {
+		if hit {
+			return la, ln
+		}
+		return 0, 0
+	}
 	reqURL := fmt.Sprintf(
 		"https://nominatim.openstreetmap.org/search?q=%s&format=jsonv2&limit=1",
 		url.QueryEscape(query),
@@ -52,15 +59,32 @@ func geocodeNominatim(ctx context.Context, query string) (lat, lng float64) {
 		Lat string `json:"lat"`
 		Lon string `json:"lon"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil || len(results) == 0 {
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return 0, 0
+	}
+	if len(results) == 0 {
+		globalMapsLocationCache.geoSetNegative(cacheKey, geocodeGoogleMissTTL)
 		return 0, 0
 	}
 	lat, _ = strconv.ParseFloat(results[0].Lat, 64)
 	lng, _ = strconv.ParseFloat(results[0].Lon, 64)
+	if lat == 0 && lng == 0 {
+		globalMapsLocationCache.geoSetNegative(cacheKey, geocodeGoogleMissTTL)
+	} else {
+		globalMapsLocationCache.geoSetCoords(cacheKey, lat, lng, geocodeNominatimTTL)
+	}
 	return lat, lng
 }
 
 func geocodeGoogle(ctx context.Context, address, apiKey string) (lat, lng float64) {
+	tag := mapsAPIKeyTagFrom(apiKey)
+	cacheKey := globalMapsLocationCache.geoKeyGoogle(tag, address)
+	if la, ln, hit, ok := globalMapsLocationCache.geoGet(cacheKey); ok {
+		if hit {
+			return la, ln
+		}
+		return 0, 0
+	}
 	u := fmt.Sprintf(
 		"https://maps.googleapis.com/maps/api/geocode/json?address=%s&key=%s",
 		url.QueryEscape(address),
@@ -91,18 +115,28 @@ func geocodeGoogle(ctx context.Context, address, apiKey string) (lat, lng float6
 		return 0, 0
 	}
 	if payload.Status != "OK" && payload.Status != "ZERO_RESULTS" {
+		globalMapsLocationCache.geoSetNegative(cacheKey, geocodeGoogleMissTTL)
 		return 0, 0
 	}
 	if len(payload.Results) == 0 {
+		globalMapsLocationCache.geoSetNegative(cacheKey, geocodeGoogleMissTTL)
 		return 0, 0
 	}
 	loc := payload.Results[0].Geometry.Location
+	globalMapsLocationCache.geoSetCoords(cacheKey, loc.Lat, loc.Lng, geocodeGoogleSuccessTTL)
 	return loc.Lat, loc.Lng
 }
 
 func nominatimSuggestions(ctx context.Context, query string, limit int) []locationSuggestion {
 	if limit <= 0 {
 		limit = 5
+	}
+	sKey := globalMapsLocationCache.suggestKeyNominatim(query)
+	if cached, ok := globalMapsLocationCache.suggestGet(sKey); ok {
+		if len(cached) <= limit {
+			return cached
+		}
+		return cached[:limit]
 	}
 	reqURL := fmt.Sprintf(
 		"https://nominatim.openstreetmap.org/search?q=%s&format=jsonv2&limit=%d",
@@ -151,12 +185,21 @@ func nominatimSuggestions(ctx context.Context, query string, limit int) []locati
 			ShortName:   shortName,
 		})
 	}
+	globalMapsLocationCache.suggestSet(sKey, out, nominatimSuggestTTL)
 	return out
 }
 
 func googlePlaceSuggestions(ctx context.Context, input, apiKey string, limit int) []locationSuggestion {
 	if limit <= 0 {
 		limit = 5
+	}
+	tag := mapsAPIKeyTagFrom(apiKey)
+	sKey := globalMapsLocationCache.suggestKeyGoogle(tag, input)
+	if cached, ok := globalMapsLocationCache.suggestGet(sKey); ok {
+		if len(cached) <= limit {
+			return cached
+		}
+		return cached[:limit]
 	}
 	autoURL := fmt.Sprintf(
 		"https://maps.googleapis.com/maps/api/place/autocomplete/json?input=%s&key=%s",
@@ -218,10 +261,16 @@ func googlePlaceSuggestions(ctx context.Context, input, apiKey string, limit int
 			ShortName:   shortName,
 		})
 	}
+	globalMapsLocationCache.suggestSet(sKey, out, placeSuggestTTL)
 	return out
 }
 
 func googlePlaceDetail(ctx context.Context, placeID, apiKey string, client *http.Client) (lat, lng float64, formatted string) {
+	tag := mapsAPIKeyTagFrom(apiKey)
+	pKey := globalMapsLocationCache.placeKey(tag, placeID)
+	if la, ln, disp, ok := globalMapsLocationCache.placeGet(pKey); ok {
+		return la, ln, disp
+	}
 	u := fmt.Sprintf(
 		"https://maps.googleapis.com/maps/api/place/details/json?place_id=%s&fields=geometry%%2Flocation%%2Cformatted_address%%2Cname&key=%s",
 		url.QueryEscape(placeID),
@@ -257,5 +306,6 @@ func googlePlaceDetail(ctx context.Context, placeID, apiKey string, client *http
 		formatted = strings.TrimSpace(payload.Result.Name)
 	}
 	loc := payload.Result.Geometry.Location
+	globalMapsLocationCache.placeSet(pKey, loc.Lat, loc.Lng, formatted, placeDetailTTL)
 	return loc.Lat, loc.Lng, formatted
 }

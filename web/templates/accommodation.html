@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=143">
+  <link rel="stylesheet" href="/static/app.css?v=147">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=124"></script>
+  <script defer src="/static/app.js?v=130"></script>
 </head>
 <body>
   <main class="app-shell" aria-label="{{.Details.Trip.StaySectionTitle}}" data-long-press-sheet-root>
@@ -116,9 +116,14 @@
                   <div id="accommodation-view-{{.ID}}" class="item-view">
                     <div class="vehicle-card-content">
                       <div class="vehicle-media">
-                        {{if .AttachmentPath}}
+                        {{if isImageWebPath .AttachmentPath}}
                         <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open booking attachment in a new tab: {{.Name}}">
                           <img class="vehicle-card-image" src="{{.AttachmentPath}}" alt="Booking attachment image for {{.Name}}">
+                        </a>
+                        {{else if .AttachmentPath}}
+                        <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" class="vehicle-card-image vehicle-card-image--doc" title="Open booking attachment in a new tab: {{.Name}}">
+                          <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                          <strong>Document attached</strong>
                         </a>
                         {{else}}
                         <div class="vehicle-card-image vehicle-card-image--placeholder" role="img" aria-label="No booking image">

@@ -58,14 +58,15 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 - **Day-grouped** stops with titles, locations, notes, optional cost and times.
 - **Per-day descriptions** (labels) editable inline on the trip page.
-- **Interactive map** with markers and a route polyline when coordinates exist.
+- **Interactive map** (Leaflet + OpenStreetMap by default, or **Google Maps** when an API key is set) with markers, optional **day filters**, and travel hints between stops; editing a stop **updates stored coordinates** and map pins after save.
 - **Search** across itinerary text from the trip header.
 - **Geocoding** can be disabled globally (app settings) for privacy or rate-limit reasons.
+- **Caching:** server and browser caches reduce repeat geocoding and place-suggestion traffic for the same queries.
 
 ### Expenses & group expenses
 
-- Manual **expenses** (category, amount, date, payment method, notes) at `/trips/{id}/expenses`; **group expenses (tab)** at `/trips/{id}/group-expenses` with equal, exact, percent, and share-based splits; **301** redirects from legacy `/budget` and `/tab` URLs.
-- **Budget summary** on the trip page (budgeted vs spent); dedicated expenses subpage with transactions and export.
+- Manual **expenses** (category, amount, date, payment method, notes) at `/trips/{id}/expenses`; **group expenses** at `/trips/{id}/group-expenses` with equal, exact, percent, and share-based splits; **301** redirects from legacy `/budget` and `/tab` URLs.
+- **Budget summary** on the trip page (budgeted vs spent), including **Total group expense** on mobile and in the desktop sidebar when group expenses are enabled; dedicated expenses subpage with transactions and export.
 - **Quick expense** entry from the trip sidebar (when the expenses section is enabled).
 - Some expenses are **linked** to stay, vehicle, or flight bookings and edited from those flows.
 - **Departed participants** on group expenses keep historical splits and settlements consistent when collaborators leave; labels show **Left trip** where applicable.
@@ -190,7 +191,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.46.0` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.47.0` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 

@@ -9,7 +9,8 @@ tmp_dir = "tmp"
 [build]
   cmd = "go build -o ./bin/remi-server.exe ./cmd/server"
   bin = "bin/remi-server.exe"
-  full_bin = "scripts\\run-dev.cmd"
+  # Run the built exe directly so Air works when started from PowerShell (run-dev.cmd was mis-invoked as a module).
+  full_bin = "bin\\remi-server.exe"
   delay = 200
   exclude_dir = ["tmp", "bin", "vendor", "data", ".git", "web/static/uploads"]
   exclude_regex = ["_test\\.go$"]

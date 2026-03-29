@@ -11,6 +11,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Flesh out `POST /api/v1/trips/{tripID}/sync` request handling per [docs/sync_contract.md](docs/sync_contract.md).
 - Richer conflict handling beyond last-write-wins for sync clients.
 
+## [1.47.0] - 2026-03-29
+
+### Added
+
+- **Maps API caching (server):** in-memory TTL caches for Google Geocoding, Places Autocomplete, Place Details, and Nominatim suggestions/geocode; caps on map size to limit memory.
+- **Location API HTTP caching:** `Cache-Control: private` on successful `/api/location/geocode` and `/api/location/suggest` responses where applicable.
+- **Client-side:** in-memory caches and in-flight deduplication for geocode and suggest calls from the browser.
+
+### Changed
+
+- **Google Maps (trip page):** light/dark map styling uses the **styled maps** path so the basemap updates immediately when the app theme changes (the Maps JS `colorScheme` option does not apply after map creation).
+- **Group expenses (UI):** “Total on Tab” renamed to **Total Group Expense**; the same summary tile appears in the **desktop sidebar** above quick group-expense actions when that section is enabled.
+- **Trip page map:** day chips to show/hide markers by itinerary day (Google Maps and Leaflet); custom itinerary markers (day-colored ring + kind icon) on Google Maps.
+- **About page:** “What you can do with REMI Trip Planner” refreshed for map modes, group expenses, per-trip date format, geocoding cache note, and self-hosted update checks.
+
+### Fixed
+
+- **Itinerary stop edits:** saving a plain stop now **geocodes** the location and persists **latitude/longitude** in SQLite; between-stop distances and the **trip map** stay in sync after AJAX save (await connector geocoding before map refresh; `fetch` for fresh trip HTML uses **`cache: "no-store"`**).
+- **Trip map after edit:** markers update by itinerary item id without a full page reload.
+- **Inline itinerary edit:** **Edit / Delete** actions remain available after save (clear `.editing` when the form node is missing; re-apply desktop `details` open state; re-wire open buttons).
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.47.0`** (and the matching GHCR image tag if you pull from the registry) so instances on **1.46.0** or older see an update on About / `GET /api/about/update-check`.
+
 ## [1.46.0] - 2026-03-29
 
 ### Added
@@ -257,7 +282,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.46.0...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.47.0...HEAD
+[1.47.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.46.0...v1.47.0
 [1.46.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.45.0...v1.46.0
 [1.45.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.40.0...v1.45.0
 [1.40.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.3.0...v1.40.0

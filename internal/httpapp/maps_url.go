@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"path/filepath"
 	"strings"
 )
 
@@ -30,4 +31,35 @@ func locationLineBeforeComma(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return s
+}
+
+// itineraryNotesDisplay removes noisy attachment suffixes that are internal plumbing
+// (e.g. "| Attachment: /static/uploads/...") from itinerary note text.
+func itineraryNotesDisplay(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	lower := strings.ToLower(s)
+	if i := strings.Index(lower, "| attachment:"); i >= 0 {
+		return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s[:i]), "|"))
+	}
+	return s
+}
+
+// isImageWebPath reports whether a stored web path likely points to an image file.
+func isImageWebPath(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		s = s[:i]
+	}
+	switch strings.ToLower(filepath.Ext(s)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif":
+		return true
+	default:
+		return false
+	}
 }

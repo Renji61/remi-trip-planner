@@ -261,7 +261,7 @@ func (a *app) aboutPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	section := changelog.SectionForVersion(changelogPath(), version.Version)
+	section := changelog.TrimSelfHosterNotes(changelog.SectionForVersion(changelogPath(), version.Version))
 	data := map[string]any{
 		"Settings":      settings,
 		"CSRFToken":     CSRFToken(r.Context()),
@@ -284,6 +284,30 @@ type aboutUpdateCheckResponse struct {
 	Message         string `json:"message,omitempty"`
 }
 
+type ghReleaseListItem struct {
+	TagName    string `json:"tag_name"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+}
+
+// highestStableReleaseTag returns the greatest semver among published, non-draft, non-prerelease releases.
+func highestStableReleaseTag(releases []ghReleaseListItem) string {
+	var best string
+	for _, rel := range releases {
+		if rel.Draft || rel.Prerelease {
+			continue
+		}
+		tag := changelog.NormalizeVersion(rel.TagName)
+		if tag == "" {
+			continue
+		}
+		if best == "" || version.Compare(tag, best) > 0 {
+			best = tag
+		}
+	}
+	return best
+}
+
 func (a *app) aboutUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	cur := version.Version
@@ -292,8 +316,10 @@ func (a *app) aboutUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		Latest:  cur,
 		CheckOK: false,
 	}
+	// GitHub's /releases/latest follows the repo "latest release" flag, which may lag behind
+	// newer tags. List releases and take the highest stable semver instead.
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet,
-		"https://api.github.com/repos/"+version.GitHubRepo+"/releases/latest", nil)
+		"https://api.github.com/repos/"+version.GitHubRepo+"/releases?per_page=100", nil)
 	if err != nil {
 		out.Message = "Could not prepare request."
 		_ = json.NewEncoder(w).Encode(out)
@@ -318,15 +344,18 @@ func (a *app) aboutUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
-	var payload struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil || strings.TrimSpace(payload.TagName) == "" {
-		out.Message = "Could not read latest release."
+	var releases []ghReleaseListItem
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&releases); err != nil {
+		out.Message = "Could not read releases."
 		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
-	latest := changelog.NormalizeVersion(payload.TagName)
+	latest := highestStableReleaseTag(releases)
+	if latest == "" {
+		out.Message = "No stable releases found for this repository."
+		_ = json.NewEncoder(w).Encode(out)
+		return
+	}
 	out.Latest = latest
 	out.CheckOK = true
 	out.UpdateAvailable = version.Compare(latest, cur) > 0

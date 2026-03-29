@@ -407,10 +407,12 @@ window.addEventListener("load", () => {
     `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=${mode}`;
   const connectorCoordsCache = new Map();
 
+  const GEOCODE_CLIENT_CACHE_MAX = 400;
+  const geocodeClientCache = new Map();
+  const geocodeClientInflight = new Map();
+
   /** Must be declared before fillMissingCoords / renderItineraryConnectors (avoid TDZ ReferenceError on load). */
-  const geocodeLocation = async (locationQuery) => {
-    const q = (locationQuery || "").trim();
-    if (!q) return null;
+  const geocodeLocationUncached = async (q) => {
     try {
       const res = await fetch(`${remiGeocodeURL()}?q=${encodeURIComponent(q)}`, {
         credentials: "same-origin",
@@ -453,6 +455,39 @@ window.addEventListener("load", () => {
       lng: parseFloat(top.lon || "0"),
       displayName: top.display_name || q
     };
+  };
+
+  const geocodeLocation = async (locationQuery) => {
+    const q = (locationQuery || "").trim();
+    if (!q) return null;
+    const ck = normalize(q);
+    if (geocodeClientCache.has(ck)) {
+      const hit = geocodeClientCache.get(ck);
+      return hit ? { lat: hit.lat, lng: hit.lng, displayName: hit.displayName } : null;
+    }
+    let inflight = geocodeClientInflight.get(ck);
+    if (!inflight) {
+      inflight = (async () => {
+        try {
+          return await geocodeLocationUncached(q);
+        } finally {
+          geocodeClientInflight.delete(ck);
+        }
+      })();
+      geocodeClientInflight.set(ck, inflight);
+    }
+    const result = await inflight;
+    if (result && Number.isFinite(result.lat) && Number.isFinite(result.lng)) {
+      if (geocodeClientCache.size >= GEOCODE_CLIENT_CACHE_MAX) {
+        geocodeClientCache.delete(geocodeClientCache.keys().next().value);
+      }
+      geocodeClientCache.set(ck, {
+        lat: result.lat,
+        lng: result.lng,
+        displayName: result.displayName
+      });
+    }
+    return result;
   };
 
   const fillMissingCoords = async (scopes) => {
@@ -657,57 +692,95 @@ window.addEventListener("load", () => {
     applyItinerarySearch();
   }
 
+  const LOCATION_SUGGEST_CLIENT_CACHE_MAX = 200;
+  const locationSuggestClientCache = new Map();
+  const locationSuggestClientInflight = new Map();
+
   const searchLocations = async (locationQuery) => {
     const q = (locationQuery || "").trim();
     if (!q) return [];
-    try {
-      const res = await fetch(`${remiSuggestURL()}?q=${encodeURIComponent(q)}`, {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
+    const ck = normalize(q);
+    if (locationSuggestClientCache.has(ck)) {
+      return locationSuggestClientCache.get(ck).map((item) => ({ ...item }));
+    }
+    let inflight = locationSuggestClientInflight.get(ck);
+    if (!inflight) {
+      inflight = (async () => {
+        try {
+          try {
+            const res = await fetch(`${remiSuggestURL()}?q=${encodeURIComponent(q)}`, {
+              credentials: "same-origin",
+              headers: { Accept: "application/json" }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data) && data.length > 0) {
+                return data
+                  .map((item) => {
+                    const lat = parseFloat(item.lat ?? item.Lat ?? "0");
+                    const lng = parseFloat(item.lng ?? item.Lon ?? "0");
+                    const displayName = item.displayName || item.display_name || "";
+                    const shortName =
+                      item.shortName ||
+                      item.name ||
+                      (displayName ? displayName.split(",")[0].trim() : "") ||
+                      displayName;
+                    return { lat, lng, displayName, shortName };
+                  })
+                  .filter(
+                    (item) =>
+                      (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng)
+                  );
+              }
+            }
+          } catch (e) {
+            /* fallback */
+          }
+          const url = new URL("https://nominatim.openstreetmap.org/search");
+          url.searchParams.set("q", q);
+          url.searchParams.set("format", "jsonv2");
+          url.searchParams.set("limit", "5");
+          const response = await fetch(url.toString(), {
+            headers: {
+              Accept: "application/json"
+            }
+          });
+          if (!response.ok) {
+            return [];
+          }
+          const data = await response.json();
+          if (!Array.isArray(data)) {
+            return [];
+          }
           return data
             .map((item) => {
-              const lat = parseFloat(item.lat ?? item.Lat ?? "0");
-              const lng = parseFloat(item.lng ?? item.Lon ?? "0");
-              const displayName = item.displayName || item.display_name || "";
-              const shortName = item.shortName || item.name || (displayName ? displayName.split(",")[0].trim() : "") || displayName;
+              const lat = parseFloat(item.lat || "0");
+              const lng = parseFloat(item.lon || "0");
+              const displayName = item.display_name || "";
+              const name = item.name && String(item.name).trim() ? String(item.name).trim() : "";
+              const shortName = name || (displayName ? displayName.split(",")[0].trim() : "") || displayName;
               return { lat, lng, displayName, shortName };
             })
-            .filter((item) => (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng));
+            .filter(
+              (item) => (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng)
+            );
+        } finally {
+          locationSuggestClientInflight.delete(ck);
         }
+      })();
+      locationSuggestClientInflight.set(ck, inflight);
+    }
+    const out = await inflight;
+    if (out.length > 0) {
+      if (locationSuggestClientCache.size >= LOCATION_SUGGEST_CLIENT_CACHE_MAX) {
+        locationSuggestClientCache.delete(locationSuggestClientCache.keys().next().value);
       }
-    } catch (e) {
-      /* fallback */
+      locationSuggestClientCache.set(
+        ck,
+        out.map((item) => ({ ...item }))
+      );
     }
-    const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.searchParams.set("q", q);
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("limit", "5");
-    const response = await fetch(url.toString(), {
-      headers: {
-        Accept: "application/json"
-      }
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-    return data
-      .map((item) => {
-        const lat = parseFloat(item.lat || "0");
-        const lng = parseFloat(item.lon || "0");
-        const displayName = item.display_name || "";
-        const name = item.name && String(item.name).trim() ? String(item.name).trim() : "";
-        const shortName = name || (displayName ? displayName.split(",")[0].trim() : "") || displayName;
-        return { lat, lng, displayName, shortName };
-      })
-      .filter((item) => (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng));
+    return out.map((item) => ({ ...item }));
   };
 
   const REMI_LOCATION_SUGGEST_BLUR_MS = 300;
@@ -1025,7 +1098,17 @@ window.addEventListener("load", () => {
 
   const closeInlineEdit = (formId) => {
     const form = document.getElementById(formId);
-    if (!form) return;
+    if (!form) {
+      /* Form can be missing after DOM sync; still clear row editing + show view or actions stay hidden (CSS). */
+      const viewId = itineraryViewIdForForm(formId);
+      if (viewId && viewId.startsWith("itinerary-view-")) {
+        const view = document.getElementById(viewId);
+        const row = view?.closest(".timeline-item");
+        if (row) row.classList.remove("editing");
+        if (view) view.classList.remove("hidden");
+      }
+      return;
+    }
     if (form.classList.contains("budget-expense-edit-form")) {
       const expenseId = form.getAttribute("data-budget-expense-id") || "";
       const editTr = expenseId
@@ -1959,6 +2042,8 @@ window.addEventListener("load", () => {
     if (!currentView) return;
     try {
       const response = await fetch(window.location.href, {
+        cache: "no-store",
+        credentials: "same-origin",
         headers: {
           "X-Requested-With": "XMLHttpRequest",
           Accept: "text/html"
@@ -1986,6 +2071,8 @@ window.addEventListener("load", () => {
   // Shared helper: fetch fresh page HTML once, reuse across calls
   const fetchFreshDoc = async () => {
     const r = await fetch(window.location.href, {
+      cache: "no-store",
+      credentials: "same-origin",
       headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" }
     });
     if (!r.ok) return null;
@@ -2087,7 +2174,8 @@ window.addEventListener("load", () => {
         "data-geocode-location",
         "data-search-text",
         "data-map-day",
-        "data-marker-kind"
+        "data-marker-kind",
+        "data-itinerary-item-id"
       ].forEach((attr) => {
         const val = freshLi.getAttribute(attr);
         if (val !== null) row.setAttribute(attr, val);
@@ -2138,7 +2226,10 @@ window.addEventListener("load", () => {
       syncItineraryRow(siblingRow, freshDoc, siblingViewId);
     });
 
-    renderItineraryConnectors(document);
+    await renderItineraryConnectors(document);
+    if (typeof window.remiRefreshTripMapFromItineraryDOM === "function") {
+      window.remiRefreshTripMapFromItineraryDOM();
+    }
     return true;
   };
 
@@ -2175,8 +2266,9 @@ window.addEventListener("load", () => {
     if (!tiles.length) return;
     try {
       const response = await fetch(window.location.href, {
-        headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" },
-        credentials: "same-origin"
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" }
       });
       if (!response.ok) return;
       const doc = new DOMParser().parseFromString(await response.text(), "text/html");
@@ -2362,13 +2454,17 @@ window.addEventListener("load", () => {
           updateChecklistEditUI(form);
         }
         if (form.id && isItineraryItemForm(form.id)) {
+          const itineraryRow = form.closest(".timeline-item");
           const moved = await smartRepositionItineraryItem(form);
           if (!moved) {
             try { sessionStorage.setItem(TOAST_KEY, inferToastMessage(form)); } catch (e) { /* ignore */ }
             window.location.reload();
             return;
           }
+          if (itineraryRow) itineraryRow.classList.remove("editing");
           closeInlineEdit(form.id);
+          window.remiApplyExpenseActionsDropdownOpen?.();
+          window.remiWireInlineEditOpenButtonsIn?.(itineraryRow || document);
         } else if (form.id && form.id.startsWith("expense-edit-budget-")) {
           try {
             sessionStorage.setItem(TOAST_KEY, inferToastMessage(form));
@@ -2449,6 +2545,10 @@ window.addEventListener("load", () => {
                   ?.remove();
               }
               row.remove();
+              if (row.classList.contains("timeline-item")) {
+                void renderItineraryConnectors(document);
+                window.remiRefreshTripMapFromItineraryDOM?.();
+              }
             }
           }
         }
@@ -2875,90 +2975,34 @@ window.addEventListener("load", () => {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
 
-  const points = Array.from(document.querySelectorAll("[data-map-itinerary-point][data-lat][data-lng]"))
-    .map((el) => ({
-      lat: parseFloat(el.getAttribute("data-lat") || "0"),
-      lng: parseFloat(el.getAttribute("data-lng") || "0"),
-      title: el.getAttribute("data-title") || "",
-      location: el.getAttribute("data-location") || "",
-      day: parseInt(el.getAttribute("data-map-day") || "1", 10) || 1,
-      kind: (el.getAttribute("data-marker-kind") || "stop").toLowerCase()
-    }))
-    .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng) && (p.lat !== 0 || p.lng !== 0));
+  const parseTripMapPoints = () =>
+    Array.from(document.querySelectorAll("[data-map-itinerary-point][data-lat][data-lng]"))
+      .map((el) => ({
+        itemId: (el.getAttribute("data-itinerary-item-id") || "").trim(),
+        lat: parseFloat(el.getAttribute("data-lat") || "0"),
+        lng: parseFloat(el.getAttribute("data-lng") || "0"),
+        title: el.getAttribute("data-title") || "",
+        location: el.getAttribute("data-location") || "",
+        day: parseInt(el.getAttribute("data-map-day") || "1", 10) || 1,
+        kind: (el.getAttribute("data-marker-kind") || "stop").toLowerCase()
+      }))
+      .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng) && (p.lat !== 0 || p.lng !== 0));
 
-  if (gMapKey) {
-    const initGoogleTripMap = () => {
-      if (!window.google || !google.maps) return;
-      const gMap = new google.maps.Map(mapEl, {
-        center: { lat: startLat, lng: startLng },
-        zoom: startZoom,
-        mapTypeControl: true,
-        streetViewControl: true,
-        fullscreenControl: true
-      });
-      const bounds = new google.maps.LatLngBounds();
-      points.forEach((p) => {
-        bounds.extend({ lat: p.lat, lng: p.lng });
-        const marker = new google.maps.Marker({
-          position: { lat: p.lat, lng: p.lng },
-          map: gMap,
-          title: `${p.title} · Day ${p.day}`
-        });
-        const iw = new google.maps.InfoWindow({
-          content: `<div><b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${p.day}</span><br>${escapeHtmlMap(p.location)}</div>`
-        });
-        marker.addListener("click", () => iw.open({ anchor: marker, map: gMap }));
-      });
-      if (points.length === 0) {
-        /* default center */
-      } else if (points.length === 1) {
-        gMap.setZoom(Math.max(startZoom, 12));
-        gMap.setCenter({ lat: points[0].lat, lng: points[0].lng });
-      } else {
-        gMap.fitBounds(bounds, 48);
-      }
-    };
-    if (window.google && google.maps) {
-      initGoogleTripMap();
-    } else {
-      window.remiGoogleTripMapInit = () => {
-        initGoogleTripMap();
-        try {
-          delete window.remiGoogleTripMapInit;
-        } catch (e) {
-          window.remiGoogleTripMapInit = undefined;
-        }
-      };
-      const gs = document.createElement("script");
-      gs.async = true;
-      gs.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(gMapKey)}&callback=remiGoogleTripMapInit`;
-      document.head.appendChild(gs);
+  const points = parseTripMapPoints();
+
+  const readTripMapLegendSelectedDays = (fallbackDayList) => {
+    const leg = document.querySelector(".trip-map-day-legend");
+    if (!leg) {
+      return new Set(fallbackDayList);
     }
-  } else if (typeof L !== "undefined") {
-  const map = L.map("map").setView([startLat, startLng], startZoom);
-  const lightLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
-  });
-  const darkLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
-  });
-  let activeBaseLayer = null;
-  const setMapTheme = (dark) => {
-    const nextLayer = dark ? darkLayer : lightLayer;
-    if (activeBaseLayer === nextLayer) return;
-    if (activeBaseLayer) {
-      map.removeLayer(activeBaseLayer);
-    }
-    activeBaseLayer = nextLayer;
-    activeBaseLayer.addTo(map);
+    const out = new Set();
+    leg.querySelectorAll(".trip-map-day-legend-item").forEach((btn) => {
+      if (btn.classList.contains("is-off")) return;
+      const d = parseInt(btn.getAttribute("data-day") || "0", 10);
+      if (d) out.add(d);
+    });
+    return out.size > 0 ? out : new Set(fallbackDayList);
   };
-  setMapTheme(document.documentElement.classList.contains("theme-dark"));
-  document.addEventListener("remi:themechange", (event) => {
-    const dark = Boolean(event?.detail?.dark);
-    setMapTheme(dark);
-  });
 
   const dayPalette = [
     "#2563eb",
@@ -2991,7 +3035,400 @@ window.addEventListener("load", () => {
   });
   const ringForDay = (day) => colorByDay.get(Math.max(1, day)) || dayPalette[0];
 
+  function remiMapHexToRgb(hex) {
+    const h = String(hex || "").replace(/^#/, "");
+    if (h.length === 3) {
+      return {
+        r: parseInt(h[0] + h[0], 16),
+        g: parseInt(h[1] + h[1], 16),
+        b: parseInt(h[2] + h[2], 16)
+      };
+    }
+    if (h.length !== 6) return { r: 37, g: 99, b: 235 };
+    return {
+      r: parseInt(h.slice(0, 2), 16),
+      g: parseInt(h.slice(2, 4), 16),
+      b: parseInt(h.slice(4, 6), 16)
+    };
+  }
+  function remiMapRgbToHex(r, g, b) {
+    const c = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+    return `#${c(r)}${c(g)}${c(b)}`;
+  }
+  function remiMapMixRgb(ringRgb, baseRgb, t) {
+    return {
+      r: ringRgb.r * t + baseRgb.r * (1 - t),
+      g: ringRgb.g * t + baseRgb.g * (1 - t),
+      b: ringRgb.b * t + baseRgb.b * (1 - t)
+    };
+  }
+  /** Canvas marker matching Leaflet remi-map-marker (day ring + kind emoji). */
+  function remiGoogleMapMarkerBitmap(ringHex, kind, isDark) {
+    const size = 34;
+    const dpr = typeof window.devicePixelRatio === "number" && window.devicePixelRatio >= 2 ? 2 : 1;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(size * dpr);
+    canvas.height = Math.round(size * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return { url: "", size, anchorX: size / 2, anchorY: size };
+    }
+    ctx.scale(dpr, dpr);
+    const ringRgb = remiMapHexToRgb(ringHex);
+    const baseRgb = isDark ? { r: 30, g: 41, b: 59 } : { r: 255, g: 255, b: 255 };
+    const mixT = isDark ? 0.28 : 0.22;
+    const fillRgb = remiMapMixRgb(ringRgb, baseRgb, mixT);
+    const cx = size / 2;
+    const cy = size / 2;
+    const radius = 13;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fillStyle = remiMapRgbToHex(fillRgb.r, fillRgb.g, fillRgb.b);
+    ctx.fill();
+    ctx.strokeStyle = ringHex;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const k = String(kind || "stop").toLowerCase();
+    const emoji =
+      k === "stay"
+        ? "\u{1F3E8}"
+        : k === "vehicle"
+          ? "\u{1F697}"
+          : k === "flight"
+            ? "\u2708\uFE0F"
+            : "\u{1F4CD}";
+    const fontPx = Math.floor(size * 0.47);
+    ctx.font = `${fontPx}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(emoji, cx, cy + 0.5);
+    return {
+      url: canvas.toDataURL("image/png"),
+      size,
+      anchorX: size / 2,
+      anchorY: size
+    };
+  }
+
+  /**
+   * Day chips under the map (toggle visibility + refit bounds). Matches .trip-map-day-legend in app.css.
+   * @param {HTMLElement} mapHost
+   * @param {number[]} uniqueDaysSorted
+   * @param {(day: number) => string} ringForDayFn
+   * @param {(selectedDays: Set<number>) => void} applySelection
+   */
+  function setupTripMapDayLegend(mapHost, uniqueDaysSorted, ringForDayFn, applySelection) {
+    const selectedDays = new Set(uniqueDaysSorted);
+    const legendButtons = new Map();
+    const syncLegendButtons = () => {
+      legendButtons.forEach((btn, d) => {
+        const on = selectedDays.has(d);
+        btn.classList.toggle("is-off", !on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    };
+    if (uniqueDaysSorted.length > 0) {
+      const leg = document.createElement("div");
+      leg.className = "trip-map-day-legend";
+      leg.setAttribute("aria-label", "Show or hide markers by itinerary day");
+      uniqueDaysSorted.forEach((d) => {
+        const ring = ringForDayFn(d);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "trip-map-day-legend-item";
+        btn.dataset.day = String(d);
+        btn.setAttribute("aria-pressed", "true");
+        btn.title = `Toggle Day ${d} markers on the map`;
+        const sw = document.createElement("span");
+        sw.className = "trip-map-day-legend-swatch";
+        sw.setAttribute("aria-hidden", "true");
+        sw.style.setProperty("--trip-map-swatch", ring);
+        btn.appendChild(sw);
+        btn.appendChild(document.createTextNode(`Day ${d}`));
+        btn.addEventListener("click", () => {
+          if (selectedDays.has(d)) selectedDays.delete(d);
+          else selectedDays.add(d);
+          syncLegendButtons();
+          applySelection(selectedDays);
+        });
+        legendButtons.set(d, btn);
+        leg.appendChild(btn);
+      });
+      mapHost.insertAdjacentElement("afterend", leg);
+    }
+    syncLegendButtons();
+    applySelection(selectedDays);
+  }
+
+  if (gMapKey) {
+    /* Dark basemap via styled maps. Google’s colorScheme only applies at Map construction;
+       setOptions({ colorScheme }) after create is ignored (Edge/Chrome), so theme toggles must use styles. */
+    const remiGmapDarkStyles = [
+      { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
+      { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+      { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+      { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+      { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+      { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#263c3f" }] },
+      { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
+      { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
+      { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#746855" }] },
+      { featureType: "transit", elementType: "geometry", stylers: [{ color: "#2f3948" }] },
+      { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] }
+    ];
+
+    let remiGoogleTripMap = null;
+    const remiGoogleTripMarkerEntries = [];
+
+    const googleTripMapDarkNow = () => document.documentElement.classList.contains("theme-dark");
+
+    const syncGoogleTripMapTheme = (darkOverride) => {
+      if (!remiGoogleTripMap || !window.google || !google.maps) return;
+      const dark =
+        typeof darkOverride === "boolean" ? darkOverride : googleTripMapDarkNow();
+      remiGoogleTripMap.setOptions({
+        styles: dark ? remiGmapDarkStyles : []
+      });
+      remiGoogleTripMarkerEntries.forEach(({ marker, point }) => {
+        const ring = ringForDay(Math.max(1, point.day));
+        const bmp = remiGoogleMapMarkerBitmap(ring, point.kind, dark);
+        if (!bmp.url) return;
+        marker.setIcon({
+          url: bmp.url,
+          scaledSize: new google.maps.Size(bmp.size, bmp.size),
+          anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
+        });
+      });
+      if (google.maps.event && typeof google.maps.event.trigger === "function") {
+        google.maps.event.trigger(remiGoogleTripMap, "resize");
+        requestAnimationFrame(() => {
+          if (remiGoogleTripMap) {
+            google.maps.event.trigger(remiGoogleTripMap, "resize");
+          }
+        });
+      }
+    };
+
+    document.addEventListener("remi:themechange", (ev) => {
+      const d =
+        ev && ev.detail && typeof ev.detail.dark === "boolean"
+          ? ev.detail.dark
+          : undefined;
+      syncGoogleTripMapTheme(d);
+    });
+
+    const initGoogleTripMap = () => {
+      if (!window.google || !google.maps) return;
+      const dark = googleTripMapDarkNow();
+      const mapOpts = {
+        center: { lat: startLat, lng: startLng },
+        zoom: startZoom,
+        mapTypeControl: true,
+        streetViewControl: true,
+        fullscreenControl: true,
+        styles: dark ? remiGmapDarkStyles : []
+      };
+      remiGoogleTripMap = new google.maps.Map(mapEl, mapOpts);
+      const gMap = remiGoogleTripMap;
+      remiGoogleTripMarkerEntries.length = 0;
+      const googleMarkersByDay = new Map();
+      const googleMarkerByItemId = new Map();
+      uniqueDays.forEach((d) => googleMarkersByDay.set(d, []));
+      const darkMarkers = googleTripMapDarkNow();
+      points.forEach((p) => {
+        const ring = ringForDay(Math.max(1, p.day));
+        const bmp = remiGoogleMapMarkerBitmap(ring, p.kind, darkMarkers);
+        const iconOpts =
+          bmp.url && typeof google.maps.Size === "function" && typeof google.maps.Point === "function"
+            ? {
+                url: bmp.url,
+                scaledSize: new google.maps.Size(bmp.size, bmp.size),
+                anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
+              }
+            : undefined;
+        const marker = new google.maps.Marker({
+          position: { lat: p.lat, lng: p.lng },
+          map: null,
+          title: `${p.title} · Day ${p.day}`,
+          ...(iconOpts ? { icon: iconOpts } : {})
+        });
+        remiGoogleTripMarkerEntries.push({ marker, point: p });
+        const dNum = Math.max(1, p.day);
+        if (!googleMarkersByDay.has(dNum)) googleMarkersByDay.set(dNum, []);
+        googleMarkersByDay.get(dNum).push(marker);
+        const iw = new google.maps.InfoWindow({
+          content: `<div><b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${p.day}</span><br>${escapeHtmlMap(p.location)}</div>`
+        });
+        marker.addListener("click", () => iw.open({ anchor: marker, map: gMap }));
+        if (p.itemId) {
+          googleMarkerByItemId.set(p.itemId, { marker, iw, point: p });
+        }
+      });
+
+      const applyGoogleDaySelection = (selectedDays) => {
+        const vis = [];
+        selectedDays.forEach((d) => {
+          (googleMarkersByDay.get(d) || []).forEach((m) => {
+            vis.push(m);
+            m.setMap(gMap);
+          });
+        });
+        googleMarkersByDay.forEach((markers, d) => {
+          if (selectedDays.has(d)) return;
+          markers.forEach((m) => m.setMap(null));
+        });
+        if (vis.length === 0) {
+          gMap.setCenter({ lat: startLat, lng: startLng });
+          gMap.setZoom(startZoom);
+          return;
+        }
+        if (vis.length === 1) {
+          const pos = vis[0].getPosition();
+          if (pos) {
+            gMap.setCenter(pos);
+            gMap.setZoom(Math.max(startZoom, 12));
+          }
+          return;
+        }
+        const bounds = new google.maps.LatLngBounds();
+        vis.forEach((m) => {
+          const pos = m.getPosition();
+          if (pos) bounds.extend(pos);
+        });
+        gMap.fitBounds(bounds, 48);
+      };
+
+      const refreshGoogleTripMapFromDOM = () => {
+        if (!remiGoogleTripMap || !window.google?.maps) return;
+        const fresh = parseTripMapPoints();
+        const seen = new Set();
+        const darkM = googleTripMapDarkNow();
+        fresh.forEach((p) => {
+          if (!p.itemId) return;
+          seen.add(p.itemId);
+          let ent = googleMarkerByItemId.get(p.itemId);
+          if (!ent) {
+            const ring = ringForDay(Math.max(1, p.day));
+            const bmp = remiGoogleMapMarkerBitmap(ring, p.kind, darkM);
+            const iconOpts =
+              bmp.url && typeof google.maps.Size === "function" && typeof google.maps.Point === "function"
+                ? {
+                    url: bmp.url,
+                    scaledSize: new google.maps.Size(bmp.size, bmp.size),
+                    anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
+                  }
+                : undefined;
+            const marker = new google.maps.Marker({
+              position: { lat: p.lat, lng: p.lng },
+              map: null,
+              title: `${p.title} · Day ${p.day}`,
+              ...(iconOpts ? { icon: iconOpts } : {})
+            });
+            const pointRef = { ...p };
+            const iw = new google.maps.InfoWindow({
+              content: `<div><b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${p.day}</span><br>${escapeHtmlMap(p.location)}</div>`
+            });
+            marker.addListener("click", () => iw.open({ anchor: marker, map: gMap }));
+            ent = { marker, iw, point: pointRef };
+            googleMarkerByItemId.set(p.itemId, ent);
+          } else {
+            Object.assign(ent.point, p);
+            ent.marker.setPosition({ lat: p.lat, lng: p.lng });
+            ent.marker.setTitle(`${p.title} · Day ${p.day}`);
+            const ring = ringForDay(Math.max(1, p.day));
+            const bmp = remiGoogleMapMarkerBitmap(ring, p.kind, darkM);
+            if (bmp.url && typeof google.maps.Size === "function" && typeof google.maps.Point === "function") {
+              ent.marker.setIcon({
+                url: bmp.url,
+                scaledSize: new google.maps.Size(bmp.size, bmp.size),
+                anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
+              });
+            }
+            ent.iw.setContent(
+              `<div><b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${p.day}</span><br>${escapeHtmlMap(p.location)}</div>`
+            );
+          }
+        });
+        googleMarkerByItemId.forEach((ent, id) => {
+          if (seen.has(id)) return;
+          ent.marker.setMap(null);
+          googleMarkerByItemId.delete(id);
+        });
+        googleMarkersByDay.clear();
+        const dayNums = new Set(uniqueDays);
+        fresh.forEach((fp) => dayNums.add(Math.max(1, fp.day)));
+        dayNums.forEach((d) => googleMarkersByDay.set(d, []));
+        googleMarkerByItemId.forEach((ent) => {
+          const d = Math.max(1, ent.point.day);
+          if (!googleMarkersByDay.has(d)) googleMarkersByDay.set(d, []);
+          googleMarkersByDay.get(d).push(ent.marker);
+        });
+        remiGoogleTripMarkerEntries.length = 0;
+        googleMarkerByItemId.forEach((ent) => {
+          remiGoogleTripMarkerEntries.push({ marker: ent.marker, point: ent.point });
+        });
+        applyGoogleDaySelection(readTripMapLegendSelectedDays(uniqueDays));
+        syncGoogleTripMapTheme();
+      };
+
+      window.remiRefreshTripMapFromItineraryDOM = refreshGoogleTripMapFromDOM;
+
+      setupTripMapDayLegend(mapEl, uniqueDays, ringForDay, applyGoogleDaySelection);
+      syncGoogleTripMapTheme();
+    };
+    if (window.google && google.maps) {
+      initGoogleTripMap();
+    } else {
+      window.remiGoogleTripMapInit = () => {
+        initGoogleTripMap();
+        try {
+          delete window.remiGoogleTripMapInit;
+        } catch (e) {
+          window.remiGoogleTripMapInit = undefined;
+        }
+      };
+      const gs = document.createElement("script");
+      gs.async = true;
+      gs.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
+        gMapKey
+      )}&callback=remiGoogleTripMapInit&v=weekly`;
+      document.head.appendChild(gs);
+    }
+  } else if (typeof L !== "undefined") {
+  const map = L.map("map").setView([startLat, startLng], startZoom);
+  const lightLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  });
+  const darkLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+  });
+  /* Keep both basemaps mounted; flip opacity + z-index so theme changes are instant (no blank gap while swapping layers). */
+  lightLayer.addTo(map);
+  darkLayer.addTo(map);
+  const setMapTheme = (dark) => {
+    if (dark) {
+      lightLayer.setOpacity(0);
+      darkLayer.setOpacity(1);
+      lightLayer.setZIndex(100);
+      darkLayer.setZIndex(200);
+    } else {
+      darkLayer.setOpacity(0);
+      lightLayer.setOpacity(1);
+      darkLayer.setZIndex(100);
+      lightLayer.setZIndex(200);
+    }
+    map.invalidateSize(false);
+  };
+  setMapTheme(document.documentElement.classList.contains("theme-dark"));
+  document.addEventListener("remi:themechange", (event) => {
+    const dark = Boolean(event?.detail?.dark);
+    setMapTheme(dark);
+  });
+
   const markersByDay = new Map();
+  const leafletMarkerByItemId = new Map();
   uniqueDays.forEach((d) => markersByDay.set(d, []));
 
   points.forEach((p) => {
@@ -3009,36 +3446,24 @@ window.addEventListener("load", () => {
     marker.bindPopup(
       `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
     );
+    if (!markersByDay.has(day)) markersByDay.set(day, []);
     markersByDay.get(day).push(marker);
+    if (p.itemId) {
+      leafletMarkerByItemId.set(p.itemId, marker);
+    }
   });
 
-  const selectedDays = new Set(uniqueDays);
-  const legendButtons = new Map();
-
-  const visibleMarkersList = () => {
-    const out = [];
+  const applyLeafletDaySelection = (selectedDays) => {
+    const vis = [];
     selectedDays.forEach((d) => {
-      (markersByDay.get(d) || []).forEach((m) => out.push(m));
-    });
-    return out;
-  };
-
-  const syncLegendButtons = () => {
-    legendButtons.forEach((btn, d) => {
-      const on = selectedDays.has(d);
-      btn.classList.toggle("is-off", !on);
-      btn.setAttribute("aria-pressed", on ? "true" : "false");
-    });
-  };
-
-  const fitMapToVisibleMarkers = () => {
-    const vis = visibleMarkersList();
-    vis.forEach((m) => {
-      if (!map.hasLayer(m)) m.addTo(map);
-    });
-    uniqueDays.forEach((d) => {
-      if (selectedDays.has(d)) return;
       (markersByDay.get(d) || []).forEach((m) => {
+        vis.push(m);
+        if (!map.hasLayer(m)) m.addTo(map);
+      });
+    });
+    markersByDay.forEach((arr, d) => {
+      if (selectedDays.has(d)) return;
+      arr.forEach((m) => {
         if (map.hasLayer(m)) map.removeLayer(m);
       });
     });
@@ -3054,38 +3479,59 @@ window.addEventListener("load", () => {
     map.fitBounds(group.getBounds(), { padding: [24, 24], maxZoom: 16 });
   };
 
-  if (uniqueDays.length > 0) {
-    const leg = document.createElement("div");
-    leg.className = "trip-map-day-legend";
-    leg.setAttribute("aria-label", "Show or hide markers by itinerary day");
-    uniqueDays.forEach((d) => {
-      const ring = ringForDay(d);
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "trip-map-day-legend-item";
-      btn.dataset.day = String(d);
-      btn.setAttribute("aria-pressed", "true");
-      btn.title = `Toggle Day ${d} markers on the map`;
-      const sw = document.createElement("span");
-      sw.className = "trip-map-day-legend-swatch";
-      sw.setAttribute("aria-hidden", "true");
-      sw.style.setProperty("--trip-map-swatch", ring);
-      btn.appendChild(sw);
-      btn.appendChild(document.createTextNode(`Day ${d}`));
-      btn.addEventListener("click", () => {
-        if (selectedDays.has(d)) selectedDays.delete(d);
-        else selectedDays.add(d);
-        syncLegendButtons();
-        fitMapToVisibleMarkers();
+  const refreshLeafletTripMapFromDOM = () => {
+    if (!map) return;
+    const fresh = parseTripMapPoints();
+    const seen = new Set();
+    fresh.forEach((p) => {
+      if (!p.itemId) return;
+      seen.add(p.itemId);
+      const day = Math.max(1, p.day);
+      const ring = ringForDay(day);
+      const glyph = kindGlyph[p.kind] || kindGlyph.stop;
+      const icon = L.divIcon({
+        className: "remi-map-marker-wrap",
+        html: `<div class="remi-map-marker" style="--remi-ring:${ring}"><span class="material-symbols-outlined" aria-hidden="true">${glyph}</span></div>`,
+        iconSize: [34, 34],
+        iconAnchor: [17, 34],
+        popupAnchor: [0, -32]
       });
-      legendButtons.set(d, btn);
-      leg.appendChild(btn);
+      let m = leafletMarkerByItemId.get(p.itemId);
+      if (!m) {
+        m = L.marker([p.lat, p.lng], { icon });
+        m.bindPopup(
+          `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
+        );
+        leafletMarkerByItemId.set(p.itemId, m);
+      } else {
+        m.setLatLng([p.lat, p.lng]);
+        m.setIcon(icon);
+        m.setPopupContent(
+          `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
+        );
+      }
     });
-    mapEl.insertAdjacentElement("afterend", leg);
-  }
+    leafletMarkerByItemId.forEach((m, id) => {
+      if (seen.has(id)) return;
+      if (map.hasLayer(m)) map.removeLayer(m);
+      leafletMarkerByItemId.delete(id);
+    });
+    markersByDay.clear();
+    const dayNums = new Set(uniqueDays);
+    fresh.forEach((fp) => dayNums.add(Math.max(1, fp.day)));
+    dayNums.forEach((d) => markersByDay.set(d, []));
+    leafletMarkerByItemId.forEach((m, id) => {
+      const pt = fresh.find((x) => x.itemId === id);
+      const d = pt ? Math.max(1, pt.day) : 1;
+      markersByDay.get(d).push(m);
+    });
+    applyLeafletDaySelection(readTripMapLegendSelectedDays(uniqueDays));
+    map.invalidateSize(false);
+  };
 
-  syncLegendButtons();
-  fitMapToVisibleMarkers();
+  window.remiRefreshTripMapFromItineraryDOM = refreshLeafletTripMapFromDOM;
+
+  setupTripMapDayLegend(mapEl, uniqueDays, ringForDay, applyLeafletDaySelection);
   }
   }
 
@@ -3102,6 +3548,7 @@ window.addEventListener("load", () => {
       }
     });
   };
+  window.remiApplyExpenseActionsDropdownOpen = applyExpenseActionsDropdownOpen;
   const init = () => {
     applyExpenseActionsDropdownOpen();
     mq.addEventListener("change", applyExpenseActionsDropdownOpen);
@@ -3730,6 +4177,130 @@ window.addEventListener("load", () => {
       }
     });
   });
+})();
+
+(function initMobileSettingsAccordion() {
+  const isSiteSettings = document.body.classList.contains("page-site-settings");
+  const isTripSettings = document.body.classList.contains("page-trip-settings");
+  if (!isSiteSettings && !isTripSettings) {
+    return;
+  }
+
+  const mqMobile = window.matchMedia("(max-width: 920px)");
+  const sectionSelector = isSiteSettings
+    ? ".site-settings-page .trip-settings-subcard"
+    : ".trip-settings-page .trip-settings-subcard";
+  const cards = Array.from(document.querySelectorAll(sectionSelector)).filter((el) => el instanceof HTMLElement);
+  if (!cards.length) {
+    return;
+  }
+
+  /** @type {{ card: HTMLElement, trigger: HTMLElement, panel: HTMLElement }[]} */
+  const sections = [];
+
+  const makeCardAccordionReady = (card, idx) => {
+    const head = card.querySelector(":scope > .trip-settings-card-head");
+    const fallbackTitle = card.querySelector(":scope > h3");
+    const trigger = head instanceof HTMLElement ? head : fallbackTitle instanceof HTMLElement ? fallbackTitle : null;
+    if (!trigger) {
+      return null;
+    }
+
+    const panel = document.createElement("div");
+    panel.className = "settings-mobile-accordion-panel";
+    panel.id = `settings-mobile-accordion-panel-${idx}`;
+
+    const nodesToMove = Array.from(card.children).filter((node) => node !== trigger);
+    if (!nodesToMove.length) {
+      return null;
+    }
+    nodesToMove.forEach((node) => panel.appendChild(node));
+    card.appendChild(panel);
+
+    card.setAttribute("data-mobile-settings-accordion", "1");
+    trigger.classList.add("settings-mobile-accordion-trigger");
+    trigger.setAttribute("role", "button");
+    trigger.setAttribute("tabindex", "0");
+    trigger.setAttribute("aria-controls", panel.id);
+    trigger.setAttribute("aria-expanded", "false");
+    panel.hidden = true;
+
+    return { card, trigger, panel };
+  };
+
+  cards.forEach((card, idx) => {
+    const ready = makeCardAccordionReady(card, idx + 1);
+    if (ready) {
+      sections.push(ready);
+    }
+  });
+
+  if (!sections.length) {
+    return;
+  }
+
+  const setOpen = (targetIdx) => {
+    sections.forEach((section, idx) => {
+      const isOpen = idx === targetIdx;
+      section.panel.hidden = !isOpen;
+      section.card.classList.toggle("settings-mobile-accordion-open", isOpen);
+      section.trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    });
+  };
+
+  const collapseAll = () => {
+    sections.forEach((section) => {
+      section.panel.hidden = true;
+      section.card.classList.remove("settings-mobile-accordion-open");
+      section.trigger.setAttribute("aria-expanded", "false");
+    });
+  };
+
+  const expandAllDesktop = () => {
+    sections.forEach((section) => {
+      section.panel.hidden = false;
+      section.card.classList.remove("settings-mobile-accordion-open");
+      section.trigger.setAttribute("aria-expanded", "true");
+    });
+  };
+
+  sections.forEach((section, idx) => {
+    const toggleCurrent = () => {
+      if (!mqMobile.matches) {
+        return;
+      }
+      const currentlyOpen = !section.panel.hidden;
+      if (currentlyOpen) {
+        collapseAll();
+        return;
+      }
+      setOpen(idx);
+    };
+
+    section.trigger.addEventListener("click", () => toggleCurrent());
+    section.trigger.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      toggleCurrent();
+    });
+  });
+
+  const syncByViewport = () => {
+    if (mqMobile.matches) {
+      collapseAll();
+    } else {
+      expandAllDesktop();
+    }
+  };
+
+  syncByViewport();
+  if (typeof mqMobile.addEventListener === "function") {
+    mqMobile.addEventListener("change", syncByViewport);
+  } else if (typeof mqMobile.addListener === "function") {
+    mqMobile.addListener(syncByViewport);
+  }
 })();
 
 (function initDashboardProfileMenu() {

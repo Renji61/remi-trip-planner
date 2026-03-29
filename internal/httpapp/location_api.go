@@ -35,6 +35,9 @@ func (a *app) apiLocationSuggest(w http.ResponseWriter, r *http.Request) {
 	} else {
 		suggestions = nominatimSuggestions(r.Context(), q, 5)
 	}
+	if len(suggestions) > 0 {
+		w.Header().Set("Cache-Control", "private, max-age=180")
+	}
 	_ = json.NewEncoder(w).Encode(suggestions)
 }
 
@@ -53,6 +56,9 @@ func (a *app) apiLocationGeocode(w http.ResponseWriter, r *http.Request) {
 	}
 	key := strings.TrimSpace(app.GoogleMapsAPIKey)
 	lat, lng := geocodeCoords(r.Context(), q, key)
+	if lat != 0 || lng != 0 {
+		w.Header().Set("Cache-Control", "private, max-age=600")
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"lat": lat, "lng": lng, "displayName": q,
 	})

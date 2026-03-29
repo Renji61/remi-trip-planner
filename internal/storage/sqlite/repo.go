@@ -204,9 +204,9 @@ func (r *Repository) UpdateItineraryItem(ctx context.Context, item trips.Itinera
 	now := time.Now().UTC()
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE itinerary_items
-		SET day_number = ?, title = ?, notes = ?, location = ?, est_cost = ?, start_time = ?, end_time = ?, updated_at = ?
+		SET day_number = ?, title = ?, notes = ?, location = ?, latitude = ?, longitude = ?, est_cost = ?, start_time = ?, end_time = ?, updated_at = ?
 		WHERE id = ? AND trip_id = ?`,
-		item.DayNumber, item.Title, item.Notes, item.Location, item.EstCost, item.StartTime, item.EndTime, now,
+		item.DayNumber, item.Title, item.Notes, item.Location, item.Latitude, item.Longitude, item.EstCost, item.StartTime, item.EndTime, now,
 		item.ID, item.TripID,
 	)
 	if err != nil {

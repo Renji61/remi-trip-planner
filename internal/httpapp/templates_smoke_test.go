@@ -44,6 +44,8 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 					return ""
 				},
 				"locationLineBeforeComma": func(s string) string { return s },
+				"itineraryNotesDisplay":   func(s string) string { return s },
+				"isImageWebPath":          func(string) bool { return true },
 				"itineraryGeocodeQuery":   func(any) string { return "" },
 				"profileInitial": func(u trips.User) string {
 					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
@@ -238,6 +240,8 @@ func TestAboutPageTemplateRenders(t *testing.T) {
 				"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
 				"googleMapsSearchURL":             func(lat, lng float64, hint string) string { return "" },
 				"locationLineBeforeComma":         func(s string) string { return s },
+				"itineraryNotesDisplay":           func(s string) string { return s },
+				"isImageWebPath":                  func(string) bool { return true },
 				"itineraryGeocodeQuery":           func(any) string { return "" },
 				"profileInitial": func(u trips.User) string {
 					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}

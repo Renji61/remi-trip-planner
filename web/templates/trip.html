@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=143">
+  <link rel="stylesheet" href="/static/app.css?v=147">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js?v=124"></script>
+  <script defer src="/static/app.js?v=133"></script>
 </head>
 <body>
   <main class="app-shell trip-details-page" data-long-press-sheet-root data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}">
@@ -163,7 +163,7 @@
                 {{end}}
                 <ul class="list timeline day-items">
                   {{range $group.Items}}
-                  <li class="timeline-item" data-itinerary-item data-map-itinerary-point data-map-day="{{$group.DayNumber}}" data-marker-kind="{{if ne .Lodging.ID ""}}stay{{else if ne .Vehicle.ID ""}}vehicle{{else if ne .Flight.ID ""}}flight{{else}}stop{{end}}" data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-geocode-location="{{itineraryGeocodeQuery .}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
+                  <li class="timeline-item" data-itinerary-item data-map-itinerary-point data-itinerary-item-id="{{.Item.ID}}" data-map-day="{{$group.DayNumber}}" data-marker-kind="{{if ne .Lodging.ID ""}}stay{{else if ne .Vehicle.ID ""}}vehicle{{else if ne .Flight.ID ""}}flight{{else}}stop{{end}}" data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-geocode-location="{{itineraryGeocodeQuery .}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
                     {{if not $.Details.Trip.IsArchived}}
                     <details class="item-actions trip-inline-actions-dropdown">
                       <summary class="trip-inline-actions-summary">
@@ -185,7 +185,7 @@
                     </details>
                     {{end}}
                     <div class="timeline-dot"></div>
-                    <div id="itinerary-view-{{.Item.ID}}" class="item-view itinerary-item-view {{if ne .Vehicle.ID ""}}itinerary-vehicle-view{{end}}">
+                    <div id="itinerary-view-{{.Item.ID}}" class="item-view itinerary-item-view {{if or (ne .Lodging.ID "") (ne .Vehicle.ID "") (ne .Flight.ID "")}}itinerary-booking-view{{end}} {{if ne .Vehicle.ID ""}}itinerary-vehicle-view{{end}}">
                       <div class="itinerary-vehicle-main">
                       <strong>{{.Item.Title}}</strong>
                       {{if ne .Lodging.ID ""}}
@@ -207,7 +207,7 @@
                         {{if ne .Lodging.ID ""}}
                         <span class="itinerary-label">Address</span>
                         {{$mapHint := .Lodging.Address}}{{if eq $mapHint ""}}{{$mapHint = .Item.Location}}{{end}}
-                        <span class="itinerary-value">{{if .Lodging.Address}}{{.Lodging.Address}}{{else if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
+                        <span class="itinerary-value">{{if .Lodging.Address}}{{locationLineBeforeComma .Lodging.Address}}{{else if .Item.Location}}{{locationLineBeforeComma .Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
                         {{else if ne .Vehicle.ID ""}}
                         <span class="itinerary-label">Pick Up Location</span>
                         {{$mapHint := .Vehicle.PickUpLocation}}{{if eq $mapHint ""}}{{$mapHint = .Item.Location}}{{end}}
@@ -219,7 +219,7 @@
                         {{else}}
                         <span class="itinerary-label">Location</span>
                         {{$mapHint := .Item.Location}}
-                        <span class="itinerary-value">{{if .Item.Location}}{{.Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
+                        <span class="itinerary-value">{{if .Item.Location}}{{locationLineBeforeComma .Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
                         {{end}}
                       </div>
                       {{if ne .Flight.ID ""}}
@@ -271,10 +271,10 @@
                         <span class="itinerary-label">Notes</span>
                         <span class="itinerary-value">{{.Flight.Notes}}</span>
                       </div>
-                      {{else if .Item.Notes}}
+                      {{else if (itineraryNotesDisplay .Item.Notes)}}
                       <div class="itinerary-field">
                         <span class="itinerary-label">Notes</span>
-                        <span class="itinerary-value">{{.Item.Notes}}</span>
+                        <span class="itinerary-value">{{itineraryNotesDisplay .Item.Notes}}</span>
                       </div>
                       {{end}}
                       {{if ne .Lodging.ID ""}}
@@ -288,6 +288,28 @@
                       {{if and (ne .Vehicle.ID "") (.Vehicle.VehicleImagePath)}}
                       <a class="vehicle-itinerary-thumb-link" href="{{.Vehicle.VehicleImagePath}}" target="_blank" rel="noreferrer">
                         <img class="vehicle-thumb" src="{{.Vehicle.VehicleImagePath}}" alt="Vehicle rental image">
+                      </a>
+                      {{else if and (ne .Lodging.ID "") (isImageWebPath .Lodging.AttachmentPath)}}
+                      <a class="vehicle-itinerary-thumb-link" href="{{.Lodging.AttachmentPath}}" target="_blank" rel="noreferrer">
+                        <img class="vehicle-thumb" src="{{.Lodging.AttachmentPath}}" alt="Accommodation attachment image">
+                      </a>
+                      {{else if and (ne .Lodging.ID "") .Lodging.AttachmentPath}}
+                      <a class="vehicle-itinerary-thumb-link" href="{{.Lodging.AttachmentPath}}" target="_blank" rel="noreferrer">
+                        <span class="vehicle-thumb vehicle-thumb--doc" role="img" aria-label="Accommodation document attached">
+                          <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                          <small>Document</small>
+                        </span>
+                      </a>
+                      {{else if and (ne .Flight.ID "") (isImageWebPath .Flight.DocumentPath)}}
+                      <a class="vehicle-itinerary-thumb-link" href="{{.Flight.DocumentPath}}" target="_blank" rel="noreferrer">
+                        <img class="vehicle-thumb" src="{{.Flight.DocumentPath}}" alt="Flight document image">
+                      </a>
+                      {{else if and (ne .Flight.ID "") .Flight.DocumentPath}}
+                      <a class="vehicle-itinerary-thumb-link" href="{{.Flight.DocumentPath}}" target="_blank" rel="noreferrer">
+                        <span class="vehicle-thumb vehicle-thumb--doc" role="img" aria-label="Flight document attached">
+                          <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                          <small>Document</small>
+                        </span>
                       </a>
                       {{end}}
                     </div>
@@ -625,9 +647,14 @@
                   <div id="trip-accommodation-view-{{.ID}}" class="item-view">
                     <div class="vehicle-card-content">
                       <div class="vehicle-media">
-                        {{if .AttachmentPath}}
+                        {{if isImageWebPath .AttachmentPath}}
                         <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open booking attachment in a new tab: {{.Name}}">
                           <img class="vehicle-card-image" src="{{.AttachmentPath}}" alt="Booking attachment image for {{.Name}}">
+                        </a>
+                        {{else if .AttachmentPath}}
+                        <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" class="vehicle-card-image vehicle-card-image--doc" title="Open booking attachment in a new tab: {{.Name}}">
+                          <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                          <strong>Document attached</strong>
                         </a>
                         {{else}}
                         <div class="vehicle-card-image vehicle-card-image--placeholder" role="img" aria-label="No booking image">
@@ -922,10 +949,10 @@
           {{end}}
           {{if eq . "the_tab"}}
           <section class="card trip-page-the-tab-section" aria-labelledby="trip-page-the-tab-heading">
-            <section class="budget-tile trip-budget-tile--mobile" aria-label="{{$.Details.Trip.GroupExpensesSectionTitle}} summary">
+            <section class="budget-tile trip-budget-tile--mobile" aria-label="Total group expense summary">
               <div class="budget-overlay">
                 <div>
-                  <div class="meta">Total on Tab</div>
+                  <div class="meta">Total Group Expense</div>
                   <div class="amount" title="{{$.CurrencySymbol}}{{formatTripMoney $.TabExpensesTotal}}">{{abbrevMoney $.CurrencySymbol $.TabExpensesTotal}}</div>
                 </div>
                 <div class="budget-spent-chip" tabindex="-1">
@@ -1060,6 +1087,18 @@
           </section>
           {{end}}
           {{if eq . "add_tab"}}
+          <section class="budget-tile trip-budget-tile--sidebar trip-tab-total-sidebar" aria-label="Total group expense summary">
+            <div class="budget-overlay">
+              <div>
+                <div class="meta">Total Group Expense</div>
+                <div class="amount" title="{{$.CurrencySymbol}}{{formatTripMoney $.TabExpensesTotal}}">{{abbrevMoney $.CurrencySymbol $.TabExpensesTotal}}</div>
+              </div>
+              <div class="budget-spent-chip" tabindex="-1">
+                <div class="meta">Entries</div>
+                <div class="chip-amount">{{len $.TabExpenses}}</div>
+              </div>
+            </div>
+          </section>
           <section class="card add-card add-tab-card" id="sidebar-add-tab">
             <div class="trip-widget-card-head">
               <h3>Add to {{$.Details.Trip.GroupExpensesSectionTitle}}</h3>

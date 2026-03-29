@@ -57,3 +57,37 @@ func parseVersionHeading(line string) (ver string, ok bool) {
 func NormalizeVersion(s string) string {
 	return strings.TrimPrefix(strings.TrimSpace(s), "v")
 }
+
+// isSelfHosterHeading reports a "### Notes for self-hosters" line (case-insensitive on the title).
+func isSelfHosterHeading(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "### ") {
+		return false
+	}
+	title := strings.TrimSpace(strings.TrimPrefix(t, "###"))
+	return strings.EqualFold(title, "Notes for self-hosters")
+}
+
+// TrimSelfHosterNotes removes the "### Notes for self-hosters" subsection for in-app display
+// (from that heading through the next "### " heading or end of text).
+func TrimSelfHosterNotes(body string) string {
+	lines := strings.Split(body, "\n")
+	var out []string
+	skipping := false
+	for _, line := range lines {
+		if !skipping && isSelfHosterHeading(line) {
+			skipping = true
+			continue
+		}
+		if skipping {
+			t := strings.TrimSpace(line)
+			if strings.HasPrefix(t, "### ") && !isSelfHosterHeading(line) {
+				skipping = false
+				out = append(out, line)
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}

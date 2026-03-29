@@ -270,6 +270,8 @@ func NewRouter(deps Dependencies) http.Handler {
 				"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
 				"googleMapsSearchURL":             googleMapsSearchURL,
 				"locationLineBeforeComma":         locationLineBeforeComma,
+				"itineraryNotesDisplay":           itineraryNotesDisplay,
+				"isImageWebPath":                  isImageWebPath,
 				"itineraryGeocodeQuery":           itineraryGeocodeQuery,
 				"abbrevMoney":                     abbrevMoney,
 				"profileInitial": func(u trips.User) string {
@@ -2932,12 +2934,16 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	estCost, _ := strconv.ParseFloat(r.FormValue("est_cost"), 64)
+	location := strings.TrimSpace(r.FormValue("location"))
+	lat, lng := a.geocodeForApp(r.Context(), location)
 	err = a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        itemID,
 		TripID:    tripID,
 		DayNumber: day,
 		Title:     r.FormValue("title"),
-		Location:  r.FormValue("location"),
+		Location:  location,
+		Latitude:  lat,
+		Longitude: lng,
 		Notes:     r.FormValue("notes"),
 		EstCost:   estCost,
 		StartTime: r.FormValue("start_time"),
