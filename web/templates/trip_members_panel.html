@@ -23,6 +23,9 @@
           </button>
         </form>
       {{end}}{{end}}
+      {{range $.TripGuests}}
+        <span class="trip-party-avatar trip-party-avatar--guest-chip" title="{{.DisplayName}} (guest)" aria-label="{{.DisplayName}} guest on trip">{{guestInitial .DisplayName}}</span>
+      {{end}}
     </div>
   </div>
   {{if .TripAccess.IsOwner}}
@@ -48,12 +51,11 @@
     <div class="sidebar-invite-panel" data-invite-panel="link" role="tabpanel">
       <div class="sidebar-trip-invite-form form-grid">
         <span class="full sidebar-invite-method-label">Invite via link</span>
-        <div class="full sidebar-invite-link-row">
-          <span class="sidebar-invite-link-field">
+        <div class="full sidebar-invite-link-row sidebar-invite-link-row--tapcopy">
+          <span class="sidebar-invite-link-field" title="Click to copy invite link">
             <span class="material-symbols-outlined sidebar-invite-link-icon" aria-hidden="true">content_copy</span>
-            <input type="text" readonly class="sidebar-invite-link-url" value="" placeholder="Creating secure link…" autocomplete="off" aria-label="Invite link URL">
+            <input type="text" readonly class="sidebar-invite-link-url" value="" placeholder="Creating secure link…" autocomplete="off" aria-label="Invite link URL. Click to copy.">
           </span>
-          <button type="button" class="secondary-btn sidebar-invite-submit" data-copy-invite-link>Copy Invite Link</button>
         </div>
       </div>
     </div>

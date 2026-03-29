@@ -1,0 +1,10 @@
+{{define "tripMobileFabLinks"}}
+{{- $t := index . "Trip" -}}
+{{if and $t.UIShowItinerary (sidebarWidgetVisible "add_stop" $t)}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}?open=stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>Add Stop</a>{{end}}
+{{if and $t.UIShowSpends (sidebarWidgetVisible "quick_spends" $t)}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}/expenses#add-expense"><span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>Add Expenses</a>{{end}}
+{{if and $t.SectionEnabledTheTab (sidebarWidgetVisible "add_tab" $t)}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}/group-expenses#add-group-expense"><span class="material-symbols-outlined" aria-hidden="true">post_add</span>Add to {{$t.GroupExpensesSectionTitle}}</a>{{end}}
+{{if $t.UIShowStay}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add Accommodation</a>{{end}}
+{{if $t.UIShowVehicle}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add Vehicle Rental</a>{{end}}
+{{if $t.UIShowFlights}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>Add Flights</a>{{end}}
+{{if sidebarWidgetVisible "checklist" $t}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}?open=checklist"><span class="material-symbols-outlined" aria-hidden="true">playlist_add</span>Add Checklist</a>{{end}}
+{{end}}

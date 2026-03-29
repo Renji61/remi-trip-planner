@@ -251,6 +251,7 @@ func (s *Service) MergedSettingsForUI(ctx context.Context, userID string) (AppSe
 	app.TripDashboardHeading = us.TripDashboardHeading
 	app.DefaultCurrencyName = us.DefaultCurrencyName
 	app.DefaultCurrencySymbol = us.DefaultCurrencySymbol
+	app.UserDistanceUnit = us.DistanceUnit
 	return app, nil
 }
 
@@ -390,6 +391,7 @@ func (s *Service) InviteCollaboratorByEmail(ctx context.Context, tripID, ownerUs
 		if err := s.repo.AddTripMember(ctx, tripID, u.ID, ownerUserID); err != nil {
 			return false, err
 		}
+		_ = s.repo.ClearDepartedTabParticipant(ctx, tripID, ParticipantKeyUser(u.ID))
 		return true, nil
 	}
 	if !errors.Is(e, sql.ErrNoRows) {
@@ -480,6 +482,7 @@ func (s *Service) AcceptTripInvite(ctx context.Context, userID, rawToken string)
 	if err := s.repo.AddTripMember(ctx, inv.TripID, userID, inv.InvitedByUserID); err != nil {
 		return err
 	}
+	_ = s.repo.ClearDepartedTabParticipant(ctx, inv.TripID, ParticipantKeyUser(userID))
 	if inv.IsLinkInvite {
 		return nil
 	}
@@ -515,6 +518,15 @@ func (s *Service) LeaveTrip(ctx context.Context, tripID, userID string) error {
 	if acc.IsOwner {
 		return errors.New("owner cannot leave; transfer ownership is not supported")
 	}
+	return s.markCollaboratorLeftRecordTab(ctx, tripID, userID)
+}
+
+func (s *Service) markCollaboratorLeftRecordTab(ctx context.Context, tripID, userID string) error {
+	display := ParticipantKeyUser(userID)
+	if u, err := s.repo.GetUserByID(ctx, userID); err == nil {
+		display = userProfileDisplayName(u)
+	}
+	_ = s.repo.UpsertDepartedTabParticipant(ctx, tripID, ParticipantKeyUser(userID), display)
 	return s.repo.MarkTripMemberLeft(ctx, tripID, userID)
 }
 
@@ -525,6 +537,24 @@ func (s *Service) StopSharingTrip(ctx context.Context, tripID, ownerUserID strin
 	}
 	if !ok {
 		return ErrTripAccessDenied
+	}
+	t, err := s.repo.GetTrip(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	memberIDs, err := s.repo.ListActiveTripMemberUserIDs(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	for _, id := range memberIDs {
+		if id == t.OwnerUserID {
+			continue
+		}
+		display := ParticipantKeyUser(id)
+		if u, e := s.repo.GetUserByID(ctx, id); e == nil {
+			display = userProfileDisplayName(u)
+		}
+		_ = s.repo.UpsertDepartedTabParticipant(ctx, tripID, ParticipantKeyUser(id), display)
 	}
 	if err := s.repo.RevokeAllCollaborators(ctx, tripID); err != nil {
 		return err

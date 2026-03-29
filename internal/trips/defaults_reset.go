@@ -17,6 +17,8 @@ func DefaultAppSettings() AppSettings {
 		DashboardTripLayout:     "grid",
 		DashboardTripSort:       "name",
 		DashboardHeroBackground: "default",
+		DefaultDistanceUnit:     "km",
+		GoogleMapsAPIKey:        "",
 	}
 }
 
@@ -43,13 +45,17 @@ func ApplyDefaultTripUIPresets(t *Trip) {
 	t.UIShowSpends = true
 	t.UIShowItinerary = true
 	t.UIShowChecklist = true
+	t.UIShowTheTab = true
 	t.UIItineraryExpand = "first"
 	t.UISpendsExpand = "first"
+	t.UITabExpand = "first"
 	t.UITimeFormat = "12h"
+	t.UIDateFormat = "dmy"
 	t.UILabelStay = ""
 	t.UILabelVehicle = ""
 	t.UILabelFlights = ""
 	t.UILabelSpends = ""
+	t.UILabelGroupExpenses = ""
 	t.UIMainSectionOrder = ""
 	t.UISidebarWidgetOrder = ""
 	t.UIMainSectionHidden = ""

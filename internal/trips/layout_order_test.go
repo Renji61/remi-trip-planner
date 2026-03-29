@@ -77,7 +77,7 @@ func TestMainSectionVisible(t *testing.T) {
 }
 
 func TestSidebarWidgetVisible(t *testing.T) {
-	tr := Trip{UIShowSpends: false, UIShowItinerary: true, UIShowChecklist: true}
+	tr := Trip{UIShowSpends: false, UIShowItinerary: true, UIShowChecklist: true, UIShowTheTab: true}
 	if SidebarWidgetVisible(SidebarBudget, tr) {
 		t.Fatal("budget hidden without spends")
 	}
@@ -95,6 +95,26 @@ func TestSidebarWidgetVisible(t *testing.T) {
 	trNoCk := Trip{UIShowSpends: true, UIShowItinerary: true, UIShowChecklist: false}
 	if SidebarWidgetVisible(SidebarAddChecklist, trNoCk) {
 		t.Fatal("sidebar checklist hidden when checklist section off")
+	}
+	trTab := Trip{UIShowSpends: true, UIShowTheTab: true, UIShowItinerary: true, UIShowChecklist: true}
+	if !SidebarWidgetVisible(SidebarAddTab, trTab) {
+		t.Fatal("add_tab visible when spends+tab on")
+	}
+	if SidebarWidgetVisible(SidebarAddTab, Trip{UIShowSpends: true, UIShowTheTab: false, UIShowItinerary: true, UIShowChecklist: true}) {
+		t.Fatal("add_tab hidden when Group Expenses section off")
+	}
+}
+
+func TestMainSectionTheTabVisibility(t *testing.T) {
+	tr := Trip{UIShowTheTab: true, UIShowSpends: true}
+	if !MainSectionVisible(MainSectionTheTab, tr) {
+		t.Fatal("the_tab visible")
+	}
+	if MainSectionVisible(MainSectionTheTab, Trip{UIShowTheTab: false, UIShowSpends: true}) {
+		t.Fatal("the_tab off hides")
+	}
+	if MainSectionVisible(MainSectionTheTab, Trip{UIShowTheTab: true, UIShowSpends: false}) {
+		t.Fatal("spends off hides the_tab")
 	}
 }
 

@@ -11,6 +11,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Flesh out `POST /api/v1/trips/{tripID}/sync` request handling per [docs/sync_contract.md](docs/sync_contract.md).
 - Richer conflict handling beyond last-write-wins for sync clients.
 
+## [1.46.0] - 2026-03-29
+
+### Added
+
+- **Per-trip calendar date format:** choose **DD/MM/YYYY** or **MM/DD/YYYY** in trip settings (alongside 12h/24h); used for expense dates, itinerary, flights, and other trip-scoped date displays.
+- **Group expenses (tab):** store **departed participants** (who left the trip) so historical splits and settlements stay consistent; show **Left trip** in labels where relevant.
+- **Desktop account menu:** shared **Profile / App settings / Log out** dropdown (circular initial trigger) on trip topbars and app-shell pages; **mobile dashboard** bottom nav includes **Profile** on those pages.
+
+### Changed
+
+- **Expenses naming & URLs:** trip subpages use **Expenses** at `/trips/{id}/expenses` and **Group expenses** at `/trips/{id}/group-expenses`; **301** redirects from legacy `/budget` and `/tab` paths.
+- **Group expenses:** split math merges participant keys from stored expenses and settlements (including guests/collaborators) so balances stay correct when people leave; payer thumbs and participant labels respect departed keys.
+- **Templates / context:** trip page group-expense rows receive full template context; dashboard shell merges supply **`CurrentUser`** where the account menu needs it.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.46.0`** (and use the matching GHCR image tag if you pull from the registry) so instances on **1.45.0** or older see an update on About / `GET /api/about/update-check`.
+
 ## [1.45.0] - 2026-03-28
 
 ### Added
@@ -239,7 +257,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.45.0...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.46.0...HEAD
+[1.46.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.45.0...v1.46.0
 [1.45.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.40.0...v1.45.0
 [1.40.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.3.0...v1.40.0
 [1.3.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.2.0...v1.3.0

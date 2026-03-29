@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  {{template "themeHeadScript" .}}
+  <title>{{.Trip.GroupExpensesSectionTitle}} | {{.Trip.Name}} | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=141">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script defer src="/static/app.js?v=121"></script>
+</head>
+<body class="page-the-tab">
+  <main class="app-shell budget-page tab-page" aria-label="{{.Trip.GroupExpensesSectionTitle}}" data-long-press-sheet-root>
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Go to dashboard">
+        <div class="brand-logo">R</div>
+        <div>
+          <h1>{{.Settings.AppTitle}}</h1>
+          <p>Serene Navigator</p>
+        </div>
+      </a>
+      {{template "tripSidebarNav" .}}
+      {{template "tripMembersPanel" .}}
+      <div class="sidebar-bottom">
+        <a class="btn" href="/trips/{{.Trip.ID}}">Back to Trip</a>
+        <a class="support-link sidebar-icon-link" href="/about"><span class="material-symbols-outlined" aria-hidden="true">info</span>About</a>
+        <form method="post" action="/logout" class="sidebar-logout-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button type="submit" class="logout-link sidebar-icon-link"><span class="material-symbols-outlined" aria-hidden="true">logout</span>Logout</button>
+        </form>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="trip-mobile-header">
+        <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
+          <span class="material-symbols-outlined" aria-hidden="true">home</span>
+        </a>
+        <h2 class="trip-mobile-header-title">{{.Trip.GroupExpensesSectionTitle}}</h2>
+        <div class="budget-mobile-header-actions">
+          <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+          {{template "tripMobileHeaderProfileBtn" .}}
+        </div>
+      </header>
+      <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
+
+      <header class="topbar budget-topbar">
+        <div class="title-group">
+          <h2>{{.Trip.GroupExpensesSectionTitle}}</h2>
+          <p>{{formatTripUIDate .Trip .Trip.StartDate}} – {{formatTripUIDate .Trip .Trip.EndDate}} · Shared costs and balances. Totals roll into {{.Trip.SpendsSectionTitle}}.</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">
+          <div class="trip-actions-links">
+            <a class="secondary-btn" href="/trips/{{.Trip.ID}}/expenses">Open {{.Trip.SpendsSectionTitle}}</a>
+            <a class="btn" href="#add-group-expense">Log Expense</a>
+            <a class="btn" href="#record-settlement">Log Settlement</a>
+          </div>
+          {{template "tripDesktopHeaderTools" .}}
+        </div>
+      </header>
+
+      <section class="tab-summary-strip" aria-label="Group expense totals" data-tab-refresh-region="tab-summary">
+        <div class="tab-summary-shell card">
+          <div class="tab-summary-mobile-top">
+            <span class="tab-summary-hero-kicker">Global overview</span>
+            <div class="tab-summary-share-compact">
+              <span class="tab-summary-share-compact-label">Your share</span>
+              <strong class="tab-summary-share-compact-value">{{$.CurrencySymbol}}{{printf "%.2f" .TabYourShare}}</strong>
+            </div>
+          </div>
+          <div class="tab-summary-hero-total">
+            <span class="tab-summary-label tab-summary-hero-total-label">Total group spending</span>
+            <strong class="tab-summary-hero-total-value">{{$.CurrencySymbol}}{{printf "%.2f" .TabTotalSpent}}</strong>
+          </div>
+          <div class="tab-summary-hero-share tab-summary-hero-share--desktop">
+            <span class="tab-summary-label">Your share</span>
+            <strong class="tab-summary-value tab-summary-value--accent">{{$.CurrencySymbol}}{{printf "%.2f" .TabYourShare}}</strong>
+          </div>
+          <div class="tab-summary-hero-net">
+            <span class="tab-summary-label tab-summary-hero-net-label">Net balance</span>
+            <span class="tab-summary-net-pill {{if ge .TabYourNet 0.0}}tab-summary-net-pill--pos{{else}}tab-summary-net-pill--neg{{end}}">{{if ge .TabYourNet 0.0}}+{{end}}{{$.CurrencySymbol}}{{printf "%.2f" .TabYourNet}}</span>
+            <span class="muted tab-summary-hint tab-summary-hero-hint">After splits &amp; recorded settlements</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card tab-balance-toggle-card" data-tab-refresh-region="tab-balances" data-tab-balances-section>
+        <div class="tab-balance-toggle-head">
+          <div class="tab-log-expense-head tab-balance-toggle-title">
+            <span class="tab-log-expense-accent" aria-hidden="true"></span>
+            <div class="tab-balance-title-block">
+              <h3 class="tab-section-title" id="tab-balance-heading">
+                <span class="tab-section-title-desktop">Balances &amp; simplified debts</span>
+                <span class="tab-section-title-mobile">Member balances</span>
+              </h3>
+              <p class="tab-balance-pending-badge{{if ne .TabBalanceView "debts"}} hidden{{end}}" data-tab-balance-pending-badge role="status">Settlements pending</p>
+            </div>
+          </div>
+          <div class="tab-balance-toggle" role="tablist" aria-label="Balance display">
+            <button type="button" role="tab" class="tab-balance-toggle-btn{{if eq .TabBalanceView "net"}} tab-balance-toggle-btn--active{{end}}" data-tab-balance-view-btn="net" aria-selected="{{if eq .TabBalanceView "net"}}true{{else}}false{{end}}">Net by person</button>
+            <button type="button" role="tab" class="tab-balance-toggle-btn{{if eq .TabBalanceView "debts"}} tab-balance-toggle-btn--active{{end}}" data-tab-balance-view-btn="debts" aria-selected="{{if eq .TabBalanceView "debts"}}true{{else}}false{{end}}">Total owed / simplified</button>
+          </div>
+        </div>
+        <div class="tab-balance-panel{{if ne .TabBalanceView "net"}} hidden{{end}}" data-tab-balance-panel="net" role="tabpanel">
+          <div class="tab-balance-cards-wrap">
+            <ul class="tab-balance-cards" role="list">
+              {{range .TabBalanceParticipants}}
+              <li class="tab-balance-card">
+                <div class="tab-balance-card-avatar" aria-hidden="true">
+                  {{if and (not .IsGuest) (ne .AvatarPath "")}}
+                  <img class="tab-balance-card-img" src="{{.AvatarPath}}" alt="">
+                  {{else}}
+                  <span class="tab-balance-card-initial{{if .IsGuest}} tab-balance-card-initial--guest{{else}} tab-balance-card-initial--member{{end}}">{{.Initial}}</span>
+                  {{end}}
+                </div>
+                <div class="tab-balance-card-body">
+                  <div class="tab-balance-card-name">{{.DisplayName}}</div>
+                  <div class="tab-balance-card-role{{if .IsGuest}} tab-balance-card-role--guest{{end}}">{{.Role}}</div>
+                </div>
+                <div class="tab-balance-card-net {{.NetClass}}">{{.NetDisplay}}</div>
+              </li>
+              {{else}}
+              <li class="tab-balance-card tab-balance-card--empty muted">No people on this trip yet.</li>
+              {{end}}
+            </ul>
+          </div>
+        </div>
+        <div class="tab-balance-panel{{if ne .TabBalanceView "debts"}} hidden{{end}}" data-tab-balance-panel="debts" role="tabpanel">
+          <div class="tab-summary-cards tab-debt-summary-cards" role="group" aria-label="Total to pay across net debtors">
+            <div class="tab-summary-card tab-debt-summary-card tab-debt-summary-card--out">
+              <span class="tab-summary-label">Total to pay</span>
+              <strong class="tab-summary-value tab-net--neg">{{$.CurrencySymbol}}{{printf "%.2f" .TabOwedOutTotal}}</strong>
+              <span class="muted tab-summary-hint">Combined amount owed by people who are net debtors</span>
+            </div>
+          </div>
+          <p class="muted tab-simplify-explainer">Suggested payments below use the same balances as <strong>Net by person</strong> and minimize the number of transfers (integer cents; guests included).</p>
+          <div class="tab-balance-cards-wrap tab-simplify-cards-wrap">
+            <ul class="tab-balance-cards tab-simplify-cards" role="list">
+              {{range .TabSimplifyRows}}
+              <li class="tab-balance-card tab-simplify-card" role="listitem">
+                <div class="tab-simplify-party">
+                  <div class="tab-balance-card-avatar tab-simplify-avatar tab-simplify-avatar--tone-{{.FromTone}}" aria-hidden="true">
+                    {{if ne (tabAvatarURL .FromAvatarPath) ""}}
+                    <img class="tab-balance-card-img" src="{{tabAvatarURL .FromAvatarPath}}" alt="">
+                    {{else}}
+                    <span class="tab-balance-card-initial{{if .FromGuest}} tab-balance-card-initial--guest{{else}} tab-balance-card-initial--member{{end}}">{{.FromInitial}}</span>
+                    {{end}}
+                  </div>
+                  <div class="tab-simplify-party-text">
+                    <span class="tab-simplify-kicker muted">Pays</span>
+                    <div class="tab-balance-card-name">{{.FromName}}</div>
+                  </div>
+                </div>
+                <div class="tab-simplify-flow" aria-hidden="true">
+                  <span class="material-symbols-outlined tab-simplify-flow-icon">arrow_forward</span>
+                </div>
+                <div class="tab-simplify-center">
+                  <span class="tab-simplify-amount">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</span>
+                  <span class="tab-simplify-sub muted">
+                    <span class="tab-simplify-sub-line">Suggested</span>
+                    <span class="tab-simplify-sub-line">payment</span>
+                  </span>
+                </div>
+                <div class="tab-simplify-party tab-simplify-party--end">
+                  <div class="tab-simplify-party-text">
+                    <span class="tab-simplify-kicker muted">Receives</span>
+                    <div class="tab-balance-card-name">{{.ToName}}</div>
+                  </div>
+                  <div class="tab-balance-card-avatar tab-simplify-avatar tab-simplify-avatar--tone-{{.ToTone}}" aria-hidden="true">
+                    {{if ne (tabAvatarURL .ToAvatarPath) ""}}
+                    <img class="tab-balance-card-img" src="{{tabAvatarURL .ToAvatarPath}}" alt="">
+                    {{else}}
+                    <span class="tab-balance-card-initial{{if .ToGuest}} tab-balance-card-initial--guest{{else}} tab-balance-card-initial--member{{end}}">{{.ToInitial}}</span>
+                    {{end}}
+                  </div>
+                </div>
+                {{if not $.Trip.IsArchived}}
+                <div class="tab-simplify-actions">
+                  <button
+                    type="button"
+                    class="secondary-btn tab-simplify-settle-btn"
+                    data-tab-settle-payer="{{.FromKey}}"
+                    data-tab-settle-payee="{{.ToKey}}"
+                    data-tab-settle-amount="{{printf "%.2f" .Amount}}"
+                  >Settle</button>
+                </div>
+                {{end}}
+              </li>
+              {{else}}
+              <li class="tab-balance-card tab-balance-card--empty tab-simplify-card--empty muted" role="listitem">Everyone is square, or add Tab expenses to see suggested payments.</li>
+              {{end}}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="card tab-analytics-wide tab-the-tab-fold" aria-labelledby="tab-charts-title">
+        <div class="tab-the-tab-fold-summary tab-log-expense-head tab-analytics-section-head">
+          <span class="tab-log-expense-accent" aria-hidden="true"></span>
+          <h3 id="tab-charts-title" class="tab-analytics-main-title"><span class="tab-analytics-title-desktop">Analytics</span><span class="tab-analytics-title-mobile">Spending insights</span><span class="tab-analytics-live-badge" title="Based on current trip data">Live</span></h3>
+        </div>
+        <div data-tab-refresh-region="tab-analytics" class="tab-the-tab-fold-panel">
+        <div class="tab-analytics-grid">
+          <div class="tab-analytics-card">
+            <div class="tab-analytics-card-head">
+              <h4 class="tab-analytics-card-title">Spending over time</h4>
+              <span class="material-symbols-outlined tab-analytics-card-icon" aria-hidden="true">show_chart</span>
+            </div>
+            <div class="tab-analytics-chart-wrap">
+              <div class="mobile-entry-carousel tab-over-time-carousel" data-tab-over-time-carousel>
+                <button type="button" class="mobile-entry-carousel__hint mobile-entry-carousel__hint--prev" data-tab-over-time-prev aria-label="Previous dates">
+                  <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+                </button>
+                <div class="mobile-entry-carousel__viewport">
+                  <div class="tab-over-time-chart-inner">
+                    <canvas id="tab-chart-over-time" data-tab-chart="over-time" aria-label="Spending over time"></canvas>
+                  </div>
+                </div>
+                <button type="button" class="mobile-entry-carousel__hint mobile-entry-carousel__hint--next" data-tab-over-time-next aria-label="Next dates">
+                  <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+                </button>
+              </div>
+              <p class="muted tab-analytics-empty hidden" data-tab-chart-empty="over-time">No dated Tab expenses yet.</p>
+            </div>
+          </div>
+          <div class="tab-analytics-card">
+            <div class="tab-analytics-card-head">
+              <h4 class="tab-analytics-card-title">Spending by payer</h4>
+              <span class="material-symbols-outlined tab-analytics-card-icon" aria-hidden="true">group</span>
+            </div>
+            <div class="tab-analytics-bar-list">
+              {{range $pi, $r := .TabChartByPayer}}
+              <div class="tab-analytics-bar-item">
+                <div class="tab-analytics-bar-top"><span class="tab-analytics-bar-label">{{$r.Label}}</span><span class="tab-analytics-bar-amt">{{$.CurrencySymbol}}{{printf "%.2f" $r.Amount}}</span></div>
+                <div class="tab-analytics-bar-track"><div class="tab-analytics-bar-fill tab-analytics-bar-fill--{{mod $pi 3}}" style="width: {{printf "%.1f" $r.Pct}}%;"></div></div>
+              </div>
+              {{else}}<p class="muted">No data yet.</p>{{end}}
+            </div>
+          </div>
+          <div class="tab-analytics-card">
+            <div class="tab-analytics-card-head">
+              <h4 class="tab-analytics-card-title">Spending by category</h4>
+              <span class="material-symbols-outlined tab-analytics-card-icon" aria-hidden="true">pie_chart</span>
+            </div>
+            <div class="tab-analytics-bar-list">
+              {{range $ci, $r := .TabChartByCategory}}
+              <div class="tab-analytics-bar-item">
+                <div class="tab-analytics-bar-top"><span class="tab-analytics-bar-label">{{$r.Label}}</span><span class="tab-analytics-bar-amt">{{$.CurrencySymbol}}{{printf "%.2f" $r.Amount}}</span></div>
+                <div class="tab-analytics-bar-track"><div class="tab-analytics-bar-fill tab-analytics-bar-fill--{{mod (add $ci 1) 3}}" style="width: {{printf "%.1f" $r.Pct}}%;"></div></div>
+              </div>
+              {{else}}<p class="muted">No data yet.</p>{{end}}
+            </div>
+          </div>
+          <div class="tab-analytics-card">
+            <div class="tab-analytics-card-head">
+              <h4 class="tab-analytics-card-title">Spending by date</h4>
+              <span class="material-symbols-outlined tab-analytics-card-icon" aria-hidden="true">calendar_month</span>
+            </div>
+            <div class="tab-analytics-bar-list">
+              {{range $ti, $r := .TabChartByTime}}
+              <div class="tab-analytics-bar-item">
+                <div class="tab-analytics-bar-top"><span class="tab-analytics-bar-label">{{$r.Label}}</span><span class="tab-analytics-bar-amt">{{$.CurrencySymbol}}{{printf "%.2f" $r.Amount}}</span></div>
+                <div class="tab-analytics-bar-track"><div class="tab-analytics-bar-fill tab-analytics-bar-fill--{{mod (add $ti 2) 3}}" style="width: {{printf "%.1f" $r.Pct}}%;"></div></div>
+              </div>
+              {{else}}<p class="muted">No dated expenses yet.</p>{{end}}
+            </div>
+          </div>
+        </div>
+        <script type="application/json" id="tab-over-time-data">{{.TabOverTimeChartJSON}}</script>
+        </div>
+      </section>
+
+      <section class="tab-the-tab-fold tab-dashboard-fold" aria-label="Log expense and settlements">
+        <div class="tab-the-tab-fold-summary tab-log-expense-head tab-dashboard-fold-summary">
+          <span class="tab-log-expense-accent" aria-hidden="true"></span>
+          <h3 class="tab-dashboard-fold-title">Log expenses &amp; settlements</h3>
+        </div>
+        <div class="tab-the-tab-fold-panel tab-dashboard-fold-panel">
+      <div class="tab-dashboard-grid">
+        <div class="tab-dashboard-col tab-dashboard-col--log">
+          <section id="add-group-expense" class="card tab-log-expense-card" aria-labelledby="tab-add-title">
+            <div class="tab-log-expense-head">
+              <span class="tab-log-expense-accent" aria-hidden="true"></span>
+              <h3 id="tab-add-title">Log new expense</h3>
+            </div>
+            {{if .Trip.IsArchived}}
+            <p class="muted">Trip is archived.</p>
+            {{else}}
+            <div
+              class="tab-split-root"
+              id="tab-split-root-add"
+              data-tab-split-root
+              data-currency-symbol="{{.CurrencySymbol}}"
+              data-equal-bootstrap="{{.TabEqualSplitBootstrap}}"
+              data-trip-default-mode="{{.Trip.TabDefaultSplitMode}}"
+              data-trip-default-json="{{.Trip.TabDefaultSplitJSON}}"
+            >
+            <form method="post" action="/trips/{{.Trip.ID}}/expenses" class="tab-log-expense-form" enctype="multipart/form-data" data-ajax-submit data-toast-message="Expense logged.">
+              <input type="hidden" name="from_tab" value="1">
+              <input type="hidden" name="return_to" value="/trips/{{.Trip.ID}}/group-expenses">
+              <input type="hidden" name="split_mode" value="equal" data-tab-split-mode>
+              <input type="hidden" name="split_json" value="" data-tab-split-json autocomplete="off">
+              <label class="tab-field-label full"><span class="tab-field-k">Expense title</span>
+                <input type="text" name="title" class="tab-field-input" placeholder="e.g. Scuba diving in El Nido" maxlength="200" data-tab-title-input>
+              </label>
+              <div class="tab-log-expense-row2">
+                <label class="tab-field-label tab-field-label--amount"><span class="tab-field-k">Amount</span>
+                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" name="amount" class="tab-field-input tab-field-input--amount" placeholder="0.00" required data-tab-amount-input></span>
+                </label>
+                <label class="tab-field-label tab-field-label--category"><span class="tab-field-k">Category</span>
+                  <select name="category" class="tab-field-input" required>
+                    <option value="" disabled selected>Select category</option>
+                    {{range .ExpenseCategories}}
+                    <option value="{{.}}">{{.}}</option>
+                    {{end}}
+                  </select>
+                </label>
+              </div>
+              <div class="tab-log-expense-row2">
+                <label class="tab-field-label"><span class="tab-field-k">Date</span>
+                  <input type="date" name="spent_on" class="tab-field-input">
+                </label>
+                <label class="tab-field-label"><span class="tab-field-k">Payment method</span>
+                  <select name="payment_method" class="tab-field-input" required>
+                    <option value="" disabled selected>Select payment method</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Credit Card">Credit Card</option>
+                    <option value="Crypto">Crypto</option>
+                    <option value="Debit Card">Debit Card</option>
+                    <option value="Digital Wallet">Digital Wallet</option>
+                    <option value="Mobile Payment">Mobile Payment</option>
+                  </select>
+                </label>
+              </div>
+              <p class="tab-field-k tab-field-k--standalone">Who paid?</p>
+              <select name="paid_by" required data-tab-paid-by class="tab-paid-by-select tab-paid-by-select--sr">
+                {{range .Party}}
+                <option value="user:{{.ID}}" {{if eq .ID $.CurrentUserID}}selected{{end}}>{{.PublicDisplayName}}{{if eq .ID $.Trip.OwnerUserID}} (owner){{end}}</option>
+                {{end}}
+                {{range .TripGuests}}
+                <option value="guest:{{.ID}}">{{.DisplayName}} (guest)</option>
+                {{end}}
+                {{range .TabDepartedParticipants}}
+                <option value="{{.ParticipantKey}}">{{.RowLabel}}{{if .IsGuestKey}} (guest){{end}} (Left trip)</option>
+                {{end}}
+              </select>
+              <div class="tab-paid-by-chips" role="radiogroup" aria-label="Who paid">
+                {{range .Party}}
+                <button type="button" class="tab-paid-chip{{if eq .ID $.CurrentUserID}} tab-paid-chip--active{{end}}" data-tab-paid-chip value="user:{{.ID}}">
+                  <span class="tab-paid-chip-avatar" aria-hidden="true">
+                    {{if ne (tabAvatarURL .AvatarPath) ""}}<img src="{{tabAvatarURL .AvatarPath}}" alt="">{{else}}<span class="tab-paid-chip-initial">{{.InitialForAvatar}}</span>{{end}}
+                  </span>
+                  <span class="tab-paid-chip-name">{{.PublicDisplayName}}</span>
+                </button>
+                {{end}}
+                {{range .TripGuests}}
+                <button type="button" class="tab-paid-chip" data-tab-paid-chip value="guest:{{.ID}}">
+                  <span class="tab-paid-chip-avatar tab-paid-chip-avatar--guest" aria-hidden="true"><span class="tab-paid-chip-initial">{{guestInitial .DisplayName}}</span></span>
+                  <span class="tab-paid-chip-name">{{.DisplayName}}</span>
+                </button>
+                {{end}}
+                {{range .TabDepartedParticipants}}
+                <button type="button" class="tab-paid-chip tab-paid-chip--departed" data-tab-paid-chip value="{{.ParticipantKey}}">
+                  <span class="tab-paid-chip-avatar tab-paid-chip-avatar--guest" aria-hidden="true"><span class="tab-paid-chip-initial">{{guestInitial .RowLabel}}</span></span>
+                  <span class="tab-paid-chip-name">{{.RowLabel}}{{if .IsGuestKey}} (guest){{end}} (Left trip)</span>
+                </button>
+                {{end}}
+              </div>
+              <p class="tab-field-k tab-field-k--standalone">Split configuration</p>
+              <div class="tab-split-mode-row tab-split-mode-row--log" role="group" aria-label="Split method">
+                <button type="button" class="tab-split-mode-btn tab-split-mode-btn--active" data-tab-split-mode-btn="equal">Equal</button>
+                <button type="button" class="tab-split-mode-btn" data-tab-split-mode-btn="exact">Exact</button>
+                <button type="button" class="tab-split-mode-btn" data-tab-split-mode-btn="percent">Percentage</button>
+                <button type="button" class="tab-split-mode-btn" data-tab-split-mode-btn="shares">Shares</button>
+              </div>
+              <p class="tab-split-hint muted" data-tab-split-hint>Split equally among selected people.</p>
+              <p class="tab-split-amount-warning hidden" data-tab-amount-warning role="alert" aria-live="polite">Enter an expense amount first, then configure the split.</p>
+              {{template "tabSplitBreakdownShell" (dict "Party" .Party "TripGuests" .TripGuests "TabDepartedParticipants" .TabDepartedParticipants "CurrencySymbol" .CurrencySymbol "CurrentUserID" .CurrentUserID "Trip" .Trip "PaidByKey" (printf "user:%s" .CurrentUserID))}}
+              <label class="tab-field-label full"><span class="tab-field-k">Notes</span>
+                <input type="text" name="notes" class="tab-field-input" placeholder="Optional">
+              </label>
+              <label class="tab-field-label full"><span class="tab-field-k">Attachment (optional)</span>
+                <input type="file" name="tab_attachment" class="tab-field-input" accept=".pdf,image/*">
+              </label>
+              <button class="full btn tab-submit-btn" type="submit"><span class="tab-submit-label-desktop">Log Expense</span><span class="tab-submit-label-mobile">Add to {{.Trip.GroupExpensesSectionTitle}}</span></button>
+            </form>
+            </div>
+            <p class="muted tab-standard-note">Your last split method is saved as this trip’s <strong>standard split</strong> for next time (change anytime).</p>
+            {{end}}
+          </section>
+        </div>
+        <div class="tab-dashboard-col tab-dashboard-col--settle">
+          <section id="record-settlement" class="card tab-settle-card" aria-labelledby="tab-settle-title">
+            <div class="tab-log-expense-head tab-settle-head">
+              <span class="tab-log-expense-accent" aria-hidden="true"></span>
+              <div class="tab-log-expense-head-text">
+                <h3 id="tab-settle-title">Record settlement</h3>
+                <p class="trip-resource-form-subtitle">Log a payment from one person to another on this trip.</p>
+              </div>
+            </div>
+            {{if .Trip.IsArchived}}
+            <p class="muted">Trip is archived.</p>
+            {{else}}
+            <form method="post" action="/trips/{{.Trip.ID}}/group-expenses/settlements" class="tab-settlement-form" data-tab-settlement-form data-ajax-submit data-toast-message="Settlement recorded.">
+              <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+              <input type="hidden" name="return_to" value="/trips/{{.Trip.ID}}/group-expenses">
+              <div class="tab-settle-payer-row">
+                <label class="tab-field-label"><span class="tab-field-k">Payer</span>
+                  <select name="payer_user_id" class="tab-field-input" required>
+                    {{range .Party}}<option value="user:{{.ID}}">{{.PublicDisplayName}}{{if eq .ID $.Trip.OwnerUserID}} (owner){{end}}</option>{{end}}
+                    {{range .TripGuests}}<option value="guest:{{.ID}}">{{.DisplayName}} (guest)</option>{{end}}
+                    {{range .TabDepartedParticipants}}<option value="{{.ParticipantKey}}">{{.RowLabel}}{{if .IsGuestKey}} (guest){{end}} (Left trip)</option>{{end}}
+                  </select>
+                </label>
+                <span class="tab-settle-flow-icon" aria-hidden="true"><span class="material-symbols-outlined">arrow_forward</span></span>
+                <label class="tab-field-label"><span class="tab-field-k">Payee</span>
+                  <select name="payee_user_id" class="tab-field-input" required>
+                    {{range .Party}}<option value="user:{{.ID}}">{{.PublicDisplayName}}{{if eq .ID $.Trip.OwnerUserID}} (owner){{end}}</option>{{end}}
+                    {{range .TripGuests}}<option value="guest:{{.ID}}">{{.DisplayName}} (guest)</option>{{end}}
+                    {{range .TabDepartedParticipants}}<option value="{{.ParticipantKey}}">{{.RowLabel}}{{if .IsGuestKey}} (guest){{end}} (Left trip)</option>{{end}}
+                  </select>
+                </label>
+              </div>
+              <div class="tab-log-expense-row2">
+                <label class="tab-field-label tab-field-label--amount"><span class="tab-field-k">Amount</span>
+                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" name="amount" class="tab-field-input tab-field-input--amount" required placeholder="0.00"></span>
+                </label>
+                <label class="tab-field-label"><span class="tab-field-k">Method</span>
+                  <select name="method" class="tab-field-input">
+                    <option value="Cash">Cash</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Venmo">Venmo</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+              </div>
+              <label class="tab-field-label"><span class="tab-field-k">Date</span>
+                <input type="date" name="settled_on" class="tab-field-input">
+              </label>
+              <label class="tab-field-label full"><span class="tab-field-k">Notes</span>
+                <input type="text" name="notes" class="tab-field-input" placeholder="Optional">
+              </label>
+              <button type="submit" class="full btn tab-submit-btn tab-settle-submit-btn"><span class="tab-submit-label-desktop">Record settlement</span><span class="tab-submit-label-mobile">Confirm payment</span></button>
+            </form>
+            {{end}}
+            <div class="tab-recent-settlements" id="tab-recent-settlements">
+              <h4 class="tab-recent-settlements-title">Recent settlements</h4>
+              <div data-tab-refresh-region="tab-settlements-list">
+              {{if .TabSettlementRows}}
+              <ul id="tab-settlements-ul" class="tab-settlement-list" role="list">
+                {{template "tab_settlement_lis" .}}
+              </ul>
+              {{if .TabCanShowMoreSettlements}}
+              <div class="tab-settlement-footer">
+                <button
+                  type="button"
+                  class="link-btn tab-settlement-view-all"
+                  id="tab-settlements-view-all-btn"
+                  data-tab-settlements-more-url="{{.TabSettlementsMoreURL}}"
+                >View all settlements</button>
+              </div>
+              {{end}}
+              {{else}}
+              <p class="muted tab-settlement-empty">No settlements recorded.</p>
+              {{end}}
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+        </div>
+      </section>
+
+      <section class="card tab-list-card tab-expenses-section tab-the-tab-fold tab-expenses-fold" data-tab-expenses-section aria-labelledby="tab-list-title">
+        <div class="tab-expenses-fold-summary">
+          <div class="tab-log-expense-head tab-recent-expenses-head">
+            <span class="tab-log-expense-accent" aria-hidden="true"></span>
+            <h3 id="tab-list-title"><span class="tab-list-title-desktop">Recent Expenses</span><span class="tab-list-title-mobile">Recent Activity</span></h3>
+          </div>
+        </div>
+        <div class="tab-expenses-fold-toolbar">
+            <form method="get" action="/trips/{{.Trip.ID}}/group-expenses" class="tab-exp-toolbar" role="search" data-tab-exp-filter-form>
+              <input type="hidden" name="balance_view" value="{{if eq .TabBalanceView "debts"}}debts{{end}}" data-tab-balance-form-field {{if ne .TabBalanceView "debts"}}disabled{{end}}>
+              <label class="tab-exp-filter-search">
+                <span class="material-symbols-outlined" aria-hidden="true">search</span>
+                <input type="search" name="q" value="{{.TabSearchQuery}}" placeholder="Search expenses…" autocomplete="off" aria-label="Search expenses" data-tab-exp-filter-input>
+              </label>
+              <div class="tab-exp-filter-details">
+                <div class="tab-exp-filter-panel tab-exp-filter-panel--inline" role="group" aria-label="Category filter">
+                  <label class="tab-exp-filter-cat-field">
+                    <span class="tab-exp-filter-cat-key">Category</span>
+                    <select name="tab_cat" data-tab-exp-filter-category>
+                      <option value="">All categories</option>
+                      {{range .ExpenseCategories}}
+                      <option value="{{.}}" {{if eq $.TabCategoryFilter .}}selected{{end}}>{{.}}</option>
+                      {{end}}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </form>
+        </div>
+        <div data-tab-refresh-region="tab-expenses-body">
+        {{if or .TabSearchQuery .TabCategoryFilter .TabCanShowMoreExpenses}}<p class="muted tab-exp-active-filters">{{if .TabSearchQuery}}Search: “{{.TabSearchQuery}}”. {{end}}{{if .TabCategoryFilter}}Category: {{.TabCategoryFilter}}.{{end}} {{len .TabExpenses}} of {{.TabExpensesFilteredTotal}} shown.</p>{{end}}
+        {{if .TabExpenses}}
+        <p class="muted tab-exp-client-empty hidden" data-tab-exp-client-empty role="status" aria-live="polite">No expenses match your search.</p>
+        <div class="tab-exp-list-view" data-tab-exp-list>
+        <div class="table-wrap tab-table-wrap tab-expense-table-wrap">
+          <table class="data-table tab-data-table tab-recent-expenses-table">
+            <thead>
+              <tr>
+                <th><span class="tab-exp-col-h">Expense</span></th>
+                <th><span class="tab-exp-col-h">Paid by</span></th>
+                <th><span class="tab-exp-col-h">Split method</span></th>
+                <th class="tab-table-num"><span class="tab-exp-col-h">Your share</span></th>
+                <th class="tab-table-num"><span class="tab-exp-col-h">Total</span></th>
+                <th class="tab-exp-actions-th"><span class="visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="tab-transactions-tbody">
+            {{template "tab_expense_table_rows" .}}
+            </tbody>
+          </table>
+        </div>
+        </div>
+        <div class="tab-exp-grid-view" data-tab-exp-grid>
+          {{template "tab_expense_grid_cards" .}}
+        </div>
+        <div class="tab-exp-view-all-row">
+          {{if .TabCanShowMoreExpenses}}
+          <button type="button" class="link-btn tab-exp-view-all" id="tab-exp-view-all-btn" data-tab-expenses-more-url="{{.TabExpensesMoreURL}}">View all transactions</button>
+          {{else}}
+          <span class="tab-exp-view-all-disabled muted">All transactions shown</span>
+          {{end}}
+        </div>
+        {{else}}
+        <p class="muted">{{if or .TabSearchQuery .TabCategoryFilter}}No matches.{{else}}No group expenses yet. Use the form above.{{end}}</p>
+        {{end}}
+        </div>
+      </section>
+      <div class="budget-spacer"></div>
+    </section>
+  </main>
+
+  <dialog id="tab-mobile-expense-edit" class="budget-mobile-expense-edit-dialog" aria-labelledby="tab-mobile-expense-edit-title">
+    <div class="budget-mobile-expense-edit-dialog__panel">
+      <div class="budget-mobile-expense-edit-dialog__head">
+        <h3 id="tab-mobile-expense-edit-title">Edit expense</h3>
+        <button type="button" class="secondary-btn" data-tab-mobile-edit-close>Close</button>
+      </div>
+      <div class="budget-mobile-expense-edit-dialog__body" data-tab-mobile-edit-slot></div>
+    </div>
+  </dialog>
+
+  <div class="mobile-fab-wrap" data-mobile-fab>
+    <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation">
+      <span class="material-symbols-outlined" aria-hidden="true">add</span>
+    </button>
+    <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
+      {{template "tripMobileFabLinks" (dict "Trip" .Trip)}}
+    </div>
+  </div>
+
+  {{template "tripBottomNavCore" (dict "Trip" .Trip "Active" "group-expenses")}}
+  {{template "tripLongPressSheet"}}
+  {{template "tripMobileProfileSheet" .}}
+  {{template "appConfirmDialog"}}
+</body>
+</html>

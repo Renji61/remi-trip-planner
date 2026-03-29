@@ -45,5 +45,6 @@
     <a href="/trips/{{.ID}}"><span class="material-symbols-outlined" aria-hidden="true">luggage</span><span>{{.Name}}</span></a>
     {{end}}
     <a class="{{if eq .SidebarNavActive "settings"}}active {{end}}" href="/settings{{if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}"><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>Settings</span></a>
+    <a class="{{if eq .SidebarNavActive "profile"}}active {{end}}" href="/profile"><span class="material-symbols-outlined" aria-hidden="true">person</span><span>Profile</span></a>
   </nav>
 {{end}}

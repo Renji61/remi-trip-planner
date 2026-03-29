@@ -184,7 +184,6 @@ window.addEventListener("load", () => {
       const tabs = root.querySelectorAll("[data-invite-tab]");
       const panels = root.querySelectorAll("[data-invite-panel]");
       const linkInput = root.querySelector(".sidebar-invite-link-url");
-      const copyBtn = root.querySelector("[data-copy-invite-link]");
 
       const showPanel = (name) => {
         panels.forEach((p) => {
@@ -216,30 +215,73 @@ window.addEventListener("load", () => {
         showPanel("link");
       }
 
-      if (copyBtn && linkInput) {
-        copyBtn.addEventListener("click", () => {
-          const v = (linkInput.value || "").trim();
-          if (!v) {
-            if (typeof window.remiShowToast === "function") {
-              window.remiShowToast("Wait for the invite link to load, then try again.");
-            }
-            return;
+      const copyInviteLink = () => {
+        if (!(linkInput instanceof HTMLInputElement)) return;
+        const v = (linkInput.value || "").trim();
+        if (!v) {
+          if (typeof window.remiShowToast === "function") {
+            window.remiShowToast("Wait for the invite link to load, then try again.");
           }
-          navigator.clipboard.writeText(v).then(
-            () => {
-              if (typeof window.remiShowToast === "function") {
-                window.remiShowToast("Invite link copied.");
-              }
-            },
-            () => {
-              if (typeof window.remiShowToast === "function") {
-                window.remiShowToast("Could not copy. Select the URL and copy manually.");
-              }
+          return;
+        }
+        navigator.clipboard.writeText(v).then(
+          () => {
+            if (typeof window.remiShowToast === "function") {
+              window.remiShowToast("Invite link copied.");
             }
-          );
+          },
+          () => {
+            if (typeof window.remiShowToast === "function") {
+              window.remiShowToast("Could not copy. Select the URL and copy manually.");
+            }
+          }
+        );
+      };
+
+      const linkFieldWrap = root.querySelector(".sidebar-invite-link-field");
+      if (linkFieldWrap && linkInput) {
+        linkFieldWrap.addEventListener("click", () => {
+          copyInviteLink();
         });
+        if (linkInput instanceof HTMLInputElement) {
+          linkInput.addEventListener("click", (e) => {
+            e.preventDefault();
+            copyInviteLink();
+          });
+        }
       }
     });
+  });
+
+  document.querySelectorAll("[data-remi-tap-copy]").forEach((root) => {
+    if (root.closest("[data-trip-invite-methods]")) return;
+    const target = root.querySelector("[data-remi-tap-copy-target]") || root.querySelector("input[readonly], textarea[readonly]");
+    if (!target || (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement))) return;
+    const toastOk = root.getAttribute("data-remi-tap-copy-toast") || "Copied.";
+    const copyFn = (ev) => {
+      if (ev) ev.preventDefault();
+      const v = (target.value || "").trim();
+      if (!v) {
+        if (typeof window.remiShowToast === "function") window.remiShowToast("Nothing to copy yet.");
+        return;
+      }
+      navigator.clipboard.writeText(v).then(
+        () => {
+          if (typeof window.remiShowToast === "function") window.remiShowToast(toastOk);
+          try {
+            target.select();
+          } catch (e) {
+            /* ignore */
+          }
+        },
+        () => {
+          if (typeof window.remiShowToast === "function") {
+            window.remiShowToast("Could not copy. Select the text and copy manually.");
+          }
+        }
+      );
+    };
+    root.addEventListener("click", copyFn);
   });
 
   const syncThemeIcons = () => {
@@ -313,6 +355,18 @@ window.addEventListener("load", () => {
 
   const normalize = (value) => (value || "").trim().toLowerCase();
 
+  const remiSuggestURL = () => {
+    const shell = document.querySelector("main.app-shell");
+    const u = shell && shell.getAttribute("data-location-suggest-url");
+    return (u && u.trim()) || "/api/location/suggest";
+  };
+  const remiGeocodeURL = () => "/api/location/geocode";
+  const remiReadDistanceUnit = () => {
+    const shell = document.querySelector("main.app-shell");
+    const u = shell && shell.getAttribute("data-distance-unit");
+    return u && String(u).trim() === "mi" ? "mi" : "km";
+  };
+
   const toRad = (deg) => (deg * Math.PI) / 180;
   const haversineKm = (lat1, lng1, lat2, lng2) => {
     const dLat = toRad(lat2 - lat1);
@@ -324,7 +378,14 @@ window.addEventListener("load", () => {
     return 6371 * c;
   };
   const formatDistance = (km) => {
-    if (!Number.isFinite(km) || km <= 0) return "0 km";
+    const unit = remiReadDistanceUnit();
+    if (!Number.isFinite(km) || km <= 0) return unit === "mi" ? "0 mi" : "0 km";
+    if (unit === "mi") {
+      const mi = km * 0.621371;
+      if (mi < 0.05) return "0 mi";
+      if (mi < 0.25) return `${Math.round(mi * 5280)} ft`;
+      return `${mi.toFixed(1)} mi`;
+    }
     if (km < 1) return `${Math.round(km * 1000)} m`;
     return `${km.toFixed(1)} km`;
   };
@@ -348,9 +409,30 @@ window.addEventListener("load", () => {
 
   /** Must be declared before fillMissingCoords / renderItineraryConnectors (avoid TDZ ReferenceError on load). */
   const geocodeLocation = async (locationQuery) => {
-    if (!locationQuery) return null;
+    const q = (locationQuery || "").trim();
+    if (!q) return null;
+    try {
+      const res = await fetch(`${remiGeocodeURL()}?q=${encodeURIComponent(q)}`, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      });
+      if (res.ok) {
+        const top = await res.json();
+        const lat = parseFloat(top.lat ?? top.Lat ?? "0");
+        const lng = parseFloat(top.lng ?? top.Lon ?? "0");
+        if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+          return {
+            lat,
+            lng,
+            displayName: top.displayName || q
+          };
+        }
+      }
+    } catch (e) {
+      /* fallback */
+    }
     const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.searchParams.set("q", locationQuery);
+    url.searchParams.set("q", q);
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("limit", "1");
     const response = await fetch(url.toString(), {
@@ -369,7 +451,7 @@ window.addEventListener("load", () => {
     return {
       lat: parseFloat(top.lat || "0"),
       lng: parseFloat(top.lon || "0"),
-      displayName: top.display_name || locationQuery
+      displayName: top.display_name || q
     };
   };
 
@@ -576,9 +658,32 @@ window.addEventListener("load", () => {
   }
 
   const searchLocations = async (locationQuery) => {
-    if (!locationQuery) return [];
+    const q = (locationQuery || "").trim();
+    if (!q) return [];
+    try {
+      const res = await fetch(`${remiSuggestURL()}?q=${encodeURIComponent(q)}`, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          return data
+            .map((item) => {
+              const lat = parseFloat(item.lat ?? item.Lat ?? "0");
+              const lng = parseFloat(item.lng ?? item.Lon ?? "0");
+              const displayName = item.displayName || item.display_name || "";
+              const shortName = item.shortName || item.name || (displayName ? displayName.split(",")[0].trim() : "") || displayName;
+              return { lat, lng, displayName, shortName };
+            })
+            .filter((item) => (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng));
+        }
+      }
+    } catch (e) {
+      /* fallback */
+    }
     const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.searchParams.set("q", locationQuery);
+    url.searchParams.set("q", q);
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("limit", "5");
     const response = await fetch(url.toString(), {
@@ -603,6 +708,13 @@ window.addEventListener("load", () => {
         return { lat, lng, displayName, shortName };
       })
       .filter((item) => (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng));
+  };
+
+  const REMI_LOCATION_SUGGEST_BLUR_MS = 300;
+  const remiPreventLocationSuggestBlur = (btn) => {
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+    });
   };
 
   document.querySelectorAll("form[data-dashboard-trip-place]").forEach((heroForm) => {
@@ -680,6 +792,7 @@ window.addEventListener("load", () => {
             sub.textContent = s.displayName;
             btn.appendChild(sub);
           }
+          remiPreventLocationSuggestBlur(btn);
           btn.addEventListener("click", () => {
             const label = (s.shortName || s.displayName || "").trim();
             nameInput.value = label;
@@ -696,7 +809,7 @@ window.addEventListener("load", () => {
     });
 
     nameInput.addEventListener("blur", () => {
-      window.setTimeout(hide, 180);
+      window.setTimeout(hide, REMI_LOCATION_SUGGEST_BLUR_MS);
     });
   });
 
@@ -780,6 +893,7 @@ window.addEventListener("load", () => {
             sub.textContent = s.displayName;
             btn.appendChild(sub);
           }
+          remiPreventLocationSuggestBlur(btn);
           btn.addEventListener("click", () => {
             const label = (s.shortName || s.displayName || "").trim();
             nameInput.value = label;
@@ -796,7 +910,7 @@ window.addEventListener("load", () => {
     });
 
     nameInput.addEventListener("blur", () => {
-      window.setTimeout(hide, 180);
+      window.setTimeout(hide, REMI_LOCATION_SUGGEST_BLUR_MS);
     });
   });
 
@@ -906,7 +1020,8 @@ window.addEventListener("load", () => {
     return formId.replace("-edit-", "-view-");
   };
 
-  const mqBudgetEditMobile = window.matchMedia("(max-width: 680px)");
+  const mqBudgetEditMobile = window.matchMedia("(max-width: 920px)");
+  const mqTabEditMobile = window.matchMedia("(max-width: 920px)");
 
   const closeInlineEdit = (formId) => {
     const form = document.getElementById(formId);
@@ -936,6 +1051,33 @@ window.addEventListener("load", () => {
       }
       return;
     }
+    if (form.classList.contains("tab-expense-edit-form")) {
+      const expenseId = form.getAttribute("data-tab-expense-id") || "";
+      const editTr = expenseId
+        ? document.querySelector(`tr.tab-expense-edit-row[data-tab-edit-for="${CSS.escape(expenseId)}"]`)
+        : null;
+      const viewTr = expenseId ? document.querySelector(`tr[data-tab-tx-view="${CSS.escape(expenseId)}"]`) : null;
+      const viewCard = expenseId
+        ? document.querySelector(`.tab-exp-grid-card[data-tab-tx-view="${CSS.escape(expenseId)}"]`)
+        : null;
+      const cell = editTr?.querySelector(".tab-expense-edit-cell");
+      if (cell && form.parentElement !== cell) {
+        cell.appendChild(form);
+      }
+      form.classList.add("hidden");
+      editTr?.classList.add("hidden");
+      viewTr?.classList.remove("editing");
+      viewCard?.classList.remove("editing");
+      const dialog = document.getElementById("tab-mobile-expense-edit");
+      if (dialog?.open) {
+        dialog.close();
+      }
+      return;
+    }
+    if (form.classList.contains("tab-settlement-edit-form")) {
+      form.classList.add("hidden");
+      return;
+    }
     form.classList.add("hidden");
     const row = form.closest(".timeline-item, .expense-item, .accommodation-item, .accommodation-card-wrap, .vehicle-rental-item, .flight-card, .reminder-checklist-item");
     if (row) row.classList.remove("editing");
@@ -944,7 +1086,9 @@ window.addEventListener("load", () => {
     if (view) view.classList.remove("hidden");
   };
 
-  document.querySelectorAll("[data-inline-edit-open]").forEach((btn) => {
+  const wireOneInlineEditOpenBtn = (btn) => {
+    if (!(btn instanceof HTMLElement) || btn.dataset.remiInlineOpenWired === "1") return;
+    btn.dataset.remiInlineOpenWired = "1";
     btn.addEventListener("click", () => {
       const actionDetails = btn.closest("details.trip-inline-actions-dropdown");
       if (actionDetails) {
@@ -981,23 +1125,71 @@ window.addEventListener("load", () => {
         }
         return;
       }
+      if (form.classList.contains("tab-expense-edit-form")) {
+        const expenseId = form.getAttribute("data-tab-expense-id") || "";
+        const editTr = expenseId
+          ? document.querySelector(`tr.tab-expense-edit-row[data-tab-edit-for="${CSS.escape(expenseId)}"]`)
+          : null;
+        const viewTr = expenseId ? document.querySelector(`tr[data-tab-tx-view="${CSS.escape(expenseId)}"]`) : null;
+        const viewCard = expenseId
+          ? document.querySelector(`.tab-exp-grid-card[data-tab-tx-view="${CSS.escape(expenseId)}"]`)
+          : null;
+        if (editTr) editTr.classList.remove("hidden");
+        if (viewTr) viewTr.classList.add("editing");
+        if (viewCard) viewCard.classList.add("editing");
+        form.classList.remove("hidden");
+        if (mqTabEditMobile.matches) {
+          const dialog = document.getElementById("tab-mobile-expense-edit");
+          const slot = dialog?.querySelector("[data-tab-mobile-edit-slot]");
+          if (dialog && slot) {
+            slot.appendChild(form);
+            dialog.showModal();
+            window.requestAnimationFrame(() => {
+              form.querySelector("input:not([type='hidden']), select, textarea")?.focus();
+            });
+          }
+        }
+        return;
+      }
+      if (form.classList.contains("tab-settlement-edit-form")) {
+        form.classList.remove("hidden");
+        return;
+      }
       const row = form.closest(".timeline-item, .expense-item, .accommodation-item, .accommodation-card-wrap, .vehicle-rental-item, .flight-card, .reminder-checklist-item");
       if (row) row.classList.add("editing");
       const viewId = itineraryViewIdForForm(formId);
       const view = viewId ? document.getElementById(viewId) : null;
       if (view) view.classList.add("hidden");
       form.classList.remove("hidden");
+      window.remiResyncVehicleDropoffInForm?.(form);
       const dateInput = form.querySelector("input[name='itinerary_date']");
       if (dateInput) dateInput.dataset.originalValue = dateInput.value;
     });
-  });
-
-  document.querySelectorAll("[data-inline-edit-cancel]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const formId = btn.getAttribute("data-inline-edit-cancel");
-      if (!formId) return;
-      closeInlineEdit(formId);
+  };
+  document.querySelectorAll("[data-inline-edit-open]").forEach((btn) => wireOneInlineEditOpenBtn(btn));
+  window.remiWireInlineEditOpenButtonsIn = (root) => {
+    const scope = root instanceof ParentNode ? root : document;
+    scope.querySelectorAll("[data-inline-edit-open]").forEach((btn) => {
+      if (btn instanceof HTMLElement) wireOneInlineEditOpenBtn(btn);
     });
+  };
+  window.rewireTabInlineEditOpenButtons = () => {
+    document.querySelectorAll("main.tab-page [data-inline-edit-open]").forEach((oldBtn) => {
+      const parent = oldBtn.parentNode;
+      if (!(parent instanceof Node)) return;
+      const fresh = oldBtn.cloneNode(true);
+      delete fresh.dataset.remiInlineOpenWired;
+      parent.replaceChild(fresh, oldBtn);
+      wireOneInlineEditOpenBtn(fresh);
+    });
+  };
+
+  document.addEventListener("click", (event) => {
+    const btn = event.target?.closest?.("[data-inline-edit-cancel]");
+    if (!(btn instanceof HTMLElement)) return;
+    const formId = btn.getAttribute("data-inline-edit-cancel");
+    if (!formId) return;
+    closeInlineEdit(formId);
   });
 
   const budgetMobileEditDialog = document.getElementById("budget-mobile-expense-edit");
@@ -1010,9 +1202,18 @@ window.addEventListener("load", () => {
     const form = slot?.querySelector(".budget-expense-edit-form");
     if (form?.id) closeInlineEdit(form.id);
   });
+  const tabMobileEditDialog = document.getElementById("tab-mobile-expense-edit");
+  tabMobileEditDialog?.querySelector("[data-tab-mobile-edit-close]")?.addEventListener("click", () => {
+    const form = tabMobileEditDialog.querySelector(".tab-expense-edit-form");
+    if (form?.id) closeInlineEdit(form.id);
+  });
+  tabMobileEditDialog?.addEventListener("close", () => {
+    const slot = tabMobileEditDialog.querySelector("[data-tab-mobile-edit-slot]");
+    const form = slot?.querySelector(".tab-expense-edit-form");
+    if (form?.id) closeInlineEdit(form.id);
+  });
 
-  const itineraryForm = document.querySelector("[data-itinerary-form]");
-  if (itineraryForm) {
+  const initItineraryForm = (itineraryForm) => {
     const locationInput = itineraryForm.querySelector("[data-location-input]");
     const latitudeInput = itineraryForm.querySelector("[data-latitude-input]");
     const longitudeInput = itineraryForm.querySelector("[data-longitude-input]");
@@ -1103,6 +1304,7 @@ window.addEventListener("load", () => {
         btn.type = "button";
         btn.className = "location-suggestion-btn";
         btn.textContent = suggestion.displayName;
+        remiPreventLocationSuggestBlur(btn);
         btn.addEventListener("click", () => {
           selectSuggestion(suggestion);
         });
@@ -1195,7 +1397,7 @@ window.addEventListener("load", () => {
       locationInput.addEventListener("blur", () => {
         window.setTimeout(() => {
           hideSuggestions();
-        }, 150);
+        }, REMI_LOCATION_SUGGEST_BLUR_MS);
         void resolveLocation(locationInput.value);
       });
     }
@@ -1222,91 +1424,11 @@ window.addEventListener("load", () => {
       event.preventDefault();
       locationInput.focus();
     });
-  }
+  };
 
-  document.querySelectorAll("[data-itinerary-form]").forEach((formEl) => {
-    if (formEl === itineraryForm) return;
-    const locationInput = formEl.querySelector("[data-location-input]");
-    const latitudeInput = formEl.querySelector("[data-latitude-input]");
-    const longitudeInput = formEl.querySelector("[data-longitude-input]");
-    const locationStatus = formEl.querySelector("[data-location-status]");
-    const suggestionBox = formEl.querySelector("[data-location-suggestions]");
-    const locationLookupEnabled = formEl.getAttribute("data-location-lookup-enabled") !== "false";
-    let suggestionTimer = null;
-    let latestQueryToken = 0;
-
-    const setStatus = (message, state) => {
-      if (!locationStatus) return;
-      locationStatus.textContent = message;
-      locationStatus.classList.remove("error", "success");
-      if (state) locationStatus.classList.add(state);
-    };
-    const fillCoordinates = (coords) => {
-      if (!latitudeInput || !longitudeInput) return;
-      latitudeInput.value = coords ? String(coords.lat) : "";
-      longitudeInput.value = coords ? String(coords.lng) : "";
-    };
-    const hideSuggestions = () => {
-      if (!suggestionBox) return;
-      suggestionBox.classList.add("hidden");
-      suggestionBox.innerHTML = "";
-    };
-    const renderSuggestions = (suggestions) => {
-      if (!suggestionBox) return;
-      suggestionBox.innerHTML = "";
-      if (!suggestions.length) {
-        hideSuggestions();
-        return;
-      }
-      suggestions.forEach((suggestion) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "location-suggestion-btn";
-        btn.textContent = suggestion.displayName;
-        btn.addEventListener("click", () => {
-          if (locationInput) locationInput.value = suggestion.displayName;
-          fillCoordinates(suggestion);
-          setStatus("Location selected and ready to plot on the map.", "success");
-          hideSuggestions();
-        });
-        suggestionBox.appendChild(btn);
-      });
-      suggestionBox.classList.remove("hidden");
-    };
-
-    if (locationInput) {
-      locationInput.addEventListener("input", () => {
-        fillCoordinates(null);
-        if (!locationLookupEnabled) {
-          return;
-        }
-        const trimmed = locationInput.value.trim();
-        if (suggestionTimer) clearTimeout(suggestionTimer);
-        if (trimmed.length < 3) {
-          hideSuggestions();
-          return;
-        }
-        suggestionTimer = window.setTimeout(async () => {
-          const token = ++latestQueryToken;
-          setStatus("Searching places...");
-          const suggestions = await searchLocations(trimmed);
-          if (token !== latestQueryToken) return;
-          renderSuggestions(suggestions);
-          setStatus(suggestions.length ? "Select a place to confirm coordinates." : "No matching places found.", suggestions.length ? null : "error");
-        }, 320);
-      });
-      locationInput.addEventListener("blur", () => {
-        window.setTimeout(hideSuggestions, 150);
-      });
-    }
-    formEl.addEventListener("submit", async (event) => {
-      if (!locationInput || !locationLookupEnabled) return;
-      const query = locationInput.value.trim();
-      if (!query) return;
-      const coords = await geocodeLocation(query);
-      if (!coords) return;
-      fillCoordinates(coords);
-    });
+  document.querySelectorAll("[data-itinerary-form]").forEach((itineraryForm) => {
+    if (!(itineraryForm instanceof HTMLElement)) return;
+    initItineraryForm(itineraryForm);
   });
 
   document.querySelectorAll("input[data-location-autocomplete]").forEach((input) => {
@@ -1319,6 +1441,7 @@ window.addEventListener("load", () => {
       suggestionsHost.className = "location-suggestions hidden";
       const wrapper = input.closest("label") || input.parentElement;
       if (wrapper) {
+        wrapper.classList.add("location-autocomplete-anchor");
         wrapper.appendChild(suggestionsHost);
       }
       return suggestionsHost;
@@ -1350,6 +1473,7 @@ window.addEventListener("load", () => {
           btn.type = "button";
           btn.className = "location-suggestion-btn";
           btn.textContent = suggestion.displayName;
+          remiPreventLocationSuggestBlur(btn);
           btn.addEventListener("click", () => {
             input.value = suggestion.displayName;
             hide();
@@ -1360,14 +1484,200 @@ window.addEventListener("load", () => {
       }, 300);
     });
     input.addEventListener("blur", () => {
-      window.setTimeout(hide, 150);
+      window.setTimeout(hide, REMI_LOCATION_SUGGEST_BLUR_MS);
     });
   });
+
+  const vehicleDropoffSyncByFieldset = new WeakMap();
+  document.querySelectorAll(".vehicle-dropoff-fieldset").forEach((fs) => {
+    const same = fs.querySelector("[data-vehicle-dropoff-same]");
+    const diff = fs.querySelector("[data-vehicle-dropoff-diff]");
+    const locWrap = fs.querySelector("[data-vehicle-dropoff-field]");
+    const locInp = locWrap?.querySelector("input[name='drop_off_location']");
+    const sync = () => {
+      const different = Boolean(diff?.checked);
+      if (locWrap) {
+        locWrap.toggleAttribute("hidden", !different);
+        locWrap.setAttribute("aria-hidden", different ? "false" : "true");
+      }
+      if (locInp) {
+        locInp.disabled = !different;
+        locInp.required = different;
+      }
+    };
+    same?.addEventListener("change", sync);
+    diff?.addEventListener("change", sync);
+    vehicleDropoffSyncByFieldset.set(fs, sync);
+    sync();
+  });
+
+  window.remiResyncVehicleDropoffInForm = (form) => {
+    if (!(form instanceof HTMLElement)) return;
+    form.querySelectorAll(".vehicle-dropoff-fieldset").forEach((fs) => {
+      const fn = vehicleDropoffSyncByFieldset.get(fs);
+      if (typeof fn === "function") fn();
+    });
+  };
+
+  const tripCoverModeEl = document.getElementById("trip_cover_image_mode");
+  const tripCoverFieldEl = document.querySelector("[data-trip-cover-field]");
+  const tripCoverExistingEl = document.querySelector("input[name='cover_image_existing']");
+  if (tripCoverModeEl && tripCoverFieldEl) {
+    const previewWrap = tripCoverFieldEl.querySelector("[data-trip-cover-preview-wrap]");
+    const urlLabel = tripCoverFieldEl.querySelector("[data-trip-cover-url-label]");
+    const fileLabel = tripCoverFieldEl.querySelector("[data-trip-cover-file-label]");
+    const urlInput = tripCoverFieldEl.querySelector("[data-trip-cover-url-input]");
+    const fileInp = tripCoverFieldEl.querySelector("[data-trip-cover-file-input]");
+    let tripCoverBlobUrl = null;
+
+    const revokeTripCoverBlob = () => {
+      if (tripCoverBlobUrl) {
+        URL.revokeObjectURL(tripCoverBlobUrl);
+        tripCoverBlobUrl = null;
+      }
+    };
+
+    const setTripCoverPreviewEmpty = (message) => {
+      if (!previewWrap) return;
+      previewWrap.replaceChildren();
+      const div = document.createElement("div");
+      div.className = "trip-cover-image-field__preview trip-cover-image-field__preview--empty muted";
+      div.textContent = message;
+      previewWrap.appendChild(div);
+    };
+
+    const setTripCoverPreviewSrc = (src) => {
+      if (!previewWrap) return;
+      previewWrap.replaceChildren();
+      const img = document.createElement("img");
+      img.className = "trip-cover-image-field__preview";
+      img.alt = "Trip cover preview";
+      img.referrerPolicy = "no-referrer";
+      img.onerror = () => {
+        setTripCoverPreviewEmpty("Could not load preview");
+      };
+      previewWrap.appendChild(img);
+      img.src = src;
+    };
+
+    const applyTripCoverUrlPreview = () => {
+      let u = (urlInput?.value || "").trim();
+      if (!u && tripCoverExistingEl) {
+        const ex = tripCoverExistingEl.value.trim();
+        if (/^https?:\/\//i.test(ex)) u = ex;
+      }
+      if (!u) {
+        setTripCoverPreviewEmpty("Paste an image URL (https) to preview");
+        return;
+      }
+      if (!/^https?:\/\//i.test(u)) {
+        setTripCoverPreviewEmpty("Enter a valid http(s) image URL");
+        return;
+      }
+      revokeTripCoverBlob();
+      setTripCoverPreviewSrc(u);
+    };
+
+    const restoreTripCoverUploadPreview = () => {
+      revokeTripCoverBlob();
+      const f = fileInp?.files && fileInp.files[0];
+      if (f) {
+        try {
+          tripCoverBlobUrl = URL.createObjectURL(f);
+          setTripCoverPreviewSrc(tripCoverBlobUrl);
+        } catch {
+          setTripCoverPreviewEmpty("Could not read file");
+        }
+        return;
+      }
+      const ex = tripCoverExistingEl?.value?.trim() || "";
+      if (ex.startsWith("/static/uploads/covers/")) {
+        setTripCoverPreviewSrc(ex);
+        return;
+      }
+      setTripCoverPreviewEmpty("Choose an image file below (JPG, PNG, WebP, or GIF)");
+    };
+
+    const syncTripCoverUI = () => {
+      const v = tripCoverModeEl.value;
+      if (v === "clear") {
+        revokeTripCoverBlob();
+        if (previewWrap) previewWrap.hidden = true;
+        if (urlLabel) urlLabel.hidden = true;
+        if (fileLabel) fileLabel.hidden = true;
+        return;
+      }
+      if (previewWrap) previewWrap.hidden = false;
+      if (urlLabel) urlLabel.hidden = v !== "url";
+      if (fileLabel) fileLabel.hidden = v !== "upload";
+      if (v === "url") {
+        applyTripCoverUrlPreview();
+      } else {
+        restoreTripCoverUploadPreview();
+      }
+    };
+
+    tripCoverModeEl.addEventListener("change", syncTripCoverUI);
+
+    let tripCoverUrlTimer = null;
+    urlInput?.addEventListener("input", () => {
+      if (tripCoverModeEl.value !== "url") return;
+      window.clearTimeout(tripCoverUrlTimer);
+      tripCoverUrlTimer = window.setTimeout(() => applyTripCoverUrlPreview(), 350);
+    });
+    urlInput?.addEventListener("change", () => {
+      if (tripCoverModeEl.value === "url") applyTripCoverUrlPreview();
+    });
+
+    fileInp?.addEventListener("change", () => {
+      if (tripCoverModeEl.value !== "upload") return;
+      restoreTripCoverUploadPreview();
+    });
+
+    syncTripCoverUI();
+  }
+
+  const heroModeEl = document.getElementById("dashboard_hero_background_mode");
+  const heroFieldEl = document.querySelector("[data-hero-image-field]");
+  if (heroModeEl && heroFieldEl) {
+    const form = heroModeEl.closest("form");
+    const urlInp = form?.querySelector("input[name='dashboard_hero_background_url']");
+    const urlLabel = urlInp?.closest("label");
+    const uploadHint = document.getElementById("hint-hero-upload");
+    const fileInp = heroFieldEl.querySelector("input[type='file']");
+    const syncHeroUI = () => {
+      const v = heroModeEl.value;
+      const showUpload = v === "custom_upload";
+      const showUrl = v === "custom_url";
+      heroFieldEl.hidden = !showUpload;
+      if (urlLabel) urlLabel.hidden = !showUrl;
+      if (uploadHint) uploadHint.hidden = !showUpload;
+    };
+    heroModeEl.addEventListener("change", syncHeroUI);
+    syncHeroUI();
+    fileInp?.addEventListener("change", () => {
+      const f = fileInp.files && fileInp.files[0];
+      const wrap = heroFieldEl.querySelector(".hero-image-field__preview-wrap");
+      if (!f || !wrap) return;
+      try {
+        const objUrl = URL.createObjectURL(f);
+        wrap.replaceChildren();
+        const img = document.createElement("img");
+        img.className = "hero-image-field__preview";
+        img.alt = "Hero preview";
+        img.src = objUrl;
+        wrap.appendChild(img);
+      } catch (e) {
+        /* ignore */
+      }
+    });
+  }
 
   document.querySelectorAll("[data-accommodation-form]").forEach((accommodationForm) => {
     const accommodationNameInput = accommodationForm.querySelector("[data-accommodation-name]");
     const accommodationAddressInput = accommodationForm.querySelector("[data-accommodation-address]");
     const accommodationStatus = accommodationForm.querySelector("[data-accommodation-status]");
+    const mqAccommodationMobile = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 920px)") : null;
     let accommodationLookupTimer = null;
 
     const setAccommodationStatus = (message, state) => {
@@ -1402,6 +1712,85 @@ window.addEventListener("load", () => {
         void lookupAddress(accommodationNameInput.value);
       });
     }
+
+    accommodationForm.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (mqAccommodationMobile && !mqAccommodationMobile.matches) return;
+      const active = event.target;
+      if (!(active instanceof HTMLElement)) return;
+      if (active instanceof HTMLTextAreaElement || active instanceof HTMLButtonElement) return;
+      if (active instanceof HTMLInputElement) {
+        const inputType = (active.type || "").toLowerCase();
+        if (["hidden", "submit", "button", "reset", "checkbox", "radio", "file"].includes(inputType)) return;
+      }
+      if (active instanceof HTMLSelectElement) return;
+      const fields = Array.from(accommodationForm.querySelectorAll("input, select, textarea")).filter((el) => {
+        if (!(el instanceof HTMLElement)) return false;
+        if (el.hasAttribute("disabled")) return false;
+        if (el.getAttribute("aria-hidden") === "true") return false;
+        if (el.offsetParent === null) return false;
+        if (el instanceof HTMLInputElement) {
+          const inputType = (el.type || "").toLowerCase();
+          if (["hidden", "submit", "button", "reset", "checkbox", "radio", "file"].includes(inputType)) return false;
+        }
+        return true;
+      });
+      const idx = fields.indexOf(active);
+      if (idx < 0) return;
+      const next = fields[idx + 1];
+      if (!(next instanceof HTMLElement)) return;
+      event.preventDefault();
+      next.focus();
+      if (next instanceof HTMLInputElement && (next.type === "text" || next.type === "search" || next.type === "tel" || next.type === "url" || next.type === "email")) {
+        try {
+          const len = next.value.length;
+          next.setSelectionRange(len, len);
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-vehicle-form]").forEach((vehicleForm) => {
+    const mqVehicleMobile = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 920px)") : null;
+    vehicleForm.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (mqVehicleMobile && !mqVehicleMobile.matches) return;
+      const active = event.target;
+      if (!(active instanceof HTMLElement)) return;
+      if (active instanceof HTMLTextAreaElement || active instanceof HTMLButtonElement) return;
+      if (active instanceof HTMLInputElement) {
+        const inputType = (active.type || "").toLowerCase();
+        if (["hidden", "submit", "button", "reset", "checkbox", "radio", "file"].includes(inputType)) return;
+      }
+      if (active instanceof HTMLSelectElement) return;
+      const fields = Array.from(vehicleForm.querySelectorAll("input, select, textarea")).filter((el) => {
+        if (!(el instanceof HTMLElement)) return false;
+        if (el.hasAttribute("disabled")) return false;
+        if (el.getAttribute("aria-hidden") === "true") return false;
+        if (el.offsetParent === null) return false;
+        if (el instanceof HTMLInputElement) {
+          const inputType = (el.type || "").toLowerCase();
+          if (["hidden", "submit", "button", "reset", "checkbox", "radio", "file"].includes(inputType)) return false;
+        }
+        return true;
+      });
+      const idx = fields.indexOf(active);
+      if (idx < 0) return;
+      const next = fields[idx + 1];
+      if (!(next instanceof HTMLElement)) return;
+      event.preventDefault();
+      next.focus();
+      if (next instanceof HTMLInputElement && (next.type === "text" || next.type === "search" || next.type === "tel" || next.type === "url" || next.type === "email")) {
+        try {
+          const len = next.value.length;
+          next.setSelectionRange(len, len);
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    });
   });
 
   document.querySelectorAll("[data-checklist-builder]").forEach((checklistForm) => {
@@ -1601,6 +1990,37 @@ window.addEventListener("load", () => {
     });
     if (!r.ok) return null;
     return new DOMParser().parseFromString(await r.text(), "text/html");
+  };
+
+  window.refreshTheTabPageFromServer = async () => {
+    if (!document.querySelector("main.tab-page")) return;
+    const doc = await fetchFreshDoc();
+    if (!doc) return;
+    document.querySelectorAll("[data-tab-refresh-region]").forEach((el) => {
+      const k = el.getAttribute("data-tab-refresh-region");
+      if (!k) return;
+      const fresh = doc.querySelector(`[data-tab-refresh-region="${CSS.escape(k)}"]`);
+      if (fresh) el.innerHTML = fresh.innerHTML;
+    });
+    document.querySelectorAll("[data-tab-refresh-region] form[data-app-confirm]").forEach((f) => {
+      delete f.dataset.remiConfirmWired;
+    });
+    document.querySelectorAll("[data-tab-refresh-region] form[data-ajax-submit]").forEach((f) => {
+      delete f.dataset.remiAjaxWired;
+    });
+    document.querySelectorAll("[data-tab-refresh-region] [data-tab-split-root]").forEach((r) => {
+      delete r.dataset.tabSplitBound;
+    });
+    document.querySelectorAll("[data-tab-refresh-region] form[data-app-confirm]").forEach((f) => {
+      window.remiWireAppConfirmOnForm?.(f);
+    });
+    document.querySelectorAll("[data-tab-refresh-region] form[data-ajax-submit]").forEach((f) => {
+      window.remiBindAjaxSubmitForm?.(f);
+    });
+    window.setupTabSplitRootsIn?.(document);
+    window.reinitTabOverTimeChart?.();
+    window.rewireTabInlineEditOpenButtons?.();
+    window.remiSyncTabExpenseInstantFilter?.();
   };
 
   // Reposition a DOM row to the correct slot based on the fresh server HTML.
@@ -1871,7 +2291,10 @@ window.addEventListener("load", () => {
       }
     });
 
-    document.querySelectorAll("form[data-app-confirm]").forEach((form) => {
+    const wireAppConfirmOnForm = (form) => {
+      if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-app-confirm")) return;
+      if (form.dataset.remiConfirmWired === "1") return;
+      form.dataset.remiConfirmWired = "1";
       form.addEventListener(
         "submit",
         (e) => {
@@ -1887,16 +2310,30 @@ window.addEventListener("load", () => {
         },
         true
       );
-    });
+    };
+    document.querySelectorAll("form[data-app-confirm]").forEach((form) => wireAppConfirmOnForm(form));
+    window.remiWireAppConfirmOnForm = wireAppConfirmOnForm;
   }
 
-  document.querySelectorAll("form[data-ajax-submit]").forEach((form) => {
-    form.addEventListener("submit", async (event) => {
+  const handleAjaxFormSubmit = async (event) => {
+    const form = event.currentTarget;
+    if (!(form instanceof HTMLFormElement)) return;
       if (event.defaultPrevented) return;
       event.preventDefault();
       const method = (form.getAttribute("method") || "post").toUpperCase();
       const formData = new FormData(form);
       mergeFormAssociatedControls(form, formData);
+      if (
+        form.classList.contains("tab-settlement-form") ||
+        form.classList.contains("tab-settlement-edit-form")
+      ) {
+        const payer = String(formData.get("payer_user_id") ?? "").trim();
+        const payee = String(formData.get("payee_user_id") ?? "").trim();
+        if (payer && payee && payer === payee) {
+          showToast("Choose two different people for payer and payee.");
+          return;
+        }
+      }
       const hasFileInput = Boolean(form.querySelector("input[type='file']"));
       const isMultipartForm = (form.enctype || "").toLowerCase().includes("multipart/form-data") || hasFileInput;
       const requestBody = isMultipartForm ? formData : new URLSearchParams(formData);
@@ -1940,6 +2377,9 @@ window.addEventListener("load", () => {
           }
           window.location.reload();
           return;
+        } else if (form.classList.contains("tab-expense-edit-form")) {
+          await window.refreshTheTabPageFromServer();
+          if (form.id) closeInlineEdit(form.id);
         } else if (form.id && form.id.startsWith("expense-edit-")) {
           const moved = await smartRepositionExpenseItem(form);
           if (!moved) {
@@ -1948,6 +2388,28 @@ window.addEventListener("load", () => {
             return;
           }
           closeInlineEdit(form.id);
+        } else if (
+          document.querySelector("main.tab-page") &&
+          (form.classList.contains("tab-log-expense-form") ||
+            /\/(tab|group-expenses)\/settlements/.test(form.action || "") ||
+            (/\/expenses\/[^/]+\/delete$/i.test(form.action || "") && form.closest("[data-tab-expenses-section]")))
+        ) {
+          await window.refreshTheTabPageFromServer();
+          if (form.classList.contains("tab-log-expense-form")) {
+            form.reset();
+            const wrap = document.getElementById("tab-split-root-add");
+            if (wrap?.parentNode) {
+              const clone = wrap.cloneNode(true);
+              delete clone.dataset.tabSplitBound;
+              wrap.replaceWith(clone);
+              window.setupTabSplitRootsIn?.(document);
+              const nf = clone.querySelector("form.tab-log-expense-form");
+              if (nf) {
+                delete nf.dataset.remiAjaxWired;
+                window.remiBindAjaxSubmitForm?.(nf);
+              }
+            }
+          }
         } else {
           await refreshInlineViewFromServer(form);
           if (form.id && form.id.includes("-edit-")) {
@@ -1970,18 +2432,24 @@ window.addEventListener("load", () => {
           form.classList.remove("day-label-dirty");
         }
         if ((form.action || "").toLowerCase().includes("/delete")) {
-          const row = form.closest(
-            ".timeline-item, .expense-item, .reminder-checklist-item, .budget-tx-view, .budget-mobile-tx-item"
-          );
-          if (row) {
-            const id = row.getAttribute("data-budget-tx-view");
-            if (id) {
-              document.querySelector(`tr.budget-expense-edit-row[data-budget-edit-for="${CSS.escape(id)}"]`)?.remove();
-              document
-                .querySelector(`li.budget-mobile-tx-item[data-budget-tx-view="${CSS.escape(id)}"]`)
-                ?.remove();
+          const tabMain = document.querySelector("main.tab-page");
+          const skipRowRemove =
+            Boolean(tabMain) &&
+            Boolean(form.closest("[data-tab-refresh-region], .tab-settle-card, .tab-expenses-section"));
+          if (!skipRowRemove) {
+            const row = form.closest(
+              ".timeline-item, .expense-item, .reminder-checklist-item, .budget-tx-view, .budget-mobile-tx-item"
+            );
+            if (row) {
+              const id = row.getAttribute("data-budget-tx-view");
+              if (id) {
+                document.querySelector(`tr.budget-expense-edit-row[data-budget-edit-for="${CSS.escape(id)}"]`)?.remove();
+                document
+                  .querySelector(`li.budget-mobile-tx-item[data-budget-tx-view="${CSS.escape(id)}"]`)
+                  ?.remove();
+              }
+              row.remove();
             }
-            row.remove();
           }
         }
         if (document.querySelector(".trip-details-page .budget-tile")) {
@@ -1991,7 +2459,101 @@ window.addEventListener("load", () => {
       } catch (error) {
         showToast(error?.message || "Unable to save right now.");
       }
+  };
+
+  const bindAjaxSubmitForm = (form) => {
+    if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-ajax-submit")) return;
+    if (form.dataset.remiAjaxWired === "1") return;
+    form.dataset.remiAjaxWired = "1";
+    form.addEventListener("submit", handleAjaxFormSubmit);
+  };
+  window.remiBindAjaxSubmitForm = bindAjaxSubmitForm;
+  document.querySelectorAll("form[data-ajax-submit]").forEach((form) => bindAjaxSubmitForm(form));
+
+  document.getElementById("tab-exp-view-all-btn")?.addEventListener("click", async () => {
+    const btn = document.getElementById("tab-exp-view-all-btn");
+    const url = btn?.getAttribute("data-tab-expenses-more-url");
+    if (!btn || !url || btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const r = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" } });
+      if (!r.ok) throw new Error("bad response");
+      const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+      const srcTbody = doc.querySelector("[data-tab-load-more-table] tbody");
+      const gridWrap = doc.querySelector("[data-tab-load-more-grid]");
+      const destTbody = document.getElementById("tab-transactions-tbody");
+      const destGrid = document.querySelector("[data-tab-exp-grid]");
+      if (srcTbody && destTbody) {
+        Array.from(srcTbody.querySelectorAll("tr")).forEach((tr) => destTbody.appendChild(tr));
+      }
+      if (gridWrap && destGrid) {
+        Array.from(gridWrap.querySelectorAll(".tab-exp-grid-card")).forEach((el) => destGrid.appendChild(el));
+      }
+      destTbody?.querySelectorAll("[data-tab-split-root]").forEach((root) => {
+        delete root.dataset.tabSplitBound;
+      });
+      destTbody?.querySelectorAll("form[data-app-confirm]").forEach((f) => {
+        delete f.dataset.remiConfirmWired;
+        window.remiWireAppConfirmOnForm?.(f);
+      });
+      destTbody?.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
+        delete f.dataset.remiAjaxWired;
+        window.remiBindAjaxSubmitForm?.(f);
+      });
+      window.setupTabSplitRootsIn?.(destTbody || document);
+      window.rewireTabInlineEditOpenButtons?.();
+      window.remiSyncTabExpenseInstantFilter?.();
+      btn.textContent = "All transactions shown";
+      btn.classList.add("tab-exp-view-all-disabled");
+    } catch {
+      btn.disabled = false;
+      showToast("Could not load remaining transactions.");
+    }
+  });
+
+  document.getElementById("tab-settlements-view-all-btn")?.addEventListener("click", async () => {
+    const btn = document.getElementById("tab-settlements-view-all-btn");
+    const url = btn?.getAttribute("data-tab-settlements-more-url");
+    const ul = document.getElementById("tab-settlements-ul");
+    if (!btn || !url || !ul || btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const r = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" } });
+      if (!r.ok) throw new Error("bad response");
+      const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+      const srcUl = doc.querySelector(".tab-load-more-settlements-src");
+      if (srcUl) {
+        Array.from(srcUl.querySelectorAll(":scope > li")).forEach((li) => ul.appendChild(li));
+      }
+      ul.querySelectorAll("form[data-app-confirm]").forEach((f) => {
+        delete f.dataset.remiConfirmWired;
+        window.remiWireAppConfirmOnForm?.(f);
+      });
+      ul.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
+        delete f.dataset.remiAjaxWired;
+        window.remiBindAjaxSubmitForm?.(f);
+      });
+      window.rewireTabInlineEditOpenButtons?.();
+      btn.textContent = "All settlements shown";
+      btn.classList.add("tab-exp-view-all-disabled");
+    } catch {
+      btn.disabled = false;
+      showToast("Could not load remaining settlements.");
+    }
+  });
+  document.body?.addEventListener("htmx:afterSwap", (event) => {
+    const target = event?.detail?.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.id !== "budget-transactions-tbody") return;
+    target.querySelectorAll("form[data-app-confirm]").forEach((f) => {
+      delete f.dataset.remiConfirmWired;
+      window.remiWireAppConfirmOnForm?.(f);
     });
+    target.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
+      delete f.dataset.remiAjaxWired;
+      window.remiBindAjaxSubmitForm?.(f);
+    });
+    window.remiWireInlineEditOpenButtonsIn?.(target);
   });
 
   const formOwnerForField = (input) => {
@@ -2295,8 +2857,10 @@ window.addEventListener("load", () => {
   }
 
   const mapEl = document.getElementById("map");
-  if (!mapEl || typeof L === "undefined") return;
-
+  if (!mapEl) {
+    /* no trip map */
+  } else {
+  const gMapKey = (mapEl.getAttribute("data-google-maps-key") || "").trim();
   const defaultLat = parseFloat(mapEl.getAttribute("data-map-lat") || "35.6762");
   const defaultLng = parseFloat(mapEl.getAttribute("data-map-lng") || "139.6503");
   const defaultZoom = parseInt(mapEl.getAttribute("data-map-zoom") || "6", 10);
@@ -2304,6 +2868,73 @@ window.addEventListener("load", () => {
   const startLng = Number.isNaN(defaultLng) ? 139.6503 : defaultLng;
   const startZoom = Number.isNaN(defaultZoom) ? 6 : defaultZoom;
 
+  const escapeHtmlMap = (s) =>
+    String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const points = Array.from(document.querySelectorAll("[data-map-itinerary-point][data-lat][data-lng]"))
+    .map((el) => ({
+      lat: parseFloat(el.getAttribute("data-lat") || "0"),
+      lng: parseFloat(el.getAttribute("data-lng") || "0"),
+      title: el.getAttribute("data-title") || "",
+      location: el.getAttribute("data-location") || "",
+      day: parseInt(el.getAttribute("data-map-day") || "1", 10) || 1,
+      kind: (el.getAttribute("data-marker-kind") || "stop").toLowerCase()
+    }))
+    .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng) && (p.lat !== 0 || p.lng !== 0));
+
+  if (gMapKey) {
+    const initGoogleTripMap = () => {
+      if (!window.google || !google.maps) return;
+      const gMap = new google.maps.Map(mapEl, {
+        center: { lat: startLat, lng: startLng },
+        zoom: startZoom,
+        mapTypeControl: true,
+        streetViewControl: true,
+        fullscreenControl: true
+      });
+      const bounds = new google.maps.LatLngBounds();
+      points.forEach((p) => {
+        bounds.extend({ lat: p.lat, lng: p.lng });
+        const marker = new google.maps.Marker({
+          position: { lat: p.lat, lng: p.lng },
+          map: gMap,
+          title: `${p.title} · Day ${p.day}`
+        });
+        const iw = new google.maps.InfoWindow({
+          content: `<div><b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${p.day}</span><br>${escapeHtmlMap(p.location)}</div>`
+        });
+        marker.addListener("click", () => iw.open({ anchor: marker, map: gMap }));
+      });
+      if (points.length === 0) {
+        /* default center */
+      } else if (points.length === 1) {
+        gMap.setZoom(Math.max(startZoom, 12));
+        gMap.setCenter({ lat: points[0].lat, lng: points[0].lng });
+      } else {
+        gMap.fitBounds(bounds, 48);
+      }
+    };
+    if (window.google && google.maps) {
+      initGoogleTripMap();
+    } else {
+      window.remiGoogleTripMapInit = () => {
+        initGoogleTripMap();
+        try {
+          delete window.remiGoogleTripMapInit;
+        } catch (e) {
+          window.remiGoogleTripMapInit = undefined;
+        }
+      };
+      const gs = document.createElement("script");
+      gs.async = true;
+      gs.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(gMapKey)}&callback=remiGoogleTripMapInit`;
+      document.head.appendChild(gs);
+    }
+  } else if (typeof L !== "undefined") {
   const map = L.map("map").setView([startLat, startLng], startZoom);
   const lightLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
@@ -2353,24 +2984,6 @@ window.addEventListener("load", () => {
     flight: "flight",
     stop: "place"
   };
-  const escapeHtml = (s) =>
-    String(s || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-
-  const points = Array.from(document.querySelectorAll("[data-map-itinerary-point][data-lat][data-lng]"))
-    .map((el) => ({
-      lat: parseFloat(el.getAttribute("data-lat") || "0"),
-      lng: parseFloat(el.getAttribute("data-lng") || "0"),
-      title: el.getAttribute("data-title") || "",
-      location: el.getAttribute("data-location") || "",
-      day: parseInt(el.getAttribute("data-map-day") || "1", 10) || 1,
-      kind: (el.getAttribute("data-marker-kind") || "stop").toLowerCase()
-    }))
-    .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng) && (p.lat !== 0 || p.lng !== 0));
-
   const uniqueDays = [...new Set(points.map((p) => Math.max(1, p.day)))].sort((a, b) => a - b);
   const colorByDay = new Map();
   uniqueDays.forEach((d, i) => {
@@ -2394,7 +3007,7 @@ window.addEventListener("load", () => {
     });
     const marker = L.marker([p.lat, p.lng], { icon });
     marker.bindPopup(
-      `<b>${escapeHtml(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtml(p.location)}`
+      `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
     );
     markersByDay.get(day).push(marker);
   });
@@ -2473,6 +3086,9 @@ window.addEventListener("load", () => {
 
   syncLegendButtons();
   fitMapToVisibleMarkers();
+  }
+  }
+
 });
 
 (function () {
@@ -2569,13 +3185,13 @@ window.addEventListener("load", () => {
       return row.querySelector(".flight-view h4")?.textContent?.trim() || "Flight";
     }
     if (row.matches(".budget-mobile-tx-item")) {
-      return row.querySelector(".budget-mobile-tx-left strong")?.textContent?.trim() || "Spend";
+      return row.querySelector(".budget-mobile-tx-left strong")?.textContent?.trim() || "Expense";
     }
     if (row.matches(".accommodation-card-wrap")) {
-      return row.querySelector(".vehicle-main-top h4")?.textContent?.trim() || "Stay";
+      return row.querySelector(".vehicle-main-top h4")?.textContent?.trim() || "Accommodation";
     }
     if (row.matches(".vehicle-rental-item")) {
-      return row.querySelector(".vehicle-main-top h4")?.textContent?.trim() || "Vehicle";
+      return row.querySelector(".vehicle-main-top h4")?.textContent?.trim() || "Vehicle Rental";
     }
     return "Item";
   }
@@ -2744,7 +3360,11 @@ window.addEventListener("load", () => {
 
   const boot = () => {
     syncBind();
-    mqMobile.addEventListener("change", syncBind);
+    if (typeof mqMobile.addEventListener === "function") {
+      mqMobile.addEventListener("change", syncBind);
+    } else if (typeof mqMobile.addListener === "function") {
+      mqMobile.addListener(syncBind);
+    }
   };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot, { once: true });
@@ -2753,9 +3373,9 @@ window.addEventListener("load", () => {
   }
 })();
 
-// Trip settings: Trip sections (ui_trip_section_*) are masters for module on/off; Main column uses ui_vis_main_*
+// Trip settings: Trip sections (ui_trip_section_*) are masters for module on/off; Primary Content uses ui_vis_main_*
 // for layout visibility only. When a master is off, matching main-column checkboxes are disabled; turning the
-// master back on restores their prior checked state. Main column changes do not affect Trip sections or sidebar.
+// master back on restores their prior checked state. Primary Content visibility does not affect Trip sections or sidebar masters.
 window.addEventListener("load", () => {
   if (!document.body.classList.contains("page-trip-settings")) {
     return;
@@ -2764,11 +3384,13 @@ window.addEventListener("load", () => {
   if (!form) {
     return;
   }
-  const MASTER_KEYS = ["itinerary", "checklist", "stay", "vehicle", "flights", "spends"];
+  const MASTER_KEYS = ["itinerary", "checklist", "stay", "vehicle", "flights", "spends", "the_tab"];
   /** @type {Map<string, boolean>} main-column ui_vis_main_* checked state when master goes off */
   const preservedMain = new Map();
   /** @type {Map<string, boolean>} sidebar widget checked state when a master gates it (e.g. add_stop, budget, checklist) */
   const preservedSidebar = new Map();
+  /** @type {boolean | null} Trip sections Group Expenses master when Expenses was turned off */
+  let preservedTheTabMaster = null;
 
   function masterCheckbox(key) {
     return form.querySelector(`input[type="checkbox"][data-vis-master="${key}"]`);
@@ -2804,6 +3426,57 @@ window.addEventListener("load", () => {
         hint.removeAttribute("hidden");
       }
     }
+  }
+
+  function applySpendsToTheTabMaster() {
+    const spendsOn = Boolean(masterCheckbox("spends")?.checked);
+    const tabM = masterCheckbox("the_tab");
+    if (!tabM) {
+      return;
+    }
+    if (!spendsOn) {
+      if (preservedTheTabMaster === null) {
+        preservedTheTabMaster = tabM.checked;
+      }
+      tabM.disabled = true;
+      tabM.checked = false;
+    } else {
+      tabM.disabled = false;
+      if (preservedTheTabMaster !== null) {
+        tabM.checked = preservedTheTabMaster;
+        preservedTheTabMaster = null;
+      }
+    }
+  }
+
+  function applyAddTabWidgetGate() {
+    const spendsOn = Boolean(masterCheckbox("spends")?.checked);
+    const tabOn = Boolean(masterCheckbox("the_tab")?.checked);
+    const ok = spendsOn && tabOn;
+    form.querySelectorAll('[data-add-tab-widget-gate="1"]').forEach((lab) => {
+      const cb = lab.querySelector('input[type="checkbox"][name^="ui_vis_sidebar_"]');
+      if (!cb) {
+        return;
+      }
+      const sk = (cb.getAttribute("name") || "").replace(/^ui_vis_sidebar_/, "");
+      if (!sk) {
+        return;
+      }
+      if (!ok) {
+        if (!preservedSidebar.has(sk)) {
+          preservedSidebar.set(sk, cb.checked);
+        }
+        cb.checked = false;
+        cb.disabled = true;
+        lab.classList.add("trip-settings-toggle-row--muted");
+      } else {
+        cb.disabled = false;
+        lab.classList.remove("trip-settings-toggle-row--muted");
+        if (preservedSidebar.has(sk)) {
+          cb.checked = preservedSidebar.get(sk);
+        }
+      }
+    });
   }
 
   function applySpendsGatedSidebar() {
@@ -2891,8 +3564,10 @@ window.addEventListener("load", () => {
   }
 
   function syncTripSectionMasters() {
+    applySpendsToTheTabMaster();
     MASTER_KEYS.forEach((k) => setMainColumnFromMaster(k));
     applySpendsGatedSidebar();
+    applyAddTabWidgetGate();
     applyItineraryGatedSidebar();
     applyChecklistGatedSidebar();
   }
@@ -2902,6 +3577,117 @@ window.addEventListener("load", () => {
   });
 
   syncTripSectionMasters();
+
+  (function initTripGuestsEditor() {
+    const seedEl = document.getElementById("trip-guests-seed");
+    const editorRoot = document.querySelector("[data-trip-guests-editor]");
+    const list = editorRoot?.querySelector("[data-trip-guests-list]");
+    const emptyEl = editorRoot?.querySelector("[data-trip-guests-empty]");
+    const patchField = editorRoot?.querySelector("[data-trip-guests-patch-field]");
+    const tpl = document.getElementById("trip-guest-row-template");
+    const input = editorRoot?.querySelector("[data-trip-guest-input]");
+    const addBtn = editorRoot?.querySelector("[data-trip-guest-add]");
+    if (!seedEl || !editorRoot || !list || !patchField || !(tpl instanceof HTMLTemplateElement)) {
+      return;
+    }
+
+    /** @type {Set<string>} */
+    const initialServerIds = new Set();
+
+    function readSeed() {
+      try {
+        const raw = seedEl.textContent?.trim() || "[]";
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function syncEmptyState() {
+      const has = Boolean(list.querySelector("[data-trip-guest-row]"));
+      if (emptyEl) {
+        emptyEl.toggleAttribute("hidden", has);
+      }
+    }
+
+    /**
+     * @param {string} name
+     * @param {string} [serverId]
+     */
+    function appendRow(name, serverId) {
+      const node = tpl.content.firstElementChild?.cloneNode(true);
+      if (!(node instanceof HTMLElement)) {
+        return;
+      }
+      if (serverId) {
+        node.setAttribute("data-server-guest-id", serverId);
+      }
+      const nameEl = node.querySelector("[data-guest-name]");
+      if (nameEl) {
+        nameEl.textContent = name;
+      }
+      node.querySelector("[data-trip-guest-remove]")?.addEventListener("click", () => {
+        node.remove();
+        syncEmptyState();
+      });
+      list.appendChild(node);
+      syncEmptyState();
+    }
+
+    const seed = readSeed();
+    for (const row of seed) {
+      if (row && row.id) {
+        initialServerIds.add(String(row.id));
+      }
+      if (row && row.name) {
+        appendRow(String(row.name), row.id ? String(row.id) : "");
+      }
+    }
+    syncEmptyState();
+
+    addBtn?.addEventListener("click", () => {
+      const name = (input?.value || "").trim();
+      if (!name || !input) {
+        return;
+      }
+      appendRow(name, "");
+      input.value = "";
+      input.focus();
+    });
+
+    input?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addBtn?.click();
+      }
+    });
+
+    form.addEventListener("submit", () => {
+      const rows = list.querySelectorAll("[data-trip-guest-row]");
+      const currentIds = new Set();
+      /** @type {string[]} */
+      const addNames = [];
+      rows.forEach((row) => {
+        if (!(row instanceof HTMLElement)) {
+          return;
+        }
+        const id = (row.getAttribute("data-server-guest-id") || "").trim();
+        const nameEl = row.querySelector("[data-guest-name]");
+        const name = (nameEl?.textContent || "").trim();
+        if (!name) {
+          return;
+        }
+        if (id) {
+          currentIds.add(id);
+        } else {
+          addNames.push(name);
+        }
+      });
+      const remove = [...initialServerIds].filter((sid) => !currentIds.has(sid));
+      patchField.value = JSON.stringify({ remove, add: addNames });
+    });
+  })();
 });
 
 (function initMobileProfileSheets() {
@@ -2943,6 +3729,55 @@ window.addEventListener("load", () => {
         el.close();
       }
     });
+  });
+})();
+
+(function initDashboardProfileMenu() {
+  const root = document.querySelector("[data-dashboard-profile-menu-root]");
+  if (!(root instanceof HTMLElement)) {
+    return;
+  }
+  const toggle = root.querySelector("[data-dashboard-profile-menu-toggle]");
+  const panel = root.querySelector(".dashboard-profile-menu__panel");
+  if (!(toggle instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) {
+    return;
+  }
+
+  const closeMenu = () => {
+    panel.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+  };
+  const openMenu = () => {
+    panel.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+  };
+  const toggleMenu = () => {
+    if (panel.hidden) {
+      openMenu();
+    } else {
+      closeMenu();
+    }
+  };
+
+  toggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleMenu();
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      return;
+    }
+    if (!root.contains(target)) {
+      closeMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeMenu();
+    }
   });
 })();
 
@@ -3001,18 +3836,28 @@ window.addEventListener("load", () => {
     prevBtn.addEventListener("click", () => go(-1));
     nextBtn.addEventListener("click", () => go(1));
 
-    const ro = new ResizeObserver(() => {
-      setSlideSize();
-    });
-    ro.observe(viewport);
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => {
+        setSlideSize();
+      });
+      ro.observe(viewport);
+    } else {
+      window.addEventListener("resize", setSlideSize);
+      window.addEventListener("orientationchange", setSlideSize);
+    }
 
     const mo = new MutationObserver(() => {
       syncHints();
     });
     mo.observe(track, { childList: true });
 
-    mq.addEventListener("change", syncHints);
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", syncHints);
+    } else if (typeof mq.addListener === "function") {
+      mq.addListener(syncHints);
+    }
     syncHints();
+    requestAnimationFrame(() => setSlideSize());
   }
 
   const boot = () => {
@@ -3023,4 +3868,1164 @@ window.addEventListener("load", () => {
   } else {
     boot();
   }
+})();
+
+(function initTabSplitRoots() {
+  function parseJSON(raw) {
+    if (raw == null || !String(raw).trim()) return { participants: [], weights: {} };
+    try {
+      return JSON.parse(String(raw));
+    } catch {
+      return { participants: [], weights: {} };
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function participantLabelForKey(root, key) {
+    for (const cb of root.querySelectorAll("[data-tab-participant-cb]")) {
+      if (cb.value === key) {
+        const lab = cb.closest("label");
+        if (!lab) {
+          return key;
+        }
+        const nameEl = lab.querySelector(".tab-split-bd-name");
+        if (nameEl) {
+          return nameEl.textContent.trim().replace(/\s+/g, " ");
+        }
+        return lab.textContent.trim().replace(/\s+/g, " ");
+      }
+    }
+    return key;
+  }
+
+  function currencySym(root) {
+    return (root.getAttribute("data-currency-symbol") || "$").trim() || "$";
+  }
+
+  /** Match Go trips.roundMoney */
+  function roundMoney(x) {
+    return Math.round(x * 100) / 100;
+  }
+
+  /** Match Go trips.fixRoundingDrift: add penny drift to lexicographically last participant key. */
+  function fixRoundingDriftAmounts(amounts, keys, target) {
+    const out = { ...amounts };
+    let sum = 0;
+    keys.forEach((k) => {
+      sum += out[k] || 0;
+    });
+    const drift = roundMoney(target - sum);
+    if (Math.abs(drift) < 0.001) {
+      return out;
+    }
+    const sorted = [...keys].sort();
+    const last = sorted[sorted.length - 1];
+    if (last) {
+      out[last] = roundMoney((out[last] || 0) + drift);
+    }
+    return out;
+  }
+
+  /** Dollar shares from percentages (same rounding as server SharesForExpense percent branch). */
+  function percentAmountsForKeys(total, keys, weights) {
+    /** @type {Record<string, number>} */
+    const raw = {};
+    keys.forEach((k) => {
+      const p = weights[k] || 0;
+      raw[k] = roundMoney((total * p) / 100);
+    });
+    return fixRoundingDriftAmounts(raw, keys, total);
+  }
+
+  /** Dollar shares from integer weights (same as Go TabSplitShares branch in SharesForExpense). */
+  function sharesAmountsForKeys(total, keys, weights) {
+    /** @type {Record<string, number>} */
+    const raw = {};
+    let totalW = 0;
+    keys.forEach((k) => {
+      const w = weights[k] || 0;
+      if (w > 0) {
+        totalW += w;
+      }
+    });
+    if (totalW <= 0) {
+      keys.forEach((k) => {
+        raw[k] = 0;
+      });
+      return fixRoundingDriftAmounts(raw, keys, total);
+    }
+    keys.forEach((k) => {
+      const w = weights[k] || 0;
+      raw[k] = roundMoney((total * w) / totalW);
+    });
+    return fixRoundingDriftAmounts(raw, keys, total);
+  }
+
+  /** Weights from the control set for the active split mode. */
+  function collectWeights(root) {
+    const mode = (root.querySelector("[data-tab-split-mode]")?.value || "equal").toLowerCase();
+    /** @type {Record<string, number>} */
+    const weights = {};
+    const parseNum = (v) => {
+      const n = parseFloat(String(v).replace(/,/g, ""));
+      return Number.isNaN(n) ? 0 : n;
+    };
+    if (mode === "exact") {
+      root.querySelectorAll("input.tab-exact-input[data-tab-weight-key]").forEach((inp) => {
+        const k = inp.getAttribute("data-tab-weight-key");
+        if (!k) return;
+        weights[k] = parseNum(inp.value);
+      });
+    } else if (mode === "percent") {
+      root.querySelectorAll("input.tab-percent-input[data-tab-weight-key]").forEach((inp) => {
+        const k = inp.getAttribute("data-tab-weight-key");
+        if (!k) return;
+        weights[k] = parseNum(inp.value);
+      });
+    } else if (mode === "shares") {
+      root.querySelectorAll("input.tab-share-count-input[data-tab-weight-key]").forEach((inp) => {
+        const k = inp.getAttribute("data-tab-weight-key");
+        if (!k) return;
+        const n = parseInt(String(inp.value).trim(), 10);
+        weights[k] = Number.isFinite(n) && n > 0 ? n : 0;
+      });
+    } else {
+      root.querySelectorAll("input.tab-split-weight-input[data-tab-weight-key]").forEach((inp) => {
+        const k = inp.getAttribute("data-tab-weight-key");
+        if (!k) return;
+        weights[k] = parseNum(inp.value);
+      });
+    }
+    return weights;
+  }
+
+  function percentSelectedSum(root) {
+    const keys = selectedKeys(root);
+    const w = collectWeights(root);
+    return keys.reduce((s, k) => s + (w[k] || 0), 0);
+  }
+
+  /** Aligns with server NormalizeTabSplitPayload percent tolerance (0.05). */
+  function percentMatches100(root) {
+    return Math.abs(percentSelectedSum(root) - 100) <= 0.05 + 1e-9;
+  }
+
+  function exactSelectedSum(root) {
+    const keys = selectedKeys(root);
+    const weights = collectWeights(root);
+    let sum = 0;
+    keys.forEach((k) => {
+      sum += weights[k] || 0;
+    });
+    return sum;
+  }
+
+  function exactSumsMatch(root) {
+    const total = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
+    const sum = exactSelectedSum(root);
+    return Math.abs(total - sum) < 0.005;
+  }
+
+  /** Selected participants must each have an integer share count ≥ 1 (matches server TabSplitShares validation). */
+  function sharesSplitValid(root) {
+    const keys = selectedKeys(root);
+    const w = collectWeights(root);
+    for (let i = 0; i < keys.length; i += 1) {
+      const x = w[keys[i]];
+      if (!(x >= 1) || !Number.isFinite(x)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function sharesAllocatedSumMatchesTotal(root) {
+    const total = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
+    const keys = selectedKeys(root);
+    if (keys.length === 0) {
+      return true;
+    }
+    if (!sharesSplitValid(root)) {
+      return false;
+    }
+    const w = collectWeights(root);
+    const amounts = sharesAmountsForKeys(total, keys, w);
+    let sum = 0;
+    keys.forEach((k) => {
+      sum += amounts[k] || 0;
+    });
+    return Math.abs(roundMoney(sum) - roundMoney(total)) < 0.005;
+  }
+
+  function applyExactSplitLayout(root, showExact) {
+    root.classList.toggle("tab-split-root--exact", showExact);
+    root.querySelectorAll("[data-tab-exact-field]").forEach((el) => {
+      el.classList.toggle("hidden", !showExact);
+      el.setAttribute("aria-hidden", showExact ? "false" : "true");
+    });
+    root.querySelectorAll("[data-tab-bd-readonly-trailing]").forEach((el) => {
+      el.classList.toggle("hidden", showExact);
+    });
+    root.querySelectorAll("input.tab-exact-input").forEach((inp) => {
+      inp.disabled = !showExact;
+    });
+    const foot = root.querySelector("[data-tab-exact-footer]");
+    if (foot) foot.classList.toggle("hidden", !showExact);
+  }
+
+  function updateExactSplitFooter(root) {
+    const mode = (root.querySelector("[data-tab-split-mode]")?.value || "equal").toLowerCase();
+    const remainingEl = root.querySelector("[data-tab-exact-remaining]");
+    const matchEl = root.querySelector("[data-tab-exact-match]");
+    if (!remainingEl || mode !== "exact") return;
+    const sym = currencySym(root);
+    const total = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
+    const sum = exactSelectedSum(root);
+    const remaining = total - sum;
+    let remText;
+    if (remaining < -0.005) {
+      remText = `-${sym}${(-remaining).toFixed(2)}`;
+    } else {
+      remText = `${sym}${remaining.toFixed(2)}`;
+    }
+    remainingEl.textContent = remText;
+    if (matchEl) {
+      const ok = Math.abs(remaining) < 0.005;
+      matchEl.classList.toggle("hidden", !ok);
+    }
+  }
+
+  function applyPercentSplitLayout(root, on) {
+    root.classList.toggle("tab-split-root--percent", on);
+    root.querySelectorAll("[data-tab-percent-field]").forEach((el) => {
+      el.classList.toggle("hidden", !on);
+      el.setAttribute("aria-hidden", on ? "false" : "true");
+    });
+    root.querySelectorAll("input.tab-percent-input").forEach((inp) => {
+      inp.disabled = !on;
+    });
+    const foot = root.querySelector("[data-tab-percent-footer]");
+    if (foot) foot.classList.toggle("hidden", !on);
+  }
+
+  function applySharesSplitLayout(root, on) {
+    root.classList.toggle("tab-split-root--shares", on);
+    root.querySelectorAll("[data-tab-shares-field]").forEach((el) => {
+      el.classList.toggle("hidden", !on);
+      el.setAttribute("aria-hidden", on ? "false" : "true");
+    });
+    root.querySelectorAll("input.tab-share-count-input").forEach((inp) => {
+      inp.disabled = !on;
+    });
+  }
+
+  function updatePercentFooter(root) {
+    const mode = (root.querySelector("[data-tab-split-mode]")?.value || "equal").toLowerCase();
+    const remEl = root.querySelector("[data-tab-percent-remaining]");
+    const matchEl = root.querySelector("[data-tab-percent-match]");
+    if (!remEl || mode !== "percent") return;
+    const sum = percentSelectedSum(root);
+    const rem = 100 - sum;
+    if (rem < -0.05) {
+      remEl.textContent = `${rem.toFixed(1)}%`;
+    } else if (rem > 0.05) {
+      remEl.textContent = `+${rem.toFixed(1)}%`;
+    } else {
+      remEl.textContent = "0.0%";
+    }
+    if (matchEl) {
+      matchEl.classList.toggle("hidden", !percentMatches100(root));
+    }
+  }
+
+  function hasPositiveTabAmount(root) {
+    const el = root.querySelector("[data-tab-amount-input]");
+    if (!(el instanceof HTMLInputElement)) {
+      return true;
+    }
+    const raw = String(el.value ?? "").trim();
+    if (raw === "") {
+      return false;
+    }
+    const n = parseFloat(raw);
+    return Number.isFinite(n) && n > 0;
+  }
+
+  /** Inline message when split is used without a valid positive amount (see data-tab-amount-warning). */
+  function updateTabSplitAmountWarning(root) {
+    const warn = root.querySelector("[data-tab-amount-warning]");
+    if (!(warn instanceof HTMLElement)) {
+      return;
+    }
+    if (hasPositiveTabAmount(root)) {
+      warn.classList.add("hidden");
+      return;
+    }
+    warn.classList.remove("hidden");
+  }
+
+  function refreshSplitSubmitState(root) {
+    const btn = root.querySelector(".tab-submit-btn");
+    if (!btn) return;
+    const mode = (root.querySelector("[data-tab-split-mode]")?.value || "equal").toLowerCase();
+    btn.removeAttribute("aria-disabled");
+    btn.removeAttribute("title");
+    const amtInp = root.querySelector("[data-tab-amount-input]");
+    if (amtInp instanceof HTMLInputElement && !hasPositiveTabAmount(root)) {
+      btn.disabled = true;
+      btn.setAttribute("aria-disabled", "true");
+      btn.setAttribute("title", "Enter a positive expense amount first.");
+      return;
+    }
+    const total = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
+
+    if (mode === "exact") {
+      const block = total > 0 && !exactSumsMatch(root);
+      btn.disabled = block;
+      if (block) {
+        btn.setAttribute("aria-disabled", "true");
+        btn.setAttribute("title", "Exact amounts must add up to the expense total.");
+      }
+      return;
+    }
+    if (mode === "percent") {
+      const block = total > 0 && !percentMatches100(root);
+      btn.disabled = block;
+      if (block) {
+        btn.setAttribute("aria-disabled", "true");
+        btn.setAttribute("title", "Percentages must add up to 100%.");
+      }
+      return;
+    }
+    if (mode === "shares") {
+      const block =
+        total > 0 &&
+        (selectedKeys(root).length === 0 || !sharesSplitValid(root) || !sharesAllocatedSumMatchesTotal(root));
+      btn.disabled = block;
+      if (block && total > 0) {
+        btn.setAttribute("aria-disabled", "true");
+        btn.setAttribute(
+          "title",
+          "Each selected person needs at least one share, and split totals must match the expense amount.",
+        );
+      }
+      return;
+    }
+    btn.disabled = false;
+  }
+
+  function renderSplitBreakdown(root) {
+    const sym = currencySym(root);
+    const amount = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
+    const mode = (root.querySelector("[data-tab-split-mode]")?.value || "equal").toLowerCase();
+    const keys = selectedKeys(root);
+    /** @type {Record<string, number>} */
+    const amounts = {};
+    const weights = collectWeights(root);
+    if (keys.length === 0) {
+      root.querySelectorAll("[data-tab-bd-amt]").forEach((el) => {
+        el.textContent = `${sym}0.00`;
+      });
+      root.querySelectorAll("[data-tab-bd-share-tag]").forEach((t) => {
+        t.textContent = "";
+        t.classList.add("hidden");
+      });
+      updateExactSplitFooter(root);
+      updatePercentFooter(root);
+      refreshSplitSubmitState(root);
+      return;
+    }
+    if (mode === "equal") {
+      const share = amount / keys.length;
+      keys.forEach((k) => {
+        amounts[k] = share;
+      });
+    } else if (mode === "exact") {
+      keys.forEach((k) => {
+        amounts[k] = weights[k] || 0;
+      });
+    } else if (mode === "percent") {
+      const fixed = percentAmountsForKeys(amount, keys, weights);
+      keys.forEach((k) => {
+        amounts[k] = fixed[k] || 0;
+      });
+    } else if (mode === "shares") {
+      const fixed = sharesAmountsForKeys(amount, keys, weights);
+      keys.forEach((k) => {
+        amounts[k] = fixed[k] || 0;
+      });
+    }
+    root.querySelectorAll("[data-tab-bd-amt]").forEach((el) => {
+      const k = el.getAttribute("data-tab-bd-amt") || "";
+      if (keys.includes(k)) {
+        el.textContent = `${sym}${(amounts[k] || 0).toFixed(2)}`;
+      } else {
+        el.textContent = `${sym}0.00`;
+      }
+    });
+    root.querySelectorAll("[data-tab-bd-share-tag]").forEach((t) => {
+      t.textContent = "";
+      t.classList.add("hidden");
+    });
+    updateExactSplitFooter(root);
+    updatePercentFooter(root);
+    refreshSplitSubmitState(root);
+  }
+
+  /** Sync split row role lines (Owner • Payer, etc.) with the paid-by select. */
+  function updateTabSplitRoleLines(root) {
+    const sel = root.querySelector("[data-tab-paid-by]");
+    const paidBy = (sel?.value || "").trim();
+    root.querySelectorAll("label.tab-split-breakdown-row[data-tab-split-row-key]").forEach((row) => {
+      const key = row.getAttribute("data-tab-split-row-key") || "";
+      const isGuest = row.getAttribute("data-tab-split-is-guest") === "1";
+      const isOwner = row.getAttribute("data-tab-split-is-owner") === "1";
+      const isYou = row.getAttribute("data-tab-split-is-you") === "1";
+      const isPayer = paidBy !== "" && paidBy === key;
+      const line = row.querySelector("[data-tab-bd-role-line]");
+      if (!line) return;
+      let base;
+      if (isGuest) {
+        base = "Guest";
+      } else if (isOwner) {
+        base = "Owner";
+      } else if (isYou) {
+        base = "Participant (You)";
+      } else {
+        base = "Participant";
+      }
+      line.textContent = isPayer ? `${base} • Payer` : base;
+      line.classList.toggle("tab-split-bd-role-line--owner-payer", Boolean(isPayer && isOwner && !isGuest));
+      row.classList.toggle("tab-split-breakdown-row--payer", Boolean(isPayer));
+    });
+  }
+
+  function wirePaidByChips(root) {
+    const sel = root.querySelector("[data-tab-paid-by]");
+    if (!sel) {
+      return;
+    }
+    const chips = root.querySelectorAll("[data-tab-paid-chip]");
+    function syncFromSelect() {
+      const v = sel.value;
+      chips.forEach((c) => {
+        c.classList.toggle("tab-paid-chip--active", c.value === v);
+      });
+      updateTabSplitRoleLines(root);
+    }
+    chips.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        sel.value = btn.value;
+        syncFromSelect();
+      });
+    });
+    sel.addEventListener("change", syncFromSelect);
+    syncFromSelect();
+  }
+
+  function selectedKeys(root) {
+    return Array.from(root.querySelectorAll("[data-tab-participant-cb]:checked")).map((cb) => cb.value);
+  }
+
+  function syncJSON(root) {
+    const keys = selectedKeys(root);
+    const raw = collectWeights(root);
+    const weights = {};
+    keys.forEach((k) => {
+      weights[k] = raw[k] || 0;
+    });
+    const payload = { participants: keys, weights };
+    const hid = root.querySelector("[data-tab-split-json]");
+    if (hid) hid.value = JSON.stringify(payload);
+  }
+
+  function syncWeightsUI(root, mode) {
+    root.classList.toggle("tab-split-root--equal", String(mode || "equal").toLowerCase() === "equal");
+    const box = root.querySelector("[data-tab-split-weights]");
+    if (!box) return;
+    const keys = selectedKeys(root);
+    const existing = {};
+    root.querySelectorAll("[data-tab-weight-key]").forEach((inp) => {
+      const k = inp.getAttribute("data-tab-weight-key");
+      if (k) existing[k] = inp.value;
+    });
+
+    if (mode === "equal") {
+      box.classList.add("hidden");
+      box.innerHTML = "";
+      applyExactSplitLayout(root, false);
+      applyPercentSplitLayout(root, false);
+      applySharesSplitLayout(root, false);
+      return;
+    }
+
+    if (mode === "exact") {
+      box.classList.add("hidden");
+      box.innerHTML = "";
+      applyPercentSplitLayout(root, false);
+      applySharesSplitLayout(root, false);
+      applyExactSplitLayout(root, true);
+      const amount = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
+      const hasAmount = amount > 0;
+      const per = keys.length ? amount / keys.length : 0;
+      root.querySelectorAll("input.tab-exact-input").forEach((inp) => {
+        const k = inp.getAttribute("data-tab-weight-key");
+        if (!k) return;
+        if (!keys.includes(k)) {
+          inp.value = "";
+          return;
+        }
+        const prev = existing[k];
+        if (hasAmount && prev != null && String(prev).trim() !== "") {
+          inp.value = prev;
+        } else {
+          inp.value = hasAmount ? per.toFixed(2) : "";
+        }
+      });
+      syncJSON(root);
+      updateExactSplitFooter(root);
+      refreshSplitSubmitState(root);
+      renderSplitBreakdown(root);
+      return;
+    }
+
+    if (mode === "percent") {
+      box.classList.add("hidden");
+      box.innerHTML = "";
+      applyExactSplitLayout(root, false);
+      applySharesSplitLayout(root, false);
+      applyPercentSplitLayout(root, true);
+      const n = keys.length;
+      const each = n > 0 ? 100 / n : 0;
+      root.querySelectorAll("input.tab-percent-input").forEach((inp) => {
+        const k = inp.getAttribute("data-tab-weight-key");
+        if (!k) return;
+        if (!keys.includes(k)) {
+          inp.value = "";
+          return;
+        }
+        const prev = existing[k];
+        if (prev != null && String(prev).trim() !== "") {
+          inp.value = prev;
+        } else {
+          inp.value = each > 0 ? each.toFixed(2) : "";
+        }
+      });
+      syncJSON(root);
+      updatePercentFooter(root);
+      refreshSplitSubmitState(root);
+      renderSplitBreakdown(root);
+      return;
+    }
+
+    if (mode === "shares") {
+      box.classList.add("hidden");
+      box.innerHTML = "";
+      applyExactSplitLayout(root, false);
+      applyPercentSplitLayout(root, false);
+      applySharesSplitLayout(root, true);
+      root.querySelectorAll("input.tab-share-count-input").forEach((inp) => {
+        const k = inp.getAttribute("data-tab-weight-key");
+        if (!k) return;
+        if (!keys.includes(k)) {
+          inp.value = "1";
+          return;
+        }
+        const prev = existing[k];
+        if (prev != null && String(prev).trim() !== "") {
+          const n = Math.floor(Math.abs(parseFloat(String(prev).replace(/,/g, ""))));
+          inp.value = n >= 1 ? String(n) : "1";
+        } else {
+          inp.value = "1";
+        }
+      });
+      syncJSON(root);
+      refreshSplitSubmitState(root);
+      renderSplitBreakdown(root);
+      return;
+    }
+
+    applyExactSplitLayout(root, false);
+    applyPercentSplitLayout(root, false);
+    applySharesSplitLayout(root, false);
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    renderSplitBreakdown(root);
+  }
+
+  function setMode(root, mode, skipSync) {
+    const m = (mode || "equal").toLowerCase();
+    root.querySelectorAll("[data-tab-split-mode-btn]").forEach((b) => {
+      b.classList.toggle("tab-split-mode-btn--active", b.getAttribute("data-tab-split-mode-btn") === m);
+    });
+    const hid = root.querySelector("[data-tab-split-mode]");
+    if (hid) hid.value = m;
+    const hint = root.querySelector("[data-tab-split-hint]");
+    if (hint) {
+      const hints = {
+        equal: "Split equally among selected people.",
+        exact: "Enter each person’s share in dollars (must add up to the expense total).",
+        percent: "Percentages should add up to 100%.",
+        shares: "Allocate costs using a proportional share system.",
+      };
+      hint.textContent = hints[m] || "";
+    }
+    syncWeightsUI(root, m);
+    renderSplitBreakdown(root);
+    if (!skipSync) syncJSON(root);
+    updateTabSplitAmountWarning(root);
+  }
+
+  function applyInitial(root) {
+    if (root.hasAttribute("data-initial-json")) {
+      const initMode = (root.getAttribute("data-initial-mode") || "equal").toLowerCase();
+      const initJson = parseJSON(root.getAttribute("data-initial-json"));
+      if (initJson.participants?.length) {
+        root.querySelectorAll("[data-tab-participant-cb]").forEach((cb) => {
+          cb.checked = initJson.participants.includes(cb.value);
+        });
+      } else {
+        root.querySelectorAll("[data-tab-participant-cb]").forEach((cb) => {
+          cb.checked = true;
+        });
+      }
+      setMode(root, initMode, true);
+      Object.entries(initJson.weights || {}).forEach(([k, v]) => {
+        const found = Array.from(root.querySelectorAll("[data-tab-weight-key]")).find(
+          (i) => i.getAttribute("data-tab-weight-key") === k,
+        );
+        if (!found) return;
+        if (found.matches("input.tab-share-count-input")) {
+          const n = Math.floor(Number(v));
+          found.value = Number.isFinite(n) && n >= 1 ? String(n) : "1";
+        } else {
+          found.value = v === 0 ? "" : String(v);
+        }
+      });
+      syncJSON(root);
+      return;
+    }
+    const tripDef = parseJSON(root.getAttribute("data-trip-default-json"));
+    const tripMode = (root.getAttribute("data-trip-default-mode") || "").trim().toLowerCase();
+    if (tripMode && tripDef.participants?.length) {
+      root.querySelectorAll("[data-tab-participant-cb]").forEach((cb) => {
+        cb.checked = tripDef.participants.includes(cb.value);
+      });
+      setMode(root, tripMode, true);
+      const allowSeedWeights = tripMode !== "exact" || hasPositiveTabAmount(root);
+      if (allowSeedWeights) {
+        Object.entries(tripDef.weights || {}).forEach(([k, v]) => {
+          const found = Array.from(root.querySelectorAll("[data-tab-weight-key]")).find(
+            (i) => i.getAttribute("data-tab-weight-key") === k,
+          );
+          if (!found) return;
+          if (found.matches("input.tab-share-count-input")) {
+            const n = Math.floor(Number(v));
+            found.value = Number.isFinite(n) && n >= 1 ? String(n) : "1";
+          } else {
+            found.value = v === 0 ? "" : String(v);
+          }
+        });
+      }
+      syncJSON(root);
+      return;
+    }
+    const equalBoot = parseJSON(root.getAttribute("data-equal-bootstrap"));
+    if (equalBoot.participants?.length) {
+      root.querySelectorAll("[data-tab-participant-cb]").forEach((cb) => {
+        cb.checked = equalBoot.participants.includes(cb.value);
+      });
+    }
+    setMode(root, "equal", false);
+  }
+
+  function setupRoot(root) {
+    if (root.dataset.tabSplitBound === "1") return;
+    root.dataset.tabSplitBound = "1";
+    root.querySelectorAll("[data-tab-split-mode-btn]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const next = btn.getAttribute("data-tab-split-mode-btn") || "equal";
+        setMode(root, next);
+        if (!hasPositiveTabAmount(root)) {
+          const amt = root.querySelector("[data-tab-amount-input]");
+          if (amt instanceof HTMLInputElement) {
+            amt.focus();
+          }
+        }
+      });
+    });
+    root.querySelectorAll("[data-tab-participant-cb]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const mode = root.querySelector("[data-tab-split-mode]")?.value || "equal";
+        syncWeightsUI(root, mode);
+        syncJSON(root);
+        renderSplitBreakdown(root);
+        updateTabSplitAmountWarning(root);
+      });
+    });
+    root.querySelector("[data-tab-amount-input]")?.addEventListener("input", () => {
+      syncJSON(root);
+      renderSplitBreakdown(root);
+      updateTabSplitAmountWarning(root);
+    });
+    root.addEventListener("input", (ev) => {
+      const t = ev.target;
+      if (
+        t instanceof HTMLInputElement &&
+        (t.matches("input.tab-exact-input[data-tab-weight-key]") ||
+          t.matches("input.tab-percent-input[data-tab-weight-key]") ||
+          t.matches("input.tab-share-count-input[data-tab-weight-key]"))
+      ) {
+        if (t.matches("input.tab-share-count-input[data-tab-weight-key]")) {
+          let n = parseInt(String(t.value).trim(), 10);
+          if (!Number.isFinite(n) || n < 1) {
+            n = 1;
+          }
+          if (String(t.value) !== String(n)) {
+            t.value = String(n);
+          }
+        }
+        syncJSON(root);
+        renderSplitBreakdown(root);
+      }
+    });
+    root.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (!(t instanceof Element)) return;
+      const dec = t.closest("[data-tab-share-dec]");
+      const inc = t.closest("[data-tab-share-inc]");
+      if (!dec && !inc) return;
+      const stepper = (dec || inc).closest(".tab-share-stepper");
+      const inp = stepper?.querySelector("input.tab-share-count-input[data-tab-weight-key]");
+      if (!(inp instanceof HTMLInputElement)) return;
+      let n = parseInt(String(inp.value).trim(), 10);
+      if (!Number.isFinite(n) || n < 1) n = 1;
+      if (dec) n = Math.max(1, n - 1);
+      else n = n + 1;
+      inp.value = String(n);
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    root.querySelector("form")?.addEventListener("submit", (e) => {
+      if (!hasPositiveTabAmount(root)) {
+        e.preventDefault();
+        updateTabSplitAmountWarning(root);
+        const amt = root.querySelector("[data-tab-amount-input]");
+        if (amt instanceof HTMLInputElement) {
+          amt.focus();
+        }
+        return;
+      }
+      syncJSON(root);
+      const mode = (root.querySelector("[data-tab-split-mode]")?.value || "equal").toLowerCase();
+      if (mode === "exact" && !exactSumsMatch(root)) {
+        e.preventDefault();
+        updateExactSplitFooter(root);
+        refreshSplitSubmitState(root);
+      }
+      if (mode === "percent" && !percentMatches100(root)) {
+        e.preventDefault();
+        updatePercentFooter(root);
+        refreshSplitSubmitState(root);
+      }
+      const amt = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
+      if (
+        mode === "shares" &&
+        amt > 0 &&
+        (selectedKeys(root).length === 0 || !sharesSplitValid(root) || !sharesAllocatedSumMatchesTotal(root))
+      ) {
+        e.preventDefault();
+        refreshSplitSubmitState(root);
+      }
+    });
+    applyInitial(root);
+    wirePaidByChips(root);
+    renderSplitBreakdown(root);
+    updateTabSplitAmountWarning(root);
+  }
+
+  const boot = () => {
+    document.querySelectorAll("[data-tab-split-root]").forEach(setupRoot);
+  };
+  window.setupTabSplitRootsIn = (container) => {
+    if (!container) return;
+    container.querySelectorAll("[data-tab-split-root]").forEach((root) => {
+      if (root.dataset.tabSplitBound === "1") return;
+      setupRoot(root);
+    });
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else {
+    boot();
+  }
+})();
+
+(function initTabExpenseInstantFilter() {
+  const norm = (s) => String(s || "").trim().toLowerCase();
+
+  function apply() {
+    const section = document.querySelector("[data-tab-expenses-section]");
+    if (!section) return;
+    const input = section.querySelector("[data-tab-exp-filter-input]");
+    const catSelect = section.querySelector("[data-tab-exp-filter-category]");
+    const q = norm(input?.value);
+    const catVal = norm(catSelect?.value);
+    const isListView =
+      typeof window.matchMedia === "function"
+        ? !window.matchMedia("(max-width: 920px)").matches
+        : true;
+    const rows = section.querySelectorAll("tr.tab-expense-row");
+    const cards = section.querySelectorAll(".tab-exp-grid-card");
+    const emptyEl = section.querySelector("[data-tab-exp-client-empty]");
+
+    rows.forEach((tr) => {
+      const hay = norm(tr.getAttribute("data-tab-exp-search"));
+      const rowCat = norm(tr.getAttribute("data-tab-exp-category"));
+      const qMatch = !q || hay.includes(q);
+      const catMatch = !catVal || rowCat === catVal;
+      const match = qMatch && catMatch;
+      tr.classList.toggle("tab-exp-filter-hidden", !match);
+      const id = tr.getAttribute("data-tab-tx-view");
+      const editRow = id
+        ? section.querySelector(`tr.tab-expense-edit-row[data-tab-edit-for="${CSS.escape(id)}"]`)
+        : null;
+      if (editRow) {
+        editRow.classList.toggle("tab-exp-filter-hidden", !match);
+      }
+    });
+
+    cards.forEach((card) => {
+      const hay = norm(card.getAttribute("data-tab-exp-search"));
+      const rowCat = norm(card.getAttribute("data-tab-exp-category"));
+      const qMatch = !q || hay.includes(q);
+      const catMatch = !catVal || rowCat === catVal;
+      const match = qMatch && catMatch;
+      card.classList.toggle("tab-exp-filter-hidden", !match);
+    });
+
+    let anyVisible = false;
+    if (isListView) {
+      rows.forEach((tr) => {
+        if (!tr.classList.contains("tab-exp-filter-hidden")) anyVisible = true;
+      });
+    } else {
+      cards.forEach((card) => {
+        if (!card.classList.contains("tab-exp-filter-hidden")) anyVisible = true;
+      });
+    }
+
+    if (emptyEl) {
+      const count = isListView ? rows.length : cards.length;
+      const filtersActive = Boolean(q || catVal);
+      const showEmpty = Boolean(filtersActive && count > 0 && !anyVisible);
+      emptyEl.classList.toggle("hidden", !showEmpty);
+    }
+  }
+
+  function wire() {
+    const section = document.querySelector("[data-tab-expenses-section]");
+    if (!section || section.dataset.remiTabExpFilterWired === "1") return;
+    section.dataset.remiTabExpFilterWired = "1";
+    const input = section.querySelector("[data-tab-exp-filter-input]");
+    const catSelect = section.querySelector("[data-tab-exp-filter-category]");
+    const form = section.querySelector("[data-tab-exp-filter-form]");
+    input?.addEventListener("input", () => apply());
+    input?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") e.preventDefault();
+    });
+    catSelect?.addEventListener("change", () => apply());
+    form?.addEventListener("submit", (e) => {
+      e.preventDefault();
+    });
+    apply();
+    const mq = window.matchMedia?.("(max-width: 920px)");
+    if (mq?.addEventListener) {
+      mq.addEventListener("change", () => apply());
+    } else if (mq?.addListener) {
+      mq.addListener(() => apply());
+    }
+  }
+
+  window.remiSyncTabExpenseInstantFilter = apply;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", wire, { once: true });
+  } else {
+    wire();
+  }
+})();
+
+const TAB_OVER_TIME_PAGE_SIZE = 7;
+
+/** When opening Group Expenses via #add-group-expense (or legacy #add-tab), scroll to Log new expense after layout. */
+function scrollToTabLogExpenseFromHash() {
+  if (!document.body.classList.contains("page-the-tab")) return;
+  const h = (window.location.hash || "").trim().toLowerCase();
+  if (h !== "#add-tab" && h !== "#add-group-expense") return;
+  const el = document.getElementById("add-group-expense") || document.getElementById("add-tab");
+  if (!el) return;
+  const go = () => {
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => requestAnimationFrame(go));
+  } else {
+    setTimeout(go, 50);
+  }
+}
+
+function initTabOverTimeChart() {
+  const canvas = document.getElementById("tab-chart-over-time");
+  const dataEl = document.getElementById("tab-over-time-data");
+  const carousel = document.querySelector("[data-tab-over-time-carousel]");
+  if (!canvas || !dataEl || typeof Chart === "undefined") {
+    return;
+  }
+  /** @type {Array<{label?: string, date?: string, amount?: number}>} */
+  let points = [];
+  try {
+    points = JSON.parse(dataEl.textContent?.trim() || "[]");
+  } catch {
+    points = [];
+  }
+  const emptyEl = document.querySelector('[data-tab-chart-empty="over-time"]');
+  if (!Array.isArray(points) || points.length === 0) {
+    canvas.classList.add("hidden");
+    emptyEl?.classList.remove("hidden");
+    carousel?.classList.add("hidden");
+    return;
+  }
+  emptyEl?.classList.add("hidden");
+  canvas.classList.remove("hidden");
+  carousel?.classList.remove("hidden");
+
+  const prevBtn = carousel?.querySelector("[data-tab-over-time-prev]");
+  const nextBtn = carousel?.querySelector("[data-tab-over-time-next]");
+
+  const existing = Chart.getChart(canvas);
+  if (existing) {
+    existing.destroy();
+  }
+
+  const dark = document.documentElement.classList.contains("theme-dark");
+  const lineColor = dark ? "#5eead4" : "#0f766e";
+  const fillTop = dark ? "rgba(94, 234, 212, 0.35)" : "rgba(15, 118, 110, 0.2)";
+  const fillBot = dark ? "rgba(94, 234, 212, 0.02)" : "rgba(15, 118, 110, 0.02)";
+  const gridColor = dark ? "rgba(255,255,255,0.08)" : "rgba(15, 23, 42, 0.08)";
+  const tickColor = dark ? "rgba(226,232,240,0.55)" : "rgba(100,116,139,0.9)";
+
+  const totalPages = Math.max(1, Math.ceil(points.length / TAB_OVER_TIME_PAGE_SIZE));
+  const state = { page: 0, chunk: /** @type {typeof points} */ ([]) };
+
+  function sliceForPage() {
+    const start = state.page * TAB_OVER_TIME_PAGE_SIZE;
+    return points.slice(start, start + TAB_OVER_TIME_PAGE_SIZE);
+  }
+
+  function syncNav() {
+    const multi = totalPages > 1;
+    if (carousel) {
+      carousel.classList.toggle("mobile-entry-carousel--single", !multi);
+    }
+    if (prevBtn instanceof HTMLButtonElement) {
+      prevBtn.disabled = state.page <= 0;
+      prevBtn.toggleAttribute("hidden", !multi);
+    }
+    if (nextBtn instanceof HTMLButtonElement) {
+      nextBtn.disabled = state.page >= totalPages - 1;
+      nextBtn.toggleAttribute("hidden", !multi);
+    }
+  }
+
+  function draw() {
+    state.chunk = sliceForPage();
+    const labels = state.chunk.map((p) => p.label || "");
+    const data = state.chunk.map((p) => (typeof p.amount === "number" ? p.amount : 0));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
+    grad.addColorStop(0, fillTop);
+    grad.addColorStop(1, fillBot);
+
+    const old = Chart.getChart(canvas);
+    if (old) {
+      old.destroy();
+    }
+
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            data,
+            borderColor: lineColor,
+            backgroundColor: grad,
+            fill: true,
+            tension: 0.35,
+            borderWidth: 3,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title(items) {
+                const i = items[0]?.dataIndex;
+                if (typeof i !== "number") return "";
+                const d = state.chunk[i]?.date;
+                return (d && String(d)) || state.chunk[i]?.label || "";
+              },
+              label(ctx2) {
+                const v = ctx2.parsed.y;
+                return typeof v === "number" ? v.toFixed(2) : "";
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { color: gridColor },
+            ticks: {
+              color: tickColor,
+              maxRotation: 45,
+              minRotation: 0,
+              autoSkip: false,
+              maxTicksLimit: TAB_OVER_TIME_PAGE_SIZE + 1,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: gridColor },
+            ticks: { color: tickColor },
+          },
+        },
+      },
+    });
+  }
+
+  state.page = 0;
+  draw();
+  syncNav();
+
+  if (prevBtn instanceof HTMLButtonElement) {
+    prevBtn.onclick = () => {
+      if (state.page > 0) {
+        state.page -= 1;
+        draw();
+        syncNav();
+      }
+    };
+  }
+  if (nextBtn instanceof HTMLButtonElement) {
+    nextBtn.onclick = () => {
+      if (state.page < totalPages - 1) {
+        state.page += 1;
+        draw();
+        syncNav();
+      }
+    };
+  }
+}
+
+(function bootTabOverTimeChart() {
+  initTabOverTimeChart();
+  window.reinitTabOverTimeChart = () => {
+    const canvas = document.getElementById("tab-chart-over-time");
+    if (canvas && typeof Chart !== "undefined") {
+      const ch = Chart.getChart(canvas);
+      if (ch) ch.destroy();
+    }
+    initTabOverTimeChart();
+    scrollToTabLogExpenseFromHash();
+  };
+  if (document.body.classList.contains("page-the-tab")) {
+    window.addEventListener("hashchange", scrollToTabLogExpenseFromHash);
+    if (document.readyState === "complete") {
+      scrollToTabLogExpenseFromHash();
+    } else {
+      window.addEventListener("load", () => scrollToTabLogExpenseFromHash(), { once: true });
+    }
+  }
+})();
+
+(function initTabBalanceViewToggle() {
+  const main = document.querySelector("main.tab-page");
+  if (!main) return;
+  main.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-tab-balance-view-btn]");
+    if (!btn || !main.contains(btn)) return;
+    const section = btn.closest("[data-tab-balances-section]");
+    if (!section) return;
+    const view = btn.getAttribute("data-tab-balance-view-btn");
+    if (view !== "net" && view !== "debts") return;
+    const isDebts = view === "debts";
+    const panelNet = section.querySelector('[data-tab-balance-panel="net"]');
+    const panelDebts = section.querySelector('[data-tab-balance-panel="debts"]');
+    const badge = section.querySelector("[data-tab-balance-pending-badge]");
+    const formField = main.querySelector("input[data-tab-balance-form-field]");
+    section.querySelectorAll("[data-tab-balance-view-btn]").forEach((b) => {
+      const v = b.getAttribute("data-tab-balance-view-btn");
+      const on = (v === "debts") === isDebts;
+      b.classList.toggle("tab-balance-toggle-btn--active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    panelNet?.classList.toggle("hidden", isDebts);
+    panelDebts?.classList.toggle("hidden", !isDebts);
+    badge?.classList.toggle("hidden", !isDebts);
+    if (formField instanceof HTMLInputElement) {
+      formField.disabled = !isDebts;
+      formField.value = isDebts ? "debts" : "";
+    }
+    try {
+      const u = new URL(window.location.href);
+      if (isDebts) {
+        u.searchParams.set("balance_view", "debts");
+      } else {
+        u.searchParams.delete("balance_view");
+      }
+      const qs = u.searchParams.toString();
+      window.history.replaceState(null, "", u.pathname + (qs ? `?${qs}` : "") + u.hash);
+    } catch {
+      /* ignore */
+    }
+  });
+})();
+
+(function initTabSimplifySettleFill() {
+  const main = document.querySelector("main.tab-page");
+  if (!main) return;
+  main.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-tab-settle-payer][data-tab-settle-payee]");
+    if (!btn || !main.contains(btn)) return;
+    const form = document.querySelector("[data-tab-settlement-form]");
+    if (!(form instanceof HTMLFormElement)) return;
+    const payerSel = form.querySelector('select[name="payer_user_id"]');
+    const payeeSel = form.querySelector('select[name="payee_user_id"]');
+    const amountInp = form.querySelector('input[name="amount"]');
+    const pKey = btn.getAttribute("data-tab-settle-payer") || "";
+    const eKey = btn.getAttribute("data-tab-settle-payee") || "";
+    const amt = btn.getAttribute("data-tab-settle-amount") || "";
+    if (!(payerSel instanceof HTMLSelectElement) || !(payeeSel instanceof HTMLSelectElement)) return;
+    if (Array.from(payerSel.options).some((o) => o.value === pKey)) payerSel.value = pKey;
+    if (Array.from(payeeSel.options).some((o) => o.value === eKey)) payeeSel.value = eKey;
+    if (amountInp instanceof HTMLInputElement) amountInp.value = amt;
+    document.getElementById("record-settlement")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    payerSel.focus();
+  });
 })();

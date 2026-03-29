@@ -1,14 +1,18 @@
 ---
-description: REMI Trip Planner — mandatory rebuild and restart on port 4122 after changes
+description: REMI Trip Planner — always restart local server on 4122 after code changes
 globs: "**/REMI Trip Planner/**"
 alwaysApply: true
 ---
 
-# Server on port 4122 — mandatory after changes
+# Server on port 4122 — restart after every change
 
-The user **always** wants the REMI Trip Planner server **rebuilt and restarted on `:4122`** after any agent-made changes that affect the app (Go under `cmd/` or `internal/`, `web/templates`, `web/static`, `migrations`, `go.mod`).
+**Standing user preference:** Whenever you modify this project (any code, templates, CSS, JS, or `go.mod`), **rebuild and restart the server on `127.0.0.1:4122` before you finish the turn** — not only on request. Treat this as part of “done” for the task.
 
-**Do this at the end of the task** unless the user explicitly says not to restart, or they are running **`air`** / `dev-watch` (hot reload) and you know it is already rebuilding for them.
+Applies to: Go (`cmd/`, `internal/`, …), `web/templates`, `web/static`, `migrations`, config that affects runtime.
+
+**Exceptions:** User explicitly says not to restart; or they are running **`air`** / `dev-watch` and you confirm it is already rebuilding. If unsure, restart anyway.
+
+**Do not** end with “restart it yourself” after you changed files — **run the restart** (or delegate to a one-line background `go run` after freeing the port).
 
 ## Windows (PowerShell)
 
@@ -17,9 +21,9 @@ From the **`REMI Trip Planner`** directory (module root with `go.mod`):
 ```powershell
 $p = Get-NetTCPConnection -LocalPort 4122 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess
 if ($p) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }
-go build -o remi-server.exe ./cmd/server/
-$env:APP_ADDR = ":4122"
-Start-Process -FilePath ".\remi-server.exe" -WorkingDirectory (Get-Location) -WindowStyle Hidden
+go build -o bin/remi-server.exe ./cmd/server
+$env:APP_ADDR = "127.0.0.1:4122"
+Start-Process -FilePath ".\bin\remi-server.exe" -WorkingDirectory (Get-Location) -WindowStyle Hidden
 ```
 
 Confirm listen: `netstat -ano | findstr ":4122"` (or `Get-NetTCPConnection -LocalPort 4122`).
@@ -29,4 +33,4 @@ Confirm listen: `netstat -ano | findstr ":4122"` (or `Get-NetTCPConnection -Loca
 - End with “run it yourself” when you changed code — **run the restart** (unless `air` is handling it).
 - Skip restart after template/CSS/JS-only edits — the running binary may not need rebuild, but **restarting** still picks up static files from disk; **rebuild** when Go changed.
 
-Docker deploy (`docker compose`) is optional; the user’s standing preference for local dev is **native `go build` + `APP_ADDR=:4122`**.
+Docker deploy (`docker compose`) is optional; the user’s standing preference for local dev is **native `go build` + `APP_ADDR=127.0.0.1:4122`** (use `APP_ADDR=:4122` only if they need LAN access).

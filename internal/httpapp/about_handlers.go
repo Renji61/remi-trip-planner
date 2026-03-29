@@ -35,6 +35,9 @@ func (a *app) mergeDashboardShell(ctx context.Context, userID, navActive, sideba
 	data["SidebarInProgressTrips"] = tr
 	data["SidebarTripID"] = sidebarTripID
 	data["TripID"] = sidebarTripID
+	if strings.TrimSpace(userID) != "" {
+		data["CurrentUser"] = CurrentUser(ctx)
+	}
 	return nil
 }
 
@@ -97,7 +100,7 @@ func filterDashboardSidebarTrips(list []trips.Trip, now time.Time, max int) []si
 		out = append(out, sidebarInProgressTrip{
 			ID:        t.ID,
 			Name:      t.Name,
-			DateRange: formatTripDateShortRange(t.StartDate, t.EndDate),
+			DateRange: formatTripDateShortForTrip(t, t.StartDate, t.EndDate),
 		})
 	}
 	return out

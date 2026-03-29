@@ -42,40 +42,6 @@ func tripForbiddenOrMissing(err error) bool {
 	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, trips.ErrTripAccessDenied)
 }
 
-// geocodeLocation calls the Nominatim API to resolve a location string into
-// geographic coordinates. Returns (0, 0) silently when geocoding fails so that
-// callers can treat missing coordinates gracefully.
-func geocodeLocation(ctx context.Context, query string) (lat, lng float64) {
-	if query == "" {
-		return 0, 0
-	}
-	reqURL := fmt.Sprintf(
-		"https://nominatim.openstreetmap.org/search?q=%s&format=jsonv2&limit=1",
-		url.QueryEscape(query),
-	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return 0, 0
-	}
-	req.Header.Set("User-Agent", "REMI-Trip-Planner/1.0")
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, 0
-	}
-	defer resp.Body.Close()
-	var results []struct {
-		Lat string `json:"lat"`
-		Lon string `json:"lon"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil || len(results) == 0 {
-		return 0, 0
-	}
-	lat, _ = strconv.ParseFloat(results[0].Lat, 64)
-	lng, _ = strconv.ParseFloat(results[0].Lon, 64)
-	return lat, lng
-}
-
 func parseMapCoord(s string) (v float64, ok bool) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
@@ -85,7 +51,7 @@ func parseMapCoord(s string) (v float64, ok bool) {
 }
 
 // applyMapDefaultPlaceFromForm sets app map defaults from POST: short place label + hidden lat/lng, or Tokyo when empty; geocodes when label set but coords missing.
-func applyMapDefaultPlaceFromForm(ctx context.Context, app *trips.AppSettings, r *http.Request) {
+func applyMapDefaultPlaceFromForm(ctx context.Context, googleMapsAPIKey string, app *trips.AppSettings, r *http.Request) {
 	placeLabel := strings.TrimSpace(r.FormValue("map_default_place_label"))
 	lat, latOK := parseMapCoord(r.FormValue("map_default_latitude"))
 	lng, lngOK := parseMapCoord(r.FormValue("map_default_longitude"))
@@ -102,7 +68,7 @@ func applyMapDefaultPlaceFromForm(ctx context.Context, app *trips.AppSettings, r
 		app.MapDefaultLongitude = lng
 		return
 	}
-	gLat, gLng := geocodeLocation(ctx, placeLabel)
+	gLat, gLng := geocodeCoords(ctx, placeLabel, googleMapsAPIKey)
 	if gLat == 0 && gLng == 0 {
 		app.MapDefaultPlaceLabel = trips.DefaultMapPlaceLabel
 		app.MapDefaultLatitude = trips.DefaultMapLatitude
@@ -182,6 +148,17 @@ type budgetCategoryGroupView struct {
 	DonutDashOffset int
 }
 
+// budgetSpendsDescription is the expenses (budget) table Description column: title when set, else notes.
+func budgetSpendsDescription(e trips.Expense) string {
+	if t := strings.TrimSpace(e.Title); t != "" {
+		return t
+	}
+	if n := strings.TrimSpace(e.Notes); n != "" {
+		return n
+	}
+	return "—"
+}
+
 type budgetTransactionRowView struct {
 	ExpenseID     string
 	DateLabel     string
@@ -189,11 +166,14 @@ type budgetTransactionRowView struct {
 	CategoryIcon  string
 	CategoryStyle string
 	Description   string
+	TitleRaw      string
 	Method        string
 	Amount        float64
 	SpentOn       string
 	NotesRaw      string
 	LodgingID     string
+	ReceiptPath   string
+	FromTab       bool
 	VehicleLocked bool
 	FlightLocked  bool
 	CanEdit       bool
@@ -210,6 +190,36 @@ func noStoreNonStaticGET(next http.Handler) http.Handler {
 	})
 }
 
+// securityHeaders adds baseline browser hardening headers for all responses.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// redirectLegacyTripGETPath issues a permanent redirect from /trips/{id}/{from}/… to /trips/{id}/{to}/… (query preserved).
+func redirectLegacyTripGETPath(w http.ResponseWriter, r *http.Request, tripID, fromSeg, toSeg string) {
+	prefix := "/trips/" + tripID + "/" + fromSeg
+	suffix := strings.TrimPrefix(r.URL.Path, prefix)
+	dest := "/trips/" + tripID + "/" + toSeg + suffix
+	if q := r.URL.RawQuery; q != "" {
+		dest += "?" + q
+	}
+	http.Redirect(w, r, dest, http.StatusMovedPermanently)
+}
+
+func (a *app) redirectLegacyBudgetToExpenses(w http.ResponseWriter, r *http.Request) {
+	redirectLegacyTripGETPath(w, r, chi.URLParam(r, "tripID"), "budget", "expenses")
+}
+
+func (a *app) redirectLegacyTabToGroupExpenses(w http.ResponseWriter, r *http.Request) {
+	redirectLegacyTripGETPath(w, r, chi.URLParam(r, "tripID"), "tab", "group-expenses")
+}
+
 func NewRouter(deps Dependencies) http.Handler {
 	tmpl := template.Must(
 		template.New("").
@@ -217,9 +227,9 @@ func NewRouter(deps Dependencies) http.Handler {
 				"formatDateTime":       formatDateTimeDisplay,
 				"formatTripDateTime":   formatTripDateTime,
 				"formatTripClock":      formatTripClock,
-				"formatUIDate":         formatUIDate,
-				"formatTripDateRange":  formatTripDateRangeEn,
-				"formatTripDateShort":  formatTripDateShortRange,
+				"formatTripUIDate":     formatTripUIDate,
+				"formatTripDateRange":  formatTripDateRange,
+				"formatTripDateShort":  formatTripDateShort,
 				"formatTripMoney":      formatTripMoney,
 				"expenseCategoryStyle": expenseCategoryStyle,
 				"expenseCategoryIcon":  expenseCategoryIcon,
@@ -242,12 +252,17 @@ func NewRouter(deps Dependencies) http.Handler {
 						return trip.UIShowFlights
 					case trips.MainSectionSpends:
 						return trip.UIShowSpends
+					case trips.MainSectionTheTab:
+						return trip.SectionEnabledTheTab()
 					default:
 						return true
 					}
 				},
 				"sidebarWidgetVisible": func(key string, trip trips.Trip) bool {
 					return trips.SidebarWidgetVisible(key, trip)
+				},
+				"effectiveDistanceUnit": func(trip trips.Trip, settings trips.AppSettings) string {
+					return trips.EffectiveDistanceUnit(&trip, settings)
 				},
 				"tripMainSectionLabel":            trips.MainSectionLabel,
 				"tripSidebarWidgetLabel":          trips.SidebarWidgetLabel,
@@ -275,6 +290,86 @@ func NewRouter(deps Dependencies) http.Handler {
 					return "/" + s
 				},
 				"sub": func(a, b int) int { return a - b },
+				"add": func(a, b int) int { return a + b },
+				"dict": func(values ...any) (map[string]any, error) {
+					if len(values)%2 != 0 {
+						return nil, fmt.Errorf("dict: expected even number of arguments")
+					}
+					m := make(map[string]any, len(values)/2)
+					for i := 0; i < len(values); i += 2 {
+						k, ok := values[i].(string)
+						if !ok {
+							return nil, fmt.Errorf("dict: key at %d must be string", i)
+						}
+						m[k] = values[i+1]
+					}
+					return m, nil
+				},
+				"tabEffectivePaidBy": func(e trips.Expense, ownerID string) string {
+					return trips.EffectivePaidBy(e, ownerID)
+				},
+				"tabSettlementParticipantKey": trips.TabSettlementParticipantKey,
+				"tabPayerThumb":               tabPayerThumb,
+				"tabAvatarURL": func(s string) string {
+					s = strings.TrimSpace(s)
+					if s == "" {
+						return ""
+					}
+					if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+						return s
+					}
+					if strings.HasPrefix(s, "/") {
+						return s
+					}
+					return "/" + s
+				},
+				"tabSplitMethodBadgeClass": func(mode string) string {
+					switch strings.ToLower(strings.TrimSpace(mode)) {
+					case trips.TabSplitEqual, "":
+						return "tab-split-method-badge--equal"
+					default:
+						return "tab-split-method-badge--neutral"
+					}
+				},
+				"guestInitial": trips.GuestInitialFromDisplayName,
+				"mod": func(a, b int) int {
+					if b == 0 {
+						return 0
+					}
+					return a % b
+				},
+				"tabTabQueryString": func(balanceView, q, tabCat string) string {
+					v := url.Values{}
+					bv := strings.ToLower(strings.TrimSpace(balanceView))
+					if bv == "debts" {
+						v.Set("balance_view", "debts")
+					}
+					if strings.TrimSpace(q) != "" {
+						v.Set("q", strings.TrimSpace(q))
+					}
+					if strings.TrimSpace(tabCat) != "" {
+						v.Set("tab_cat", strings.TrimSpace(tabCat))
+					}
+					s := v.Encode()
+					if s == "" {
+						return ""
+					}
+					return "?" + s
+				},
+				"tabSplitModeShort": func(mode string) string {
+					switch strings.ToLower(strings.TrimSpace(mode)) {
+					case trips.TabSplitEqual, "":
+						return "Equal"
+					case trips.TabSplitExact:
+						return "Exact"
+					case trips.TabSplitPercent:
+						return "Percent"
+					case trips.TabSplitShares:
+						return "Shares"
+					default:
+						return mode
+					}
+				},
 			}).
 			ParseGlob("web/templates/*.html"),
 	)
@@ -290,6 +385,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Heartbeat("/healthz"))
+	r.Use(securityHeaders)
 	r.Use(noStoreNonStaticGET)
 	r.Use(a.withSession)
 
@@ -318,6 +414,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/settings", a.saveSettings)
 		r.Post("/settings/reset-all", a.resetAllSiteSettings)
 		r.Post("/settings/theme", a.saveThemeQuick)
+		r.Get("/api/location/suggest", a.apiLocationSuggest)
+		r.Get("/api/location/geocode", a.apiLocationGeocode)
 		r.Post("/trips", a.createTrip)
 
 		r.Route("/trips/{tripID}", func(r chi.Router) {
@@ -325,9 +423,18 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Get("/", a.tripPage)
 			r.Get("/settings", a.tripSettingsPage)
 			r.Post("/reset-ui", a.resetTripUIPresets)
-			r.Get("/budget", a.budgetPage)
-			r.Get("/budget/transactions", a.budgetTransactionsRows)
-			r.Get("/budget/export", a.exportBudgetReport)
+			r.Get("/expenses", a.budgetPage)
+			r.Get("/expenses/transactions", a.budgetTransactionsRows)
+			r.Get("/expenses/export", a.exportBudgetReport)
+			r.Get("/group-expenses", a.theTabPage)
+			r.Get("/group-expenses/expenses-more", a.tabExpensesLoadMore)
+			r.Get("/group-expenses/settlements-more", a.tabSettlementsLoadMore)
+			r.Get("/budget", a.redirectLegacyBudgetToExpenses)
+			r.Get("/budget/transactions", a.redirectLegacyBudgetToExpenses)
+			r.Get("/budget/export", a.redirectLegacyBudgetToExpenses)
+			r.Get("/tab", a.redirectLegacyTabToGroupExpenses)
+			r.Get("/tab/expenses-more", a.redirectLegacyTabToGroupExpenses)
+			r.Get("/tab/settlements-more", a.redirectLegacyTabToGroupExpenses)
 			r.Post("/update", a.updateTrip)
 			r.Post("/archive", a.archiveTrip)
 			r.Post("/delete", a.deleteTrip)
@@ -354,6 +461,14 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/expenses", a.addExpense)
 			r.Post("/expenses/{expenseID}/update", a.updateExpense)
 			r.Post("/expenses/{expenseID}/delete", a.deleteExpense)
+			r.Post("/guests", a.addTripGuest)
+			r.Post("/guests/{guestID}/delete", a.deleteTripGuest)
+			r.Post("/group-expenses/settlements/{settlementID}/update", a.updateTabSettlement)
+			r.Post("/group-expenses/settlements/{settlementID}/delete", a.deleteTabSettlement)
+			r.Post("/group-expenses/settlements", a.addTabSettlement)
+			r.Post("/tab/settlements/{settlementID}/update", a.updateTabSettlement)
+			r.Post("/tab/settlements/{settlementID}/delete", a.deleteTabSettlement)
+			r.Post("/tab/settlements", a.addTabSettlement)
 			r.Post("/checklist", a.addChecklistItem)
 			r.Post("/invite", a.tripInviteCollaborator)
 			r.Post("/invite-link", a.tripCreateInviteLink)
@@ -376,12 +491,20 @@ func NewRouter(deps Dependencies) http.Handler {
 	})
 
 	r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := os.ReadFile(filepath.Join(a.staticDir, "manifest.webmanifest"))
+		data, err := os.ReadFile(filepath.Join(a.staticDir, "manifest.webmanifest"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/manifest+json")
 		_, _ = w.Write(data)
 	})
 	r.Get("/sw.js", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := os.ReadFile(filepath.Join(a.staticDir, "sw.js"))
+		data, err := os.ReadFile(filepath.Join(a.staticDir, "sw.js"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/javascript")
 		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		_, _ = w.Write(data)
@@ -481,7 +604,11 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 		heroPatternClass = "dashboard-hero-adventure--pattern-" + strings.TrimPrefix(bg, "pattern:")
 	case strings.HasPrefix(bg, "https://"):
 		heroImageURL = bg
+	case strings.HasPrefix(bg, "/static/"):
+		heroImageURL = bg
 	}
+	travelDistanceDisplay := trips.FormatDistanceStat(travelStats.KmLogged, trips.EffectiveDistanceUnit(nil, settings))
+	homeDistanceUnit := trips.EffectiveDistanceUnit(nil, settings)
 
 	inProg := filterDashboardSidebarTrips(list, time.Now(), 2)
 	_ = a.templates.ExecuteTemplate(w, "home.html", map[string]any{
@@ -491,6 +618,8 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 		"ArchivedTripCards":      archMerged,
 		"Settings":               settings,
 		"TravelStats":            travelStats,
+		"TravelDistanceDisplay":  travelDistanceDisplay,
+		"HomeDistanceUnit":       homeDistanceUnit,
 		"CSRFToken":              CSRFToken(r.Context()),
 		"CurrentUser":            CurrentUser(r.Context()),
 		"Saved":                  r.URL.Query().Get("saved") == "1",
@@ -552,36 +681,8 @@ func dashboardTripSubtitle(desc string) string {
 	return string(r[:max]) + "…"
 }
 
-// budgetRollupFromDetails matches budget page logic: spend excludes pending pay-at-pickup vehicle expenses,
-// allocation is itinerary + bookings + non-booking expenses, percent capped at 100 for the bar.
-func budgetRollupFromDetails(details trips.TripDetails) (spent, allocated float64, pct int) {
-	now := time.Now()
-	pendingExpenseIDs := map[string]struct{}{}
-	for _, v := range details.Vehicles {
-		if !v.PayAtPickUp || strings.TrimSpace(v.DropOffAt) == "" {
-			continue
-		}
-		dropOffAt, err := time.Parse("2006-01-02T15:04", v.DropOffAt)
-		if err != nil || !now.Before(dropOffAt) {
-			continue
-		}
-		if v.RentalExpenseID != "" {
-			pendingExpenseIDs[v.RentalExpenseID] = struct{}{}
-		}
-		if v.InsuranceExpenseID != "" {
-			pendingExpenseIDs[v.InsuranceExpenseID] = struct{}{}
-		}
-	}
-	totalSpent := 0.0
-	for _, e := range details.Expenses {
-		if _, isPending := pendingExpenseIDs[e.ID]; isPending {
-			continue
-		}
-		totalSpent += e.Amount
-	}
-	if totalSpent < 0 {
-		totalSpent = 0
-	}
+// tripLegacyBudgetAllocated is the pre–trip-budget-cap allocation: itinerary + bookings + non-booking expenses.
+func tripLegacyBudgetAllocated(details trips.TripDetails) float64 {
 	vehicleByExpenseID := trips.VehicleRentalByExpenseID(details.Vehicles)
 	flightByExpenseID := trips.FlightByExpenseID(details.Flights)
 	nonLodgingExpenses := 0.0
@@ -590,17 +691,43 @@ func budgetRollupFromDetails(details trips.TripDetails) (spent, allocated float6
 			nonLodgingExpenses += e.Amount
 		}
 	}
-	totalBudgeted := computeTotalBudgeted(details.Itinerary, details.Lodgings, details.Vehicles, details.Flights) + nonLodgingExpenses
-	budgetProgress := 0.0
-	if totalBudgeted > 0 {
-		budgetProgress = (totalSpent / totalBudgeted) * 100
+	return computeTotalBudgeted(details.Itinerary, details.Lodgings, details.Vehicles, details.Flights) + nonLodgingExpenses
+}
+
+func tripBudgetAllocated(details trips.TripDetails) float64 {
+	if details.Trip.BudgetCap > 0 {
+		return details.Trip.BudgetCap
+	}
+	return tripLegacyBudgetAllocated(details)
+}
+
+func tripBudgetSpentSum(details trips.TripDetails) float64 {
+	total := 0.0
+	for _, e := range details.Expenses {
+		total += e.Amount
+	}
+	if total < 0 {
+		return 0
+	}
+	return total
+}
+
+// budgetRollupFromDetails sums all ledger expenses as spent. When Trip.BudgetCap > 0 it becomes the Budget Limit figure;
+// otherwise the legacy computed allocation is used. Percent is capped at 100 for progress visuals; BudgetExceeded is true when spent > cap.
+func budgetRollupFromDetails(details trips.TripDetails) (spent, allocated float64, pct int, budgetExceeded bool) {
+	spent = tripBudgetSpentSum(details)
+	allocated = tripBudgetAllocated(details)
+	budgetExceeded = allocated > 0 && spent > allocated
+	var budgetProgress float64
+	if allocated > 0 {
+		budgetProgress = (spent / allocated) * 100
 		if budgetProgress > 100 {
 			budgetProgress = 100
 		}
-	} else if totalSpent > 0 {
+	} else if spent > 0 {
 		budgetProgress = 100
 	}
-	return totalSpent, totalBudgeted, int(budgetProgress + 0.5)
+	return spent, allocated, int(budgetProgress + 0.5), budgetExceeded
 }
 
 func (a *app) loadDashboardBudgetRollups(ctx context.Context, userID string, list []trips.Trip) map[string]dashboardBudgetRollup {
@@ -610,7 +737,7 @@ func (a *app) loadDashboardBudgetRollups(ctx context.Context, userID string, lis
 		if err != nil {
 			continue
 		}
-		spent, alloc, pct := budgetRollupFromDetails(det)
+		spent, alloc, pct, _ := budgetRollupFromDetails(det)
 		out[t.ID] = dashboardBudgetRollup{Spent: spent, Allocated: alloc, Percent: pct}
 	}
 	return out
@@ -773,7 +900,15 @@ func (a *app) settingsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
-	_ = r.ParseForm()
+	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+	} else if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
 	uid := CurrentUserID(r.Context())
 	if uid == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -789,9 +924,19 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 
 	heroBG := strings.TrimSpace(r.FormValue("dashboard_hero_background"))
 	if mode := strings.TrimSpace(r.FormValue("dashboard_hero_background_mode")); mode != "" {
-		if mode == "custom_url" {
+		switch mode {
+		case "custom_url":
 			heroBG = strings.TrimSpace(r.FormValue("dashboard_hero_background_url"))
-		} else {
+		case "custom_upload":
+			if p, err := storeDashboardHeroUpload(r, uid); err == nil && p != "" {
+				heroBG = p
+			} else if err != nil {
+				http.Error(w, "failed to save hero image", http.StatusBadRequest)
+				return
+			} else {
+				heroBG = strings.TrimSpace(r.FormValue("dashboard_hero_existing_path"))
+			}
+		default:
 			heroBG = mode
 		}
 	}
@@ -801,10 +946,19 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if vals, ok := r.PostForm["clear_google_maps_key"]; ok && len(vals) > 0 && vals[len(vals)-1] == "1" {
+		app.GoogleMapsAPIKey = ""
+	} else if v := strings.TrimSpace(r.FormValue("google_maps_api_key")); v != "" {
+		app.GoogleMapsAPIKey = v
+	}
+	geoKey := strings.TrimSpace(app.GoogleMapsAPIKey)
 	app.AppTitle = defaultIfEmpty(r.FormValue("app_title"), "REMI Trip Planner")
-	applyMapDefaultPlaceFromForm(r.Context(), &app, r)
+	applyMapDefaultPlaceFromForm(r.Context(), geoKey, &app, r)
 	app.MapDefaultZoom = mapZoom
 	app.EnableLocationLookup = enableLookup
+	if _, ok := r.PostForm["default_distance_unit"]; ok {
+		app.DefaultDistanceUnit = trips.NormalizeDistanceUnit(r.FormValue("default_distance_unit"))
+	}
 	if vals, ok := r.PostForm["site_registration_enabled"]; ok && len(vals) > 0 {
 		app.RegistrationEnabled = vals[len(vals)-1] == "1"
 	}
@@ -813,21 +967,27 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mergedUser, _ := a.tripService.MergedSettingsForUI(r.Context(), uid)
+	userDist := mergedUser.UserDistanceUnit
+	if _, ok := r.PostForm["user_distance_unit"]; ok {
+		userDist = strings.TrimSpace(r.FormValue("user_distance_unit"))
+	}
 	if err := a.tripService.SaveUserUISettings(r.Context(), uid, trips.UserSettings{
 		UserID:                  uid,
 		ThemePreference:         r.FormValue("theme_preference"),
 		DashboardTripLayout:     r.FormValue("dashboard_trip_layout"),
 		DashboardTripSort:       r.FormValue("dashboard_trip_sort"),
-		DashboardHeroBackground: heroBG,
+		DashboardHeroBackground: normalizeDashboardHeroBackground(heroBG),
 		TripDashboardHeading:    strings.TrimSpace(r.FormValue("trip_dashboard_heading")),
 		DefaultCurrencyName:     defaultIfEmpty(r.FormValue("default_currency_name"), "USD"),
 		DefaultCurrencySymbol:   defaultIfEmpty(r.FormValue("default_currency_symbol"), "$"),
+		DistanceUnit:            userDist,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	returnTo := strings.TrimSpace(r.FormValue("return_to"))
-	if returnTo == "" || !strings.HasPrefix(returnTo, "/") {
+	if !isSafeSiteSettingsReturn(returnTo) {
 		returnTo = "/settings"
 	}
 	joiner := "?"
@@ -860,7 +1020,7 @@ func (a *app) resetAllSiteSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	returnTo := strings.TrimSpace(r.FormValue("return_to"))
-	if returnTo == "" || !strings.HasPrefix(returnTo, "/") {
+	if !isSafeSiteSettingsReturn(returnTo) {
 		returnTo = "/settings"
 	}
 	joiner := "?"
@@ -904,6 +1064,7 @@ func (a *app) saveThemeQuick(w http.ResponseWriter, r *http.Request) {
 		TripDashboardHeading:    merged.TripDashboardHeading,
 		DefaultCurrencyName:     merged.DefaultCurrencyName,
 		DefaultCurrencySymbol:   merged.DefaultCurrencySymbol,
+		DistanceUnit:            merged.UserDistanceUnit,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -994,49 +1155,17 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	total := 0.0
-	for _, e := range details.Expenses {
-		total += e.Amount
-	}
-	now := time.Now()
-	for _, v := range details.Vehicles {
-		if !v.PayAtPickUp {
-			continue
-		}
-		dropOffAt, err := time.Parse("2006-01-02T15:04", v.DropOffAt)
-		if err != nil || !now.Before(dropOffAt) {
-			continue
-		}
-		total -= v.Cost + v.InsuranceCost
-	}
-	if total < 0 {
-		total = 0
-	}
-	var nonLodgingExpenses float64
+	total, totalBudgeted, budgetProgress, budgetExceeded := budgetRollupFromDetails(details)
 	vehicleByExpenseID := trips.VehicleRentalByExpenseID(details.Vehicles)
 	flightByExpenseID := trips.FlightByExpenseID(details.Flights)
-	for _, e := range details.Expenses {
-		if e.LodgingID == "" && vehicleByExpenseID[e.ID].ID == "" && flightByExpenseID[e.ID].ID == "" {
-			nonLodgingExpenses += e.Amount
-		}
-	}
-	totalBudgeted := computeTotalBudgeted(details.Itinerary, details.Lodgings, details.Vehicles, details.Flights) + nonLodgingExpenses
-	budgetProgress := 0.0
-	if totalBudgeted > 0 {
-		budgetProgress = (total / totalBudgeted) * 100
-		if budgetProgress > 100 {
-			budgetProgress = 100
-		}
-	} else if total > 0 {
-		budgetProgress = 100
-	}
 	dayLabels, err := a.tripService.GetTripDayLabels(r.Context(), tripID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	dayGroups := buildItineraryDayGroups(details.Trip.StartDate, details.Itinerary, details.Lodgings, details.Vehicles, details.Flights, dayLabels)
-	expenseGroups := buildExpenseDayGroups(details.Trip.StartDate, details.Expenses)
+	spendsDisplayExpenses := trips.CollapseVehicleRentalExpenseDuplicates(details.Expenses, details.Vehicles)
+	expenseGroups := buildExpenseDayGroups(details.Trip.StartDate, spendsDisplayExpenses)
 	checklistCategoryGroups := buildChecklistCategoryGroups(details.Checklist, trips.ReminderChecklistCategories)
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
@@ -1046,6 +1175,8 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	}
 	acc, _ := TripAccessFromContext(r.Context())
 	party, _ := a.tripService.TripParty(r.Context(), tripID)
+	tripGuests, _ := a.tripService.ListTripGuests(r.Context(), tripID)
+	tabDepartedParticipants, _ := a.tripService.ListDepartedTabParticipants(r.Context(), tripID)
 	pendingInvites, _ := a.tripService.ListPendingTripInvitesForTrip(r.Context(), tripID, uid)
 	nCollab, _ := a.tripService.TripCollaboratorCount(r.Context(), tripID)
 	inviteNotice := strings.TrimSpace(r.URL.Query().Get("invite_notice"))
@@ -1065,6 +1196,35 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	for expenseID := range flightByExpenseID {
 		flightExpenseLocked[expenseID] = true
 	}
+	tabExpenses := make([]trips.Expense, 0)
+	for _, e := range details.Expenses {
+		if e.FromTab {
+			tabExpenses = append(tabExpenses, e)
+		}
+	}
+	tabExpenseGroups := buildExpenseDayGroups(details.Trip.StartDate, tabExpenses)
+	var tabExpensesTotal float64
+	for _, e := range tabExpenses {
+		tabExpensesTotal += e.Amount
+	}
+	var tabPartyIDs []string
+	for _, p := range party {
+		tabPartyIDs = append(tabPartyIDs, p.ID)
+	}
+	var tabGuestIDs []string
+	for _, g := range tripGuests {
+		tabGuestIDs = append(tabGuestIDs, g.ID)
+	}
+	tabMeKey := trips.ParticipantKeyUser(uid)
+	tabYourShareByExpenseID := map[string]float64{}
+	for _, e := range tabExpenses {
+		sh, err := trips.SharesForExpense(e, tabPartyIDs, tabGuestIDs, details.Trip.OwnerUserID)
+		if err == nil {
+			tabYourShareByExpenseID[e.ID] = sh[tabMeKey]
+		}
+	}
+	tabParticipantLabels := participantLabelMap(party, tripGuests, tabDepartedParticipants)
+	tabEqualSplitBootstrap := buildEqualSplitJSON(party, tripGuests)
 	mainSectionOrder := trips.NormalizeMainSectionOrder(details.Trip.UIMainSectionOrder)
 	sidebarWidgetOrder := trips.NormalizeSidebarWidgetOrder(details.Trip.UISidebarWidgetOrder)
 	customSidebarLinks := trips.ParseCustomSidebarLinksJSON(details.Trip.UICustomSidebarLinks)
@@ -1084,7 +1244,8 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		"CurrencyName":                currencyName,
 		"TotalExpense":                total,
 		"TotalBudgeted":               totalBudgeted,
-		"BudgetProgress":              budgetProgress,
+		"BudgetProgress":              float64(budgetProgress),
+		"BudgetExceeded":              budgetExceeded,
 		"ExpenseCategories":           trips.QuickExpenseCategories,
 		"ChecklistCategories":         trips.ReminderChecklistCategories,
 		"ChecklistGroups":             checklistCategoryGroups,
@@ -1095,12 +1256,23 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		"CustomSidebarLinks":          customSidebarLinks,
 		"TripAccess":                  acc,
 		"Party":                       party,
+		"TripGuests":                  tripGuests,
+		"TabDepartedParticipants":     tabDepartedParticipants,
 		"PendingInvites":              pendingInvites,
 		"CollaboratorCount":           nCollab,
 		"InviteNotice":                inviteNotice,
 		"InviteNoticeEmail":           inviteEmail,
 		"ArchivedHiddenFromDashboard": archivedHidden,
+		"TabExpenses":                 tabExpenses,
+		"TabExpenseGroups":            tabExpenseGroups,
+		"TabExpensesTotal":            tabExpensesTotal,
+		"Trip":                        details.Trip,
+		"TabParticipantLabels":        tabParticipantLabels,
+		"TabYourShareByExpenseID":     tabYourShareByExpenseID,
+		"TabEqualSplitBootstrap":      tabEqualSplitBootstrap,
 		"CSRFToken":                   CSRFToken(r.Context()),
+		"CurrentUserID":               uid,
+		"CurrentUser":                 CurrentUser(r.Context()),
 		"SidebarNavActive":            "trip",
 		"MapViewLatitude":             mapViewLat,
 		"MapViewLongitude":            mapViewLng,
@@ -1152,6 +1324,21 @@ func (a *app) tripSettingsPage(w http.ResponseWriter, r *http.Request) {
 		"HideSettingsNavOnMobile":   true,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, trips.TripDetails{Trip: t}, pageData, "settings")
+	guestSeed := template.JS("[]")
+	if gl, ok := pageData["TripGuests"].([]trips.TripGuest); ok && len(gl) > 0 {
+		type guestSeedRow struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		s := make([]guestSeedRow, 0, len(gl))
+		for _, g := range gl {
+			s = append(s, guestSeedRow{ID: g.ID, Name: g.DisplayName})
+		}
+		if b, err := json.Marshal(s); err == nil {
+			guestSeed = template.JS(b)
+		}
+	}
+	pageData["TripGuestsInitialJSON"] = guestSeed
 	var buf bytes.Buffer
 	if err := a.templates.ExecuteTemplate(&buf, "trip_settings.html", pageData); err != nil {
 		log.Printf("trip settings page template: %v", err)
@@ -1185,39 +1372,11 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
 
-	// Pending vehicle expenses are pay-at-pickup costs that should not be counted as "spent" yet.
-	now := time.Now()
-	pendingExpenseIDs := map[string]struct{}{}
-	for _, v := range details.Vehicles {
-		if !v.PayAtPickUp || strings.TrimSpace(v.DropOffAt) == "" {
-			continue
-		}
-		dropOffAt, err := time.Parse("2006-01-02T15:04", v.DropOffAt)
-		if err != nil || !now.Before(dropOffAt) {
-			continue
-		}
-		if v.RentalExpenseID != "" {
-			pendingExpenseIDs[v.RentalExpenseID] = struct{}{}
-		}
-		if v.InsuranceExpenseID != "" {
-			pendingExpenseIDs[v.InsuranceExpenseID] = struct{}{}
-		}
-	}
+	totalSpent, totalBudgeted, budgetPct, budgetExceeded := budgetRollupFromDetails(details)
+	budgetProgress := float64(budgetPct)
 
-	spentExpenses := make([]trips.Expense, 0, len(details.Expenses))
-	totalSpent := 0.0
-	for _, e := range details.Expenses {
-		if _, isPending := pendingExpenseIDs[e.ID]; isPending {
-			continue
-		}
-		spentExpenses = append(spentExpenses, e)
-		totalSpent += e.Amount
-	}
-	if totalSpent < 0 {
-		totalSpent = 0
-	}
+	spentExpenses := trips.CollapseVehicleRentalExpenseDuplicates(append([]trips.Expense(nil), details.Expenses...), details.Vehicles)
 
-	// Budgeted cost uses itinerary-planned costs + manually entered, non-booking expenses.
 	vehicleByExpenseID := trips.VehicleRentalByExpenseID(details.Vehicles)
 	flightByExpenseID := trips.FlightByExpenseID(details.Flights)
 	vehicleExpenseLocked := map[string]bool{}
@@ -1228,27 +1387,10 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 	for id := range flightByExpenseID {
 		flightExpenseLocked[id] = true
 	}
-	nonLodgingExpenses := 0.0
-	for _, e := range details.Expenses {
-		if e.LodgingID == "" && vehicleByExpenseID[e.ID].ID == "" && flightByExpenseID[e.ID].ID == "" {
-			nonLodgingExpenses += e.Amount
-		}
-	}
-	totalBudgeted := computeTotalBudgeted(details.Itinerary, details.Lodgings, details.Vehicles, details.Flights) + nonLodgingExpenses
 
 	remaining := totalBudgeted - totalSpent
 	if remaining < 0 {
 		remaining = 0
-	}
-
-	budgetProgress := 0.0
-	if totalBudgeted > 0 {
-		budgetProgress = (totalSpent / totalBudgeted) * 100
-		if budgetProgress > 100 {
-			budgetProgress = 100
-		}
-	} else if totalSpent > 0 {
-		budgetProgress = 100
 	}
 
 	tripDays := 1
@@ -1388,7 +1530,7 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Transaction history (date desc), but excluding pending pay-at-pickup expenses.
+	// Transaction history (date desc).
 	transactions := make([]budgetTransactionRowView, 0, len(spentExpenses))
 	// Use SpentOn first (ISO date strings sort lexicographically); fallback to CreatedAt.
 	sort.Slice(spentExpenses, func(i, j int) bool {
@@ -1416,15 +1558,13 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		e := spentExpenses[i]
 		dateLabel := ""
 		if strings.TrimSpace(e.SpentOn) != "" {
-			dateLabel = formatUIDate(e.SpentOn)
+			dateLabel = trips.FormatISODate(e.SpentOn, trips.UIDateNumericLayout(details.Trip.UIDateFormat))
 		}
-		desc := e.Notes
-		if strings.TrimSpace(desc) == "" {
-			desc = "—"
-		}
+		desc := budgetSpendsDescription(e)
 		vLocked := vehicleExpenseLocked[e.ID]
 		fLocked := flightExpenseLocked[e.ID]
-		canEdit := !details.Trip.IsArchived && e.LodgingID == "" && !vLocked && !fLocked
+		isOwner := uid == details.Trip.OwnerUserID
+		canEdit := isOwner && !details.Trip.IsArchived && e.LodgingID == "" && !vLocked && !fLocked
 		transactions = append(transactions, budgetTransactionRowView{
 			ExpenseID:     e.ID,
 			DateLabel:     dateLabel,
@@ -1432,11 +1572,14 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 			CategoryIcon:  expenseCategoryIcon(e.Category),
 			CategoryStyle: expenseCategoryStyle(e.Category),
 			Description:   desc,
+			TitleRaw:      e.Title,
 			Method:        defaultIfEmpty(e.PaymentMethod, "Cash"),
 			Amount:        e.Amount,
 			SpentOn:       e.SpentOn,
 			NotesRaw:      e.Notes,
 			LodgingID:     e.LodgingID,
+			ReceiptPath:   strings.TrimSpace(e.ReceiptPath),
+			FromTab:       e.FromTab,
 			VehicleLocked: vLocked,
 			FlightLocked:  fLocked,
 			CanEdit:       canEdit,
@@ -1471,6 +1614,7 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		"TotalBudgeted":          totalBudgeted,
 		"Remaining":              remaining,
 		"BudgetProgress":         budgetProgress,
+		"BudgetExceeded":         budgetExceeded,
 		"DailyAvgSpent":          dailyAvgSpent,
 		"BudgetTargetPerDay":     budgetTargetPerDay,
 		"DailyDeltaPctAbsInt":    dailyDeltaPctAbsInt,
@@ -1485,9 +1629,419 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		"BudgetInitialLimit":     initialLimit,
 		"VehicleExpenseLocked":   vehicleExpenseLocked,
 		"FlightExpenseLocked":    flightExpenseLocked,
+		"CurrentUserID":          uid,
 	}
-	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "budget")
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "expenses")
 	_ = a.templates.ExecuteTemplate(w, "budget.html", pageData)
+}
+
+func (a *app) theTabPage(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
+	if err != nil {
+		if tripForbiddenOrMissing(err) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "the_tab") {
+		return
+	}
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
+	tabExpensesAll := make([]trips.Expense, 0)
+	for _, e := range details.Expenses {
+		if e.FromTab {
+			tabExpensesAll = append(tabExpensesAll, e)
+		}
+	}
+	party, _ := a.tripService.TripParty(r.Context(), tripID)
+	guests, _ := a.tripService.ListTripGuests(r.Context(), tripID)
+	tabDeparted, _ := a.tripService.ListDepartedTabParticipants(r.Context(), tripID)
+	var partyIDs []string
+	for _, p := range party {
+		partyIDs = append(partyIDs, p.ID)
+	}
+	var guestIDs []string
+	for _, g := range guests {
+		guestIDs = append(guestIDs, g.ID)
+	}
+	participantLabels := participantLabelMap(party, guests, tabDeparted)
+	settlements, _ := a.tripService.ListTabSettlements(r.Context(), tripID)
+	tabNet, tabLedgerErr := trips.TabLedger(tabExpensesAll, partyIDs, guestIDs, settlements, details.Trip.OwnerUserID)
+	if tabLedgerErr != nil {
+		tabNet = map[string]float64{}
+	}
+	tabSimplified := trips.SimplifyDebts(tabNet, 0.02)
+	tabOwedOut, _ := trips.TabDebtTotals(tabNet)
+	meKey := trips.ParticipantKeyUser(uid)
+	tabYourNet := tabNet[meKey]
+	tabSearchQ := strings.TrimSpace(r.URL.Query().Get("q"))
+	tabSearchQEscaped := url.QueryEscape(tabSearchQ)
+	tabCatFilter := strings.TrimSpace(r.URL.Query().Get("tab_cat"))
+	tabExpenses := tabExpensesAll
+	if tabSearchQ != "" {
+		matchIDs, _ := a.tripService.SearchTabExpenseIDs(r.Context(), tripID, tabSearchQ)
+		idSet := map[string]struct{}{}
+		for _, id := range matchIDs {
+			idSet[id] = struct{}{}
+		}
+		var filtered []trips.Expense
+		for _, e := range tabExpensesAll {
+			if _, ok := idSet[e.ID]; ok {
+				filtered = append(filtered, e)
+			}
+		}
+		tabExpenses = filtered
+	}
+	if tabCatFilter != "" {
+		var filtered []trips.Expense
+		for _, e := range tabExpenses {
+			if strings.EqualFold(strings.TrimSpace(e.Category), tabCatFilter) {
+				filtered = append(filtered, e)
+			}
+		}
+		tabExpenses = filtered
+	}
+	sortTabExpensesNewestFirst(tabExpenses)
+	tabExpensesFilteredTotal := len(tabExpenses)
+	const tabRecentExpenseLimit = 10
+	const tabRecentSettlementLimit = 5
+	tabExpensesShown := tabExpenses
+	tabCanShowMoreExpenses := false
+	if len(tabExpenses) > tabRecentExpenseLimit {
+		tabExpensesShown = tabExpenses[:tabRecentExpenseLimit]
+		tabCanShowMoreExpenses = true
+	}
+	allSettlementRows := buildTabSettlementRows(settlements, participantLabels, uid, details.Trip.OwnerUserID, currencySymbol, details.Trip.IsArchived)
+	tabSettlementRowsShown := allSettlementRows
+	tabCanShowMoreSettlements := false
+	if len(allSettlementRows) > tabRecentSettlementLimit {
+		tabSettlementRowsShown = allSettlementRows[:tabRecentSettlementLimit]
+		tabCanShowMoreSettlements = true
+	}
+	balanceView := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("balance_view")))
+	if balanceView != "debts" {
+		balanceView = "net"
+	}
+	tabTotalSpent := sumTabExpenseAmounts(tabExpensesAll)
+	tabYourShare := tabYourShareCents(uid, tabExpensesAll, partyIDs, guestIDs, details.Trip.OwnerUserID)
+	vehicleByExpenseID := trips.VehicleRentalByExpenseID(details.Vehicles)
+	flightByExpenseID := trips.FlightByExpenseID(details.Flights)
+	vehicleExpenseLocked := map[string]bool{}
+	for id := range vehicleByExpenseID {
+		vehicleExpenseLocked[id] = true
+	}
+	flightExpenseLocked := map[string]bool{}
+	for id := range flightByExpenseID {
+		flightExpenseLocked[id] = true
+	}
+	equalBootstrap := buildEqualSplitJSON(party, guests)
+	tabYourShareByExpenseID := map[string]float64{}
+	for _, e := range tabExpensesAll {
+		sh, err := trips.SharesForExpense(e, partyIDs, guestIDs, details.Trip.OwnerUserID)
+		if err == nil {
+			tabYourShareByExpenseID[e.ID] = sh[meKey]
+		}
+	}
+	tabBalanceParticipants := make([]trips.TabBalanceParticipantView, 0, len(party)+len(guests)+len(tabDeparted))
+	for _, p := range party {
+		k := trips.ParticipantKeyUser(p.ID)
+		role := "Member"
+		if p.ID == details.Trip.OwnerUserID {
+			role = "Owner"
+		}
+		nc, nd := trips.TabNetDisplay(currencySymbol, tabNet[k])
+		tabBalanceParticipants = append(tabBalanceParticipants, trips.TabBalanceParticipantView{
+			DisplayName: p.PublicDisplayName(),
+			Role:        role,
+			IsGuest:     false,
+			Net:         tabNet[k],
+			AvatarPath:  strings.TrimSpace(p.AvatarPath),
+			Initial:     p.InitialForAvatar(),
+			NetClass:    nc,
+			NetDisplay:  nd,
+		})
+	}
+	for _, g := range guests {
+		k := trips.ParticipantKeyGuest(g.ID)
+		nc, nd := trips.TabNetDisplay(currencySymbol, tabNet[k])
+		tabBalanceParticipants = append(tabBalanceParticipants, trips.TabBalanceParticipantView{
+			DisplayName: g.DisplayName,
+			Role:        "Guest",
+			IsGuest:     true,
+			Net:         tabNet[k],
+			Initial:     trips.GuestInitialFromDisplayName(g.DisplayName),
+			NetClass:    nc,
+			NetDisplay:  nd,
+		})
+	}
+	for _, d := range tabDeparted {
+		k := strings.TrimSpace(d.ParticipantKey)
+		if k == "" {
+			continue
+		}
+		name := strings.TrimSpace(d.DisplayName)
+		if name == "" {
+			name = k
+		}
+		kind, _, ok := trips.ParseParticipantKey(k)
+		isGuest := ok && kind == "guest"
+		disp := name + " (Left trip)"
+		if isGuest {
+			disp = name + " (guest) (Left trip)"
+		}
+		nc, nd := trips.TabNetDisplay(currencySymbol, tabNet[k])
+		init := trips.UserProfile{DisplayName: name}.InitialForAvatar()
+		if isGuest {
+			init = trips.GuestInitialFromDisplayName(name)
+		}
+		tabBalanceParticipants = append(tabBalanceParticipants, trips.TabBalanceParticipantView{
+			DisplayName: disp,
+			Role:        "Left trip",
+			IsGuest:     isGuest,
+			Net:         tabNet[k],
+			Initial:     init,
+			NetClass:    nc,
+			NetDisplay:  nd,
+		})
+	}
+	tabOverTimeJSON := template.JS("[]")
+	if b, err := json.Marshal(tabSpendingOverTimeSeries(details.Trip, tabExpensesAll)); err == nil && len(b) > 0 {
+		tabOverTimeJSON = template.JS(b)
+	}
+	expMoreQS := url.Values{}
+	if balanceView == "debts" {
+		expMoreQS.Set("balance_view", "debts")
+	}
+	if tabSearchQ != "" {
+		expMoreQS.Set("q", tabSearchQ)
+	}
+	if tabCatFilter != "" {
+		expMoreQS.Set("tab_cat", tabCatFilter)
+	}
+	expMoreQS.Set("offset", strconv.Itoa(len(tabExpensesShown)))
+	expMoreQS.Set("limit", "9999")
+	tabExpensesMoreURL := "/trips/" + tripID + "/group-expenses/expenses-more?" + expMoreQS.Encode()
+	setMoreQS := url.Values{}
+	setMoreQS.Set("offset", strconv.Itoa(len(tabSettlementRowsShown)))
+	setMoreQS.Set("limit", "9999")
+	tabSettlementsMoreURL := "/trips/" + tripID + "/group-expenses/settlements-more?" + setMoreQS.Encode()
+	pageData := map[string]any{
+		"Trip":                      details.Trip,
+		"Details":                   details,
+		"Settings":                  settings,
+		"CSRFToken":                 CSRFToken(r.Context()),
+		"CurrencySymbol":            currencySymbol,
+		"ExpenseCategories":         trips.QuickExpenseCategories,
+		"TabExpenses":               tabExpensesShown,
+		"TabExpensesAllCount":       len(tabExpensesAll),
+		"TabExpensesFilteredTotal":  tabExpensesFilteredTotal,
+		"TabCanShowMoreExpenses":    tabCanShowMoreExpenses,
+		"TabExpensesMoreURL":        tabExpensesMoreURL,
+		"TabSearchQuery":            tabSearchQ,
+		"TabSearchQueryEscaped":     tabSearchQEscaped,
+		"TabCategoryFilter":         tabCatFilter,
+		"TabParticipantLabels":      participantLabels,
+		"TabDepartedParticipants":   tabDeparted,
+		"TabTotalSpent":             tabTotalSpent,
+		"TabYourShare":              tabYourShare,
+		"TabYourNet":                tabYourNet,
+		"TabNetByParticipant":       tabNet,
+		"TabSimplifiedTransfers":    tabSimplified,
+		"TabSimplifyRows":           buildTabSimplifyTransferRows(tabSimplified, party, guests, tabDeparted),
+		"TabOwedOutTotal":           tabOwedOut,
+		"TabBalanceParticipants":    tabBalanceParticipants,
+		"TabBalanceView":            balanceView,
+		"TabSettlements":            settlements,
+		"TabSettlementRows":         tabSettlementRowsShown,
+		"TabCanShowMoreSettlements": tabCanShowMoreSettlements,
+		"TabSettlementsMoreURL":     tabSettlementsMoreURL,
+		"TabChartByCategory":        tabCategoryChartRows(tabExpensesAll),
+		"TabChartByPayer":           tabPayerChartRows(tabExpensesAll, details.Trip.OwnerUserID, participantLabels),
+		"TabChartByTime":            tabTimeChartRows(details.Trip, tabExpensesAll),
+		"TabOverTimeChartJSON":      tabOverTimeJSON,
+		"TabEqualSplitBootstrap":    equalBootstrap,
+		"TabYourShareByExpenseID":   tabYourShareByExpenseID,
+		"CurrentUserID":             uid,
+		"VehicleExpenseLocked":      vehicleExpenseLocked,
+		"FlightExpenseLocked":       flightExpenseLocked,
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "group-expenses")
+	_ = a.templates.ExecuteTemplate(w, "the_tab.html", pageData)
+}
+
+func (a *app) tabExpensesLoadMore(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	offset, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("offset")))
+	limit := 9999
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
+	if err != nil {
+		if tripForbiddenOrMissing(err) {
+			http.Error(w, "trip not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "the_tab") {
+		return
+	}
+	uid := CurrentUserID(r.Context())
+	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
+	tabExpensesAll := make([]trips.Expense, 0)
+	for _, e := range details.Expenses {
+		if e.FromTab {
+			tabExpensesAll = append(tabExpensesAll, e)
+		}
+	}
+	party, _ := a.tripService.TripParty(r.Context(), tripID)
+	guests, _ := a.tripService.ListTripGuests(r.Context(), tripID)
+	tabDeparted, _ := a.tripService.ListDepartedTabParticipants(r.Context(), tripID)
+	var partyIDs []string
+	for _, p := range party {
+		partyIDs = append(partyIDs, p.ID)
+	}
+	var guestIDs []string
+	for _, g := range guests {
+		guestIDs = append(guestIDs, g.ID)
+	}
+	participantLabels := participantLabelMap(party, guests, tabDeparted)
+	tabSearchQ := strings.TrimSpace(r.URL.Query().Get("q"))
+	tabCatFilter := strings.TrimSpace(r.URL.Query().Get("tab_cat"))
+	tabExpenses := tabExpensesAll
+	if tabSearchQ != "" {
+		matchIDs, _ := a.tripService.SearchTabExpenseIDs(r.Context(), tripID, tabSearchQ)
+		idSet := map[string]struct{}{}
+		for _, id := range matchIDs {
+			idSet[id] = struct{}{}
+		}
+		var filtered []trips.Expense
+		for _, e := range tabExpensesAll {
+			if _, ok := idSet[e.ID]; ok {
+				filtered = append(filtered, e)
+			}
+		}
+		tabExpenses = filtered
+	}
+	if tabCatFilter != "" {
+		var filtered []trips.Expense
+		for _, e := range tabExpenses {
+			if strings.EqualFold(strings.TrimSpace(e.Category), tabCatFilter) {
+				filtered = append(filtered, e)
+			}
+		}
+		tabExpenses = filtered
+	}
+	sortTabExpensesNewestFirst(tabExpenses)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(tabExpenses) {
+		offset = len(tabExpenses)
+	}
+	end := offset + limit
+	if end > len(tabExpenses) {
+		end = len(tabExpenses)
+	}
+	window := tabExpenses[offset:end]
+	meKey := trips.ParticipantKeyUser(uid)
+	tabYourShareByExpenseID := map[string]float64{}
+	for _, e := range window {
+		sh, err := trips.SharesForExpense(e, partyIDs, guestIDs, details.Trip.OwnerUserID)
+		if err == nil {
+			tabYourShareByExpenseID[e.ID] = sh[meKey]
+		}
+	}
+	vehicleByExpenseID := trips.VehicleRentalByExpenseID(details.Vehicles)
+	flightByExpenseID := trips.FlightByExpenseID(details.Flights)
+	vehicleExpenseLocked := map[string]bool{}
+	for id := range vehicleByExpenseID {
+		vehicleExpenseLocked[id] = true
+	}
+	flightExpenseLocked := map[string]bool{}
+	for id := range flightByExpenseID {
+		flightExpenseLocked[id] = true
+	}
+	pageData := map[string]any{
+		"Trip":                    details.Trip,
+		"CSRFToken":               CSRFToken(r.Context()),
+		"CurrencySymbol":          currencySymbol,
+		"ExpenseCategories":       trips.QuickExpenseCategories,
+		"TabExpenses":             window,
+		"TabYourShareByExpenseID": tabYourShareByExpenseID,
+		"CurrentUserID":           uid,
+		"VehicleExpenseLocked":    vehicleExpenseLocked,
+		"FlightExpenseLocked":     flightExpenseLocked,
+		"TabParticipantLabels":    participantLabels,
+		"TabEqualSplitBootstrap":  buildEqualSplitJSON(party, guests),
+		"TabDepartedParticipants": tabDeparted,
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "group-expenses")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = a.templates.ExecuteTemplate(w, "tab_expenses_load_more", pageData)
+}
+
+func (a *app) tabSettlementsLoadMore(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	offset, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("offset")))
+	limit := 9999
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
+	if err != nil {
+		if tripForbiddenOrMissing(err) {
+			http.Error(w, "trip not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "the_tab") {
+		return
+	}
+	uid := CurrentUserID(r.Context())
+	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
+	settlements, _ := a.tripService.ListTabSettlements(r.Context(), tripID)
+	party, _ := a.tripService.TripParty(r.Context(), tripID)
+	guests, _ := a.tripService.ListTripGuests(r.Context(), tripID)
+	tabDeparted, _ := a.tripService.ListDepartedTabParticipants(r.Context(), tripID)
+	participantLabels := participantLabelMap(party, guests, tabDeparted)
+	allRows := buildTabSettlementRows(settlements, participantLabels, uid, details.Trip.OwnerUserID, currencySymbol, details.Trip.IsArchived)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(allRows) {
+		offset = len(allRows)
+	}
+	end := offset + limit
+	if end > len(allRows) {
+		end = len(allRows)
+	}
+	window := allRows[offset:end]
+	pageData := map[string]any{
+		"Trip":              details.Trip,
+		"CSRFToken":         CSRFToken(r.Context()),
+		"TabSettlementRows": window,
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "group-expenses")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = a.templates.ExecuteTemplate(w, "tab_settlements_load_more", pageData)
 }
 
 func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
@@ -1517,32 +2071,7 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pending vehicle expenses are pay-at-pickup costs that should not be counted as "spent" yet.
-	now := time.Now()
-	pendingExpenseIDs := map[string]struct{}{}
-	for _, v := range details.Vehicles {
-		if !v.PayAtPickUp || strings.TrimSpace(v.DropOffAt) == "" {
-			continue
-		}
-		dropOffAt, err := time.Parse("2006-01-02T15:04", v.DropOffAt)
-		if err != nil || !now.Before(dropOffAt) {
-			continue
-		}
-		if v.RentalExpenseID != "" {
-			pendingExpenseIDs[v.RentalExpenseID] = struct{}{}
-		}
-		if v.InsuranceExpenseID != "" {
-			pendingExpenseIDs[v.InsuranceExpenseID] = struct{}{}
-		}
-	}
-
-	spentExpenses := make([]trips.Expense, 0, len(details.Expenses))
-	for _, e := range details.Expenses {
-		if _, isPending := pendingExpenseIDs[e.ID]; isPending {
-			continue
-		}
-		spentExpenses = append(spentExpenses, e)
-	}
+	spentExpenses := trips.CollapseVehicleRentalExpenseDuplicates(append([]trips.Expense(nil), details.Expenses...), details.Vehicles)
 
 	// Sort: newest first (SpentOn first, fallback CreatedAt).
 	sort.Slice(spentExpenses, func(i, j int) bool {
@@ -1583,19 +2112,18 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 		flightExpenseLocked[id] = true
 	}
 
+	txUID := CurrentUserID(r.Context())
 	transactions := make([]budgetTransactionRowView, 0, len(window))
 	for _, e := range window {
 		dateLabel := ""
 		if strings.TrimSpace(e.SpentOn) != "" {
-			dateLabel = formatUIDate(e.SpentOn)
+			dateLabel = trips.FormatISODate(e.SpentOn, trips.UIDateNumericLayout(details.Trip.UIDateFormat))
 		}
-		desc := e.Notes
-		if strings.TrimSpace(desc) == "" {
-			desc = "—"
-		}
+		desc := budgetSpendsDescription(e)
 		vLocked := vehicleExpenseLocked[e.ID]
 		fLocked := flightExpenseLocked[e.ID]
-		canEdit := !details.Trip.IsArchived && e.LodgingID == "" && !vLocked && !fLocked
+		isOwner := txUID == details.Trip.OwnerUserID
+		canEdit := isOwner && !details.Trip.IsArchived && e.LodgingID == "" && !vLocked && !fLocked
 		transactions = append(transactions, budgetTransactionRowView{
 			ExpenseID:     e.ID,
 			DateLabel:     dateLabel,
@@ -1603,11 +2131,14 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 			CategoryIcon:  expenseCategoryIcon(e.Category),
 			CategoryStyle: expenseCategoryStyle(e.Category),
 			Description:   desc,
+			TitleRaw:      e.Title,
 			Method:        defaultIfEmpty(e.PaymentMethod, "Cash"),
 			Amount:        e.Amount,
 			SpentOn:       e.SpentOn,
 			NotesRaw:      e.Notes,
 			LodgingID:     e.LodgingID,
+			ReceiptPath:   strings.TrimSpace(e.ReceiptPath),
+			FromTab:       e.FromTab,
 			VehicleLocked: vLocked,
 			FlightLocked:  fLocked,
 			CanEdit:       canEdit,
@@ -1651,32 +2182,7 @@ func (a *app) exportBudgetReport(w http.ResponseWriter, r *http.Request) {
 
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
 
-	// Pending vehicle expenses are pay-at-pickup costs that should not be counted as "spent" yet.
-	now := time.Now()
-	pendingExpenseIDs := map[string]struct{}{}
-	for _, v := range details.Vehicles {
-		if !v.PayAtPickUp || strings.TrimSpace(v.DropOffAt) == "" {
-			continue
-		}
-		dropOffAt, err := time.Parse("2006-01-02T15:04", v.DropOffAt)
-		if err != nil || !now.Before(dropOffAt) {
-			continue
-		}
-		if v.RentalExpenseID != "" {
-			pendingExpenseIDs[v.RentalExpenseID] = struct{}{}
-		}
-		if v.InsuranceExpenseID != "" {
-			pendingExpenseIDs[v.InsuranceExpenseID] = struct{}{}
-		}
-	}
-
-	spentExpenses := make([]trips.Expense, 0, len(details.Expenses))
-	for _, e := range details.Expenses {
-		if _, isPending := pendingExpenseIDs[e.ID]; isPending {
-			continue
-		}
-		spentExpenses = append(spentExpenses, e)
-	}
+	spentExpenses := trips.CollapseVehicleRentalExpenseDuplicates(append([]trips.Expense(nil), details.Expenses...), details.Vehicles)
 
 	// Sort: newest first (SpentOn first, fallback CreatedAt).
 	sort.Slice(spentExpenses, func(i, j int) bool {
@@ -1708,7 +2214,7 @@ func (a *app) exportBudgetReport(w http.ResponseWriter, r *http.Request) {
 	for _, e := range spentExpenses {
 		dateLabel := "--"
 		if strings.TrimSpace(e.SpentOn) != "" {
-			dateLabel = formatUIDate(e.SpentOn)
+			dateLabel = trips.FormatISODate(e.SpentOn, trips.UIDateNumericLayout(details.Trip.UIDateFormat))
 		}
 		desc := e.Notes
 		if strings.TrimSpace(desc) == "" {
@@ -1964,6 +2470,11 @@ func (a *app) redirectIfTripSectionDisabled(w http.ResponseWriter, r *http.Reque
 			http.Redirect(w, r, "/trips/"+trip.ID, http.StatusSeeOther)
 			return true
 		}
+	case "the_tab":
+		if !trip.SectionEnabledTheTab() {
+			http.Redirect(w, r, "/trips/"+trip.ID, http.StatusSeeOther)
+			return true
+		}
 	}
 	return false
 }
@@ -1982,9 +2493,50 @@ func formTriSectionOn(r *http.Request, key string) bool {
 	return false
 }
 
+func (a *app) applyTripGuestPatchFromForm(ctx context.Context, tripID string, r *http.Request, archived bool) {
+	if archived {
+		return
+	}
+	raw := strings.TrimSpace(r.FormValue("trip_guests_patch"))
+	if raw == "" {
+		return
+	}
+	var p struct {
+		Remove []string `json:"remove"`
+		Add    []string `json:"add"`
+	}
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		log.Printf("trip_guests_patch: invalid json: %v", err)
+		return
+	}
+	for _, id := range p.Remove {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if err := a.tripService.DeleteTripGuest(ctx, tripID, id); err != nil {
+			log.Printf("DeleteTripGuest %s: %v", id, err)
+		}
+	}
+	for _, name := range p.Add {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if err := a.tripService.AddTripGuest(ctx, trips.TripGuest{TripID: tripID, DisplayName: name}); err != nil {
+			log.Printf("AddTripGuest %q: %v", name, err)
+		}
+	}
+}
+
 func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	if err := r.ParseForm(); err != nil {
+	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+	} else if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
@@ -2001,9 +2553,33 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	existing.Description = r.FormValue("description")
 	existing.StartDate = r.FormValue("start_date")
 	existing.EndDate = r.FormValue("end_date")
-	existing.CoverImage = r.FormValue("cover_image_url")
+	coverMode := strings.TrimSpace(r.FormValue("cover_image_mode"))
+	switch coverMode {
+	case "upload":
+		p, err := storeTripCoverUpload(r, tripID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if p != "" {
+			existing.CoverImage = p
+		} else {
+			existing.CoverImage = normalizeTripCoverImageRef(r.FormValue("cover_image_existing"))
+		}
+	case "clear":
+		existing.CoverImage = ""
+	default:
+		existing.CoverImage = normalizeTripCoverImageRef(r.FormValue("cover_image_url"))
+	}
+	existing.DistanceUnit = strings.TrimSpace(r.FormValue("distance_unit"))
 	existing.CurrencyName = defaultIfEmpty(r.FormValue("currency_name"), "USD")
 	existing.CurrencySymbol = defaultIfEmpty(r.FormValue("currency_symbol"), "$")
+	existing.BudgetCap = 0
+	if s := strings.TrimSpace(r.FormValue("budget_cap")); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err == nil && !math.IsNaN(v) && v >= 0 {
+			existing.BudgetCap = v
+		}
+	}
 	existing.UIShowItinerary = formTriSectionOn(r, "ui_trip_section_itinerary")
 	existing.UIShowChecklist = formTriSectionOn(r, "ui_trip_section_checklist")
 	var mainHidden []string
@@ -2017,6 +2593,8 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 			existing.UIShowFlights = formTriSectionOn(r, "ui_trip_section_flights")
 		case trips.MainSectionSpends:
 			existing.UIShowSpends = formTriSectionOn(r, "ui_trip_section_spends")
+		case trips.MainSectionTheTab:
+			existing.UIShowTheTab = formTriSectionOn(r, "ui_trip_section_the_tab")
 		}
 		visOn := formTriSectionOn(r, "ui_vis_main_"+k)
 		if !visOn {
@@ -2047,10 +2625,12 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 		tf = "12h"
 	}
 	existing.UITimeFormat = tf
+	existing.UIDateFormat = trips.NormalizeUIDateFormat(r.FormValue("ui_date_format"))
 	existing.UILabelStay = strings.TrimSpace(r.FormValue("ui_label_stay"))
 	existing.UILabelVehicle = strings.TrimSpace(r.FormValue("ui_label_vehicle"))
 	existing.UILabelFlights = strings.TrimSpace(r.FormValue("ui_label_flights"))
 	existing.UILabelSpends = strings.TrimSpace(r.FormValue("ui_label_spends"))
+	existing.UILabelGroupExpenses = strings.TrimSpace(r.FormValue("ui_label_group_expenses"))
 	existing.UIMainSectionOrder = trips.JoinMainSectionOrder(trips.NormalizeMainSectionOrder(r.FormValue("ui_main_section_order")))
 	existing.UISidebarWidgetOrder = trips.JoinSidebarWidgetOrder(trips.NormalizeSidebarWidgetOrder(r.FormValue("ui_sidebar_widget_order")))
 	existing.UIShowCustomLinks = formTriSectionOn(r, "ui_show_custom_links")
@@ -2061,6 +2641,10 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	}
 	existing.UICustomSidebarLinks = trips.EncodeCustomSidebarLinksJSON(customLinks)
 
+	if !existing.UIShowSpends {
+		existing.UIShowTheTab = false
+	}
+
 	err = a.tripService.UpdateTrip(r.Context(), existing)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -2070,6 +2654,7 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	a.applyTripGuestPatchFromForm(r.Context(), tripID, r, existing.IsArchived)
 	if isAsyncRequest(r) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -2233,7 +2818,9 @@ func (a *app) saveTripDayLabel(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	_ = r.ParseForm()
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		_ = r.ParseForm()
+	}
 	trip, err := a.tripService.GetTrip(r.Context(), tripID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -2251,6 +2838,31 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 	if paymentMethod == "" {
 		paymentMethod = "Cash"
 	}
+	fromTab := strings.TrimSpace(strings.ToLower(r.FormValue("from_tab"))) == "1" ||
+		strings.TrimSpace(strings.ToLower(r.FormValue("from_tab"))) == "true"
+	if fromTab {
+		if a.redirectIfTripSectionDisabled(w, r, trip, "the_tab") {
+			return
+		}
+	}
+	title, paidBy, splitMode, splitJSON := "", "", "", ""
+	if fromTab {
+		var tabErr error
+		title, paidBy, splitMode, splitJSON, tabErr = a.parseTabExpenseFields(r.Context(), tripID, trip, amount, true, r)
+		if tabErr != nil {
+			http.Error(w, tabErr.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		title = strings.TrimSpace(r.FormValue("title"))
+	}
+	receiptPath := ""
+	if path, err := storeExpenseReceipt(r, tripID, "tab_attachment"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	} else {
+		receiptPath = path
+	}
 	err = a.tripService.AddExpense(r.Context(), trips.Expense{
 		TripID:        tripID,
 		Category:      r.FormValue("category"),
@@ -2258,6 +2870,12 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 		Notes:         r.FormValue("notes"),
 		SpentOn:       r.FormValue("spent_on"),
 		PaymentMethod: paymentMethod,
+		FromTab:       fromTab,
+		ReceiptPath:   receiptPath,
+		Title:         title,
+		PaidBy:        paidBy,
+		SplitMode:     splitMode,
+		SplitJSON:     splitJSON,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -2265,6 +2883,10 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if isAsyncRequest(r) {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	next := strings.TrimSpace(r.FormValue("return_to"))
@@ -2352,7 +2974,7 @@ func (a *app) deleteItineraryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if l, ok := trips.LodgingByItineraryItemID(details.Lodgings, details.Itinerary)[itemID]; ok && l.ID != "" {
-		http.Error(w, "Remove this stay from Accommodation instead of deleting the itinerary line.", http.StatusBadRequest)
+		http.Error(w, "Remove this booking from Accommodation instead of deleting the itinerary line.", http.StatusBadRequest)
 		return
 	}
 	if v, ok := trips.VehicleRentalByItineraryItemID(details.Vehicles, details.Itinerary)[itemID]; ok && v.ID != "" {
@@ -2377,13 +2999,55 @@ func (a *app) deleteItineraryItem(w http.ResponseWriter, r *http.Request) {
 func (a *app) updateExpense(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	expenseID := chi.URLParam(r, "expenseID")
-	_ = r.ParseForm()
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		_ = r.ParseForm()
+	}
+	prev, err := a.tripService.GetExpense(r.Context(), tripID, expenseID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	amount, _ := strconv.ParseFloat(r.FormValue("amount"), 64)
 	paymentMethod := strings.TrimSpace(r.FormValue("payment_method"))
 	if paymentMethod == "" {
 		paymentMethod = "Cash"
 	}
-	err := a.tripService.UpdateExpense(r.Context(), trips.Expense{
+	receiptPath := strings.TrimSpace(prev.ReceiptPath)
+	removeReceipt := strings.TrimSpace(strings.ToLower(r.FormValue("remove_tab_attachment"))) == "1" ||
+		strings.TrimSpace(strings.ToLower(r.FormValue("remove_tab_attachment"))) == "true"
+	if removeReceipt && receiptPath != "" {
+		_ = deleteUploadedFileByWebPath(receiptPath)
+		receiptPath = ""
+	}
+	newPath, storeErr := storeExpenseReceipt(r, tripID, "tab_attachment")
+	if storeErr != nil {
+		http.Error(w, storeErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if newPath != "" {
+		if receiptPath != "" && receiptPath != newPath {
+			_ = deleteUploadedFileByWebPath(receiptPath)
+		}
+		receiptPath = newPath
+	}
+	tripRow, tripErr := a.tripService.GetTrip(r.Context(), tripID)
+	if tripErr != nil {
+		if errors.Is(tripErr, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, tripErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if tripRow.OwnerUserID != CurrentUserID(r.Context()) {
+		http.Error(w, "only the trip owner can edit expenses", http.StatusForbidden)
+		return
+	}
+	exp := trips.Expense{
 		ID:            expenseID,
 		TripID:        tripID,
 		Category:      r.FormValue("category"),
@@ -2391,7 +3055,30 @@ func (a *app) updateExpense(w http.ResponseWriter, r *http.Request) {
 		Notes:         r.FormValue("notes"),
 		SpentOn:       r.FormValue("spent_on"),
 		PaymentMethod: paymentMethod,
-	})
+		ReceiptPath:   receiptPath,
+	}
+	tabMeta := strings.TrimSpace(r.FormValue("tab_meta_submitted")) == "1"
+	if prev.FromTab && !tabMeta {
+		exp.Title = prev.Title
+		exp.PaidBy = prev.PaidBy
+		exp.SplitMode = prev.SplitMode
+		exp.SplitJSON = prev.SplitJSON
+	} else if prev.FromTab && tabMeta {
+		var tabFieldErr error
+		exp.Title, exp.PaidBy, exp.SplitMode, exp.SplitJSON, tabFieldErr = a.parseTabExpenseFields(r.Context(), tripID, tripRow, amount, true, r)
+		if tabFieldErr != nil {
+			http.Error(w, tabFieldErr.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		t := strings.TrimSpace(r.FormValue("title"))
+		if t != "" {
+			exp.Title = t
+		} else {
+			exp.Title = prev.Title
+		}
+	}
+	err = a.tripService.UpdateExpense(r.Context(), exp)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -2404,18 +3091,51 @@ func (a *app) updateExpense(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	next := strings.TrimSpace(r.FormValue("return_to"))
+	if next != "" && isSafeReturnForTrip(next, tripID) {
+		http.Redirect(w, r, next, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/trips/"+tripID, http.StatusSeeOther)
 }
 
 func (a *app) deleteExpense(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	expenseID := chi.URLParam(r, "expenseID")
+	_ = r.ParseForm()
+	tripRow, tripErr := a.tripService.GetTrip(r.Context(), tripID)
+	if tripErr != nil {
+		if errors.Is(tripErr, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, tripErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if tripRow.OwnerUserID != CurrentUserID(r.Context()) {
+		http.Error(w, "only the trip owner can delete expenses", http.StatusForbidden)
+		return
+	}
+	prev, _ := a.tripService.GetExpense(r.Context(), tripID, expenseID)
+	receiptWeb := strings.TrimSpace(prev.ReceiptPath)
 	if err := a.tripService.DeleteExpense(r.Context(), tripID, expenseID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if receiptWeb != "" {
+		_ = deleteUploadedFileByWebPath(receiptWeb)
+	}
+	if isAsyncRequest(r) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	next := strings.TrimSpace(r.FormValue("return_to"))
+	if next != "" && isSafeReturnForTrip(next, tripID) {
+		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/trips/"+tripID, http.StatusSeeOther)
@@ -2579,7 +3299,7 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 	checkInItemID := uuid.NewString()
 	checkOutItemID := uuid.NewString()
 	checkInNotes := buildLodgingCheckInNotes(notes, bookingNo, attachmentPath)
-	addrLat, addrLng := geocodeLocation(r.Context(), address)
+	addrLat, addrLng := a.geocodeForApp(r.Context(), address)
 
 	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        checkInItemID,
@@ -2712,7 +3432,7 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 	address := r.FormValue("address")
 	bookingNo := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
-	addrLat, addrLng := geocodeLocation(r.Context(), address)
+	addrLat, addrLng := a.geocodeForApp(r.Context(), address)
 
 	checkInNotes := buildLodgingCheckInNotes(notes, bookingNo, attachmentPath)
 	lodging := trips.Lodging{
@@ -2868,9 +3588,18 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 	location := r.FormValue("pick_up_location")
 	vehicleDetail := r.FormValue("vehicle_detail")
 	vehicleTitle := vehicleRentalTitleValue(vehicleDetail, location)
+	dropOffSeparate := strings.TrimSpace(r.FormValue("drop_off_same")) == "different"
+	dropOffLocStored := ""
+	dropLocationStr := location
+	if dropOffSeparate {
+		dropOffLocStored = strings.TrimSpace(r.FormValue("drop_off_location"))
+		if dropOffLocStored != "" {
+			dropLocationStr = dropOffLocStored
+		}
+	}
+	dropVehicleTitle := vehicleRentalTitleValue(vehicleDetail, dropLocationStr)
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
-	payAtPickUp := r.FormValue("pay_at_pick_up") == "true"
 	vehicleImagePath, err := storeVehicleImage(r, "vehicle_image")
 	if err != nil {
 		http.Error(w, "failed to save vehicle image", http.StatusBadRequest)
@@ -2880,9 +3609,13 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 	rentalID := uuid.NewString()
 	pickUpItineraryID := uuid.NewString()
 	dropOffItineraryID := uuid.NewString()
-	pickUpNotes := buildVehicleItineraryNotes(notes, booking, payAtPickUp)
+	pickUpNotes := buildVehicleItineraryNotes(notes, booking, false)
 	dropOffNotes := defaultIfEmpty(notes, "")
-	locLat, locLng := geocodeLocation(r.Context(), location)
+	locLat, locLng := a.geocodeForApp(r.Context(), location)
+	dropLat, dropLng := locLat, locLng
+	if dropOffSeparate && strings.TrimSpace(dropOffLocStored) != "" {
+		dropLat, dropLng = a.geocodeForApp(r.Context(), dropOffLocStored)
+	}
 
 	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        pickUpItineraryID,
@@ -2904,10 +3637,10 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 		ID:        dropOffItineraryID,
 		TripID:    tripID,
 		DayNumber: dropOffDay,
-		Title:     trips.VehicleRentalItineraryDropOffTitle(vehicleTitle),
-		Location:  location,
-		Latitude:  locLat,
-		Longitude: locLng,
+		Title:     trips.VehicleRentalItineraryDropOffTitle(dropVehicleTitle),
+		Location:  dropLocationStr,
+		Latitude:  dropLat,
+		Longitude: dropLng,
 		Notes:     dropOffNotes,
 		EstCost:   totalCost,
 		StartTime: dropOffTime,
@@ -2921,6 +3654,7 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 		ID:                  rentalID,
 		TripID:              tripID,
 		PickUpLocation:      location,
+		DropOffLocation:     dropOffLocStored,
 		VehicleDetail:       vehicleDetail,
 		PickUpAt:            pickUpAt.Format("2006-01-02T15:04"),
 		DropOffAt:           dropOffAt.Format("2006-01-02T15:04"),
@@ -2929,7 +3663,7 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 		VehicleImagePath:    vehicleImagePath,
 		Cost:                cost,
 		InsuranceCost:       insuranceCost,
-		PayAtPickUp:         payAtPickUp,
+		PayAtPickUp:         false,
 		PickUpItineraryID:   pickUpItineraryID,
 		DropOffItineraryID:  dropOffItineraryID,
 	})
@@ -2999,9 +3733,18 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 	location := r.FormValue("pick_up_location")
 	vehicleDetail := r.FormValue("vehicle_detail")
 	vehicleTitle := vehicleRentalTitleValue(vehicleDetail, location)
+	dropOffSeparate := strings.TrimSpace(r.FormValue("drop_off_same")) == "different"
+	dropOffLocStored := ""
+	dropLocationStr := location
+	if dropOffSeparate {
+		dropOffLocStored = strings.TrimSpace(r.FormValue("drop_off_location"))
+		if dropOffLocStored != "" {
+			dropLocationStr = dropOffLocStored
+		}
+	}
+	dropVehicleTitle := vehicleRentalTitleValue(vehicleDetail, dropLocationStr)
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
-	payAtPickUp := r.FormValue("pay_at_pick_up") == "true"
 	vehicleImagePath, err := storeVehicleImage(r, "vehicle_image")
 	if err != nil {
 		http.Error(w, "failed to save vehicle image", http.StatusBadRequest)
@@ -3018,7 +3761,11 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 	if vehicleImagePath != "" && r.FormValue("current_vehicle_image_path") != "" && vehicleImagePath != r.FormValue("current_vehicle_image_path") {
 		_ = deleteUploadedFileByWebPath(r.FormValue("current_vehicle_image_path"))
 	}
-	locLat, locLng := geocodeLocation(r.Context(), location)
+	locLat, locLng := a.geocodeForApp(r.Context(), location)
+	dropLat, dropLng := locLat, locLng
+	if dropOffSeparate && strings.TrimSpace(dropOffLocStored) != "" {
+		dropLat, dropLng = a.geocodeForApp(r.Context(), dropOffLocStored)
+	}
 
 	if err := a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        existing.PickUpItineraryID,
@@ -3028,7 +3775,7 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		Location:  location,
 		Latitude:  locLat,
 		Longitude: locLng,
-		Notes:     buildVehicleItineraryNotes(notes, booking, payAtPickUp),
+		Notes:     buildVehicleItineraryNotes(notes, booking, false),
 		EstCost:   totalCost,
 		StartTime: pickUpTime,
 		EndTime:   pickUpTime,
@@ -3040,10 +3787,10 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		ID:        existing.DropOffItineraryID,
 		TripID:    tripID,
 		DayNumber: dropOffDay,
-		Title:     trips.VehicleRentalItineraryDropOffTitle(vehicleTitle),
-		Location:  location,
-		Latitude:  locLat,
-		Longitude: locLng,
+		Title:     trips.VehicleRentalItineraryDropOffTitle(dropVehicleTitle),
+		Location:  dropLocationStr,
+		Latitude:  dropLat,
+		Longitude: dropLng,
 		Notes:     defaultIfEmpty(notes, ""),
 		EstCost:   totalCost,
 		StartTime: dropOffTime,
@@ -3057,6 +3804,7 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		ID:                  rentalID,
 		TripID:              tripID,
 		PickUpLocation:      location,
+		DropOffLocation:     dropOffLocStored,
 		VehicleDetail:       vehicleDetail,
 		PickUpAt:            pickUpAt.Format("2006-01-02T15:04"),
 		DropOffAt:           dropOffAt.Format("2006-01-02T15:04"),
@@ -3065,7 +3813,7 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		VehicleImagePath:    vehicleImagePath,
 		Cost:                cost,
 		InsuranceCost:       insuranceCost,
-		PayAtPickUp:         payAtPickUp,
+		PayAtPickUp:         false,
 		PickUpItineraryID:   existing.PickUpItineraryID,
 		DropOffItineraryID:  existing.DropOffItineraryID,
 		RentalExpenseID:     existing.RentalExpenseID,
@@ -3220,8 +3968,8 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 	arriveItineraryID := uuid.NewString()
 	departNotes := buildFlightItineraryNotes(notes, booking)
 	arriveNotes := defaultIfEmpty(notes, "")
-	departLat, departLng := geocodeLocation(r.Context(), departAirport)
-	arriveLat, arriveLng := geocodeLocation(r.Context(), arriveAirport)
+	departLat, departLng := a.geocodeForApp(r.Context(), departAirport)
+	arriveLat, arriveLng := a.geocodeForApp(r.Context(), arriveAirport)
 
 	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        departItineraryID,
@@ -3357,8 +4105,8 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
 	label := flightTitleValue(flightName, flightNumber)
-	departLat, departLng := geocodeLocation(r.Context(), departAirport)
-	arriveLat, arriveLng := geocodeLocation(r.Context(), arriveAirport)
+	departLat, departLng := a.geocodeForApp(r.Context(), departAirport)
+	arriveLat, arriveLng := a.geocodeForApp(r.Context(), arriveAirport)
 
 	if err := a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        existing.DepartItineraryID,
@@ -3456,6 +4204,9 @@ func (a *app) toggleChecklistItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if _, ok := a.requireTripAccess(w, r, item.TripID); !ok {
+		return
+	}
 	trip, err := a.tripService.GetTrip(r.Context(), item.TripID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -3477,11 +4228,7 @@ func (a *app) toggleChecklistItem(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	back := r.Referer()
-	if back == "" {
-		back = "/"
-	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	http.Redirect(w, r, "/trips/"+trip.ID+"?open=checklist", http.StatusSeeOther)
 }
 
 func (a *app) updateChecklistItem(w http.ResponseWriter, r *http.Request) {
@@ -3494,6 +4241,9 @@ func (a *app) updateChecklistItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, ok := a.requireTripAccess(w, r, existing.TripID); !ok {
 		return
 	}
 	trip, err := a.tripService.GetTrip(r.Context(), existing.TripID)
@@ -3524,11 +4274,7 @@ func (a *app) updateChecklistItem(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	back := r.Referer()
-	if back == "" {
-		back = "/"
-	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	http.Redirect(w, r, "/trips/"+trip.ID+"?open=checklist", http.StatusSeeOther)
 }
 
 func (a *app) deleteChecklistItem(w http.ResponseWriter, r *http.Request) {
@@ -3540,6 +4286,9 @@ func (a *app) deleteChecklistItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, ok := a.requireTripAccess(w, r, existing.TripID); !ok {
 		return
 	}
 	trip, err := a.tripService.GetTrip(r.Context(), existing.TripID)
@@ -3562,11 +4311,7 @@ func (a *app) deleteChecklistItem(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	back := r.Referer()
-	if back == "" {
-		back = "/"
-	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	http.Redirect(w, r, "/trips/"+trip.ID+"?open=checklist", http.StatusSeeOther)
 }
 
 func (a *app) listChanges(w http.ResponseWriter, r *http.Request) {
@@ -3607,13 +4352,18 @@ func (a *app) mergeTripSidebarContext(ctx context.Context, r *http.Request, trip
 	acc, _ := TripAccessFromContext(ctx)
 	party, _ := a.tripService.TripParty(ctx, tripID)
 	pendingInvites, _ := a.tripService.ListPendingTripInvitesForTrip(ctx, tripID, uid)
+	tripGuests, _ := a.tripService.ListTripGuests(ctx, tripID)
+	tabDeparted, _ := a.tripService.ListDepartedTabParticipants(ctx, tripID)
 	customSidebarLinks := trips.ParseCustomSidebarLinksJSON(details.Trip.UICustomSidebarLinks)
 	into["Details"] = details
 	into["CustomSidebarLinks"] = customSidebarLinks
 	into["TripAccess"] = acc
 	into["Party"] = party
+	into["TripGuests"] = tripGuests
+	into["TabDepartedParticipants"] = tabDeparted
 	into["PendingInvites"] = pendingInvites
 	into["SidebarNavActive"] = sidebarNavActive
+	into["CurrentUser"] = CurrentUser(ctx)
 }
 
 func defaultIfEmpty(value, fallback string) string {
@@ -3633,6 +4383,22 @@ func isSafeReturnForTrip(raw string, tripID string) bool {
 	}
 	base := "/trips/" + tripID
 	return raw == base || strings.HasPrefix(raw, base+"/") || strings.HasPrefix(raw, base+"?")
+}
+
+// isSafeSiteSettingsReturn allows same-origin relative redirects from site settings forms
+// (rejects protocol-relative //host, backslashes, NUL, and @ which can confuse URL handling).
+func isSafeSiteSettingsReturn(raw string) bool {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return false
+	}
+	if !strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") {
+		return false
+	}
+	if strings.ContainsAny(s, "@\\\x00") {
+		return false
+	}
+	return true
 }
 
 func parseDateTimeLocal(raw string) (time.Time, string, string, error) {
@@ -3764,6 +4530,113 @@ func dayNumberFromDate(startDate, endDate, itineraryDate string) (int, error) {
 	return int(selected.Sub(start).Hours()/24) + 1, nil
 }
 
+func normalizeDashboardHeroBackground(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "default"
+	}
+	if strings.HasPrefix(s, "pattern:") {
+		return s
+	}
+	if strings.HasPrefix(s, "https://") {
+		return s
+	}
+	if strings.HasPrefix(s, "/static/") {
+		return s
+	}
+	if strings.HasPrefix(s, "static/uploads/") {
+		return "/" + s
+	}
+	return s
+}
+
+func normalizeTripCoverImageRef(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") {
+		return s
+	}
+	if strings.HasPrefix(s, "/static/") {
+		return s
+	}
+	if strings.HasPrefix(s, "static/uploads/") {
+		return "/" + s
+	}
+	return s
+}
+
+func storeDashboardHeroUpload(r *http.Request, userID string) (string, error) {
+	if !expenseUploadTripIDOK(userID) {
+		return "", errors.New("invalid user id")
+	}
+	file, header, err := r.FormFile("dashboard_hero_upload")
+	if err != nil {
+		if errors.Is(err, http.ErrMissingFile) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer file.Close()
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
+	default:
+		return "", errors.New("unsupported image type")
+	}
+	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
+	targetDir := filepath.Join("web", "static", "uploads", "hero", userID)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(targetDir, name)
+	dst, err := os.Create(targetPath)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, file); err != nil {
+		return "", err
+	}
+	return "/static/uploads/hero/" + userID + "/" + name, nil
+}
+
+func storeTripCoverUpload(r *http.Request, tripID string) (string, error) {
+	if !expenseUploadTripIDOK(tripID) {
+		return "", errors.New("invalid trip id")
+	}
+	file, header, err := r.FormFile("cover_image_upload")
+	if err != nil {
+		if errors.Is(err, http.ErrMissingFile) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer file.Close()
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
+	default:
+		return "", errors.New("unsupported image type")
+	}
+	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
+	targetDir := filepath.Join("web", "static", "uploads", "covers", tripID)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(targetDir, name)
+	dst, err := os.Create(targetPath)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, file); err != nil {
+		return "", err
+	}
+	return "/static/uploads/covers/" + tripID + "/" + name, nil
+}
+
 func storeVehicleImage(r *http.Request, field string) (string, error) {
 	file, header, err := r.FormFile(field)
 	if err != nil {
@@ -3826,6 +4699,74 @@ func storeFlightDocument(r *http.Request, field string) (string, error) {
 	return "/static/uploads/flights/" + name, nil
 }
 
+func expenseUploadTripIDOK(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func expenseReceiptWebPathAllowed(clean string) bool {
+	const prefix = "static/uploads/expenses/"
+	if !strings.HasPrefix(clean, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(clean, prefix)
+	if rest == "" {
+		return false
+	}
+	i := strings.IndexByte(rest, '/')
+	if i <= 0 || i >= len(rest)-1 {
+		return false
+	}
+	tripSeg, fileSeg := rest[:i], rest[i+1:]
+	if strings.Contains(fileSeg, "/") || strings.Contains(fileSeg, "\\") {
+		return false
+	}
+	return expenseUploadTripIDOK(tripSeg) && fileSeg != ""
+}
+
+// storeExpenseReceipt saves multipart field to web/static/uploads/expenses/{tripID}/ and returns a web path, or "" if no file.
+func storeExpenseReceipt(r *http.Request, tripID, field string) (string, error) {
+	if !expenseUploadTripIDOK(tripID) {
+		return "", errors.New("invalid trip id")
+	}
+	file, header, err := r.FormFile(field)
+	if err != nil {
+		if errors.Is(err, http.ErrMissingFile) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext == "" {
+		ext = ".bin"
+	}
+	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
+	targetDir := filepath.Join("web", "static", "uploads", "expenses", tripID)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(targetDir, name)
+	dst, err := os.Create(targetPath)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, file); err != nil {
+		return "", err
+	}
+	return "/static/uploads/expenses/" + tripID + "/" + name, nil
+}
+
 func formatDateTimeDisplay(raw string) string {
 	if raw == "" {
 		return "--"
@@ -3837,7 +4778,7 @@ func formatDateTimeDisplay(raw string) string {
 	return parsed.Format("02-01-2006 | 03:04 PM")
 }
 
-// formatTripDateTime formats datetime-local values using the trip’s 12h/24h preference (trip detail pages only).
+// formatTripDateTime formats datetime-local values using the trip’s date order and 12h/24h preference (trip detail pages only).
 func formatTripDateTime(t trips.Trip, raw string) string {
 	if strings.TrimSpace(raw) == "" {
 		return "--"
@@ -3846,10 +4787,11 @@ func formatTripDateTime(t trips.Trip, raw string) string {
 	if err != nil {
 		return raw
 	}
+	dateLayout := trips.UIDateNumericLayout(t.UIDateFormat)
 	if trips.UITimeFormatIs24h(t.UITimeFormat) {
-		return parsed.Format("02-01-2006 | 15:04")
+		return parsed.Format(dateLayout + " | 15:04")
 	}
-	return parsed.Format("02-01-2006 | 03:04 PM")
+	return parsed.Format(dateLayout + " | 03:04 PM")
 }
 
 // formatTripClock formats stored time strings (e.g. itinerary start/end) using the trip’s clock preference.
@@ -3875,45 +4817,75 @@ func formatTripClock(t trips.Trip, raw string) string {
 	return tt.Format("3:04 PM")
 }
 
-// formatUIDate renders a stored YYYY-MM-DD value as DD-MM-YYYY for display. Unparseable input is returned unchanged.
-func formatUIDate(iso string) string {
-	s := strings.TrimSpace(iso)
-	if s == "" {
-		return ""
+func extractTripFromTemplate(v any) (trips.Trip, bool) {
+	switch x := v.(type) {
+	case trips.Trip:
+		return x, true
+	case dashboardTripCard:
+		return x.Trip, true
+	default:
+		return trips.Trip{}, false
 	}
-	t, err := time.Parse("2006-01-02", s)
-	if err != nil {
-		return iso
-	}
-	return t.Format("02-01-2006")
 }
 
-// formatTripDateRangeEn formats a trip span like "Dec 10 – Dec 18, 2023" for dashboard cards.
-func formatTripDateRangeEn(startISO, endISO string) string {
+// formatTripUIDate renders a stored YYYY-MM-DD using the trip’s MM-DD-YYYY vs DD-MM-YYYY preference (templates pass .Trip or a dashboard card).
+func formatTripUIDate(ctx any, iso string) string {
+	t, ok := extractTripFromTemplate(ctx)
+	layout := "02-01-2006"
+	if ok {
+		layout = trips.UIDateNumericLayout(t.UIDateFormat)
+	}
+	return trips.FormatISODate(iso, layout)
+}
+
+func formatTripDateRange(ctx any, startISO, endISO string) string {
+	t, ok := extractTripFromTemplate(ctx)
+	if !ok {
+		t = trips.Trip{}
+	}
+	return formatTripDateRangeForTrip(t, startISO, endISO)
+}
+
+func formatTripDateShort(ctx any, startISO, endISO string) string {
+	t, ok := extractTripFromTemplate(ctx)
+	if !ok {
+		t = trips.Trip{}
+	}
+	return formatTripDateShortForTrip(t, startISO, endISO)
+}
+
+func formatTripDateRangeForTrip(t trips.Trip, startISO, endISO string) string {
 	s := strings.TrimSpace(startISO)
 	e := strings.TrimSpace(endISO)
+	numLayout := trips.UIDateNumericLayout(t.UIDateFormat)
+	mdy := trips.UIDateIsMDY(t.UIDateFormat)
 	if s == "" && e == "" {
 		return "Dates not set"
 	}
 	if s == "" {
-		return formatUIDate(e)
+		return trips.FormatISODate(e, numLayout)
 	}
 	if e == "" {
-		return formatUIDate(s)
+		return trips.FormatISODate(s, numLayout)
 	}
 	st, err1 := time.Parse("2006-01-02", s)
 	en, err2 := time.Parse("2006-01-02", e)
 	if err1 != nil || err2 != nil {
-		return formatUIDate(s) + " – " + formatUIDate(e)
+		return trips.FormatISODate(s, numLayout) + " – " + trips.FormatISODate(e, numLayout)
+	}
+	if mdy {
+		if st.Year() == en.Year() {
+			return st.Format("Jan 2") + " – " + en.Format("Jan 2, 2006")
+		}
+		return st.Format("Jan 2, 2006") + " – " + en.Format("Jan 2, 2006")
 	}
 	if st.Year() == en.Year() {
-		return st.Format("Jan 2") + " – " + en.Format("Jan 2, 2006")
+		return st.Format("2 Jan") + " – " + en.Format("2 Jan 2006")
 	}
-	return st.Format("Jan 2, 2006") + " – " + en.Format("Jan 2, 2006")
+	return st.Format("2 Jan 2006") + " – " + en.Format("2 Jan 2006")
 }
 
-// formatTripDateShortRange formats a compact span for mobile list cards, e.g. "Oct 12 – 18".
-func formatTripDateShortRange(startISO, endISO string) string {
+func formatTripDateShortForTrip(t trips.Trip, startISO, endISO string) string {
 	s := strings.TrimSpace(startISO)
 	e := strings.TrimSpace(endISO)
 	if s == "" || e == "" {
@@ -3924,13 +4896,23 @@ func formatTripDateShortRange(startISO, endISO string) string {
 	if err1 != nil || err2 != nil || en.Before(st) {
 		return ""
 	}
+	mdy := trips.UIDateIsMDY(t.UIDateFormat)
+	if mdy {
+		if st.Year() == en.Year() && st.Month() == en.Month() {
+			return st.Format("Jan 2") + " – " + strconv.Itoa(en.Day())
+		}
+		if st.Year() == en.Year() {
+			return st.Format("Jan 2") + " – " + en.Format("Jan 2")
+		}
+		return st.Format("Jan 2, 2006") + " – " + en.Format("Jan 2, 2006")
+	}
 	if st.Year() == en.Year() && st.Month() == en.Month() {
-		return st.Format("Jan 2") + " – " + strconv.Itoa(en.Day())
+		return st.Format("2 Jan") + " – " + strconv.Itoa(en.Day())
 	}
 	if st.Year() == en.Year() {
-		return st.Format("Jan 2") + " – " + en.Format("Jan 2")
+		return st.Format("2 Jan") + " – " + en.Format("2 Jan")
 	}
-	return st.Format("Jan 2, 2006") + " – " + en.Format("Jan 2, 2006")
+	return st.Format("2 Jan 2006") + " – " + en.Format("2 Jan 2006")
 }
 
 func formatTripMoney(amount float64) string {
@@ -4109,11 +5091,22 @@ func expenseCategoryStrokeColor(cat string) string {
 }
 
 func deleteUploadedFileByWebPath(webPath string) error {
-	clean := strings.TrimPrefix(webPath, "/")
+	clean := strings.TrimPrefix(strings.TrimSpace(webPath), "/")
 	if clean == "" {
 		return nil
 	}
-	if !strings.HasPrefix(clean, "static/uploads/bookings/") && !strings.HasPrefix(clean, "static/uploads/vehicles/") && !strings.HasPrefix(clean, "static/uploads/flights/") {
+	if strings.Contains(clean, "..") {
+		return nil
+	}
+	allowed := strings.HasPrefix(clean, "static/uploads/bookings/") ||
+		strings.HasPrefix(clean, "static/uploads/vehicles/") ||
+		strings.HasPrefix(clean, "static/uploads/flights/") ||
+		strings.HasPrefix(clean, "static/uploads/hero/") ||
+		strings.HasPrefix(clean, "static/uploads/covers/")
+	if strings.HasPrefix(clean, "static/uploads/expenses/") {
+		allowed = expenseReceiptWebPathAllowed(clean)
+	}
+	if !allowed {
 		return nil
 	}
 	target := filepath.Join("web", filepath.FromSlash(clean))

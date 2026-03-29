@@ -198,10 +198,10 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID string) (trips.
 	var updated string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT user_id, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background,
-			trip_dashboard_heading, default_currency_name, default_currency_symbol, updated_at
+			trip_dashboard_heading, default_currency_name, default_currency_symbol, COALESCE(distance_unit, ''), updated_at
 		FROM user_settings WHERE user_id = ?`, userID).
 		Scan(&s.UserID, &s.ThemePreference, &s.DashboardTripLayout, &s.DashboardTripSort, &s.DashboardHeroBackground,
-			&s.TripDashboardHeading, &s.DefaultCurrencyName, &s.DefaultCurrencySymbol, &updated)
+			&s.TripDashboardHeading, &s.DefaultCurrencyName, &s.DefaultCurrencySymbol, &s.DistanceUnit, &updated)
 	s.UpdatedAt, _ = time.Parse(time.RFC3339, updated)
 	return s, err
 }
@@ -210,8 +210,8 @@ func (r *Repository) SaveUserSettings(ctx context.Context, s trips.UserSettings)
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO user_settings (user_id, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background,
-			trip_dashboard_heading, default_currency_name, default_currency_symbol, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			trip_dashboard_heading, default_currency_name, default_currency_symbol, distance_unit, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
 			theme_preference = excluded.theme_preference,
 			dashboard_trip_layout = excluded.dashboard_trip_layout,
@@ -220,9 +220,10 @@ func (r *Repository) SaveUserSettings(ctx context.Context, s trips.UserSettings)
 			trip_dashboard_heading = excluded.trip_dashboard_heading,
 			default_currency_name = excluded.default_currency_name,
 			default_currency_symbol = excluded.default_currency_symbol,
+			distance_unit = excluded.distance_unit,
 			updated_at = excluded.updated_at`,
 		s.UserID, s.ThemePreference, s.DashboardTripLayout, s.DashboardTripSort, s.DashboardHeroBackground,
-		s.TripDashboardHeading, s.DefaultCurrencyName, s.DefaultCurrencySymbol, now,
+		s.TripDashboardHeading, s.DefaultCurrencyName, s.DefaultCurrencySymbol, s.DistanceUnit, now,
 	)
 	return err
 }
@@ -310,6 +311,24 @@ func (r *Repository) RevokeAllCollaborators(ctx context.Context, tripID string) 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx, `UPDATE trip_members SET left_at = ? WHERE trip_id = ? AND left_at IS NULL`, now, tripID)
 	return err
+}
+
+func (r *Repository) ListActiveTripMemberUserIDs(ctx context.Context, tripID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT user_id FROM trip_members WHERE trip_id = ? AND left_at IS NULL`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func (r *Repository) SetTripArchivedHiddenForUser(ctx context.Context, tripID, userID string, hidden bool) error {

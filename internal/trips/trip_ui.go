@@ -14,13 +14,13 @@ func sectionTitleOrDefault(custom, def string) string {
 	return def
 }
 
-// StaySectionTitle is the sidebar/nav label for the stay section (custom per trip).
+// StaySectionTitle is the sidebar/nav label for the accommodation section (custom per trip).
 func (t Trip) StaySectionTitle() string {
-	return sectionTitleOrDefault(t.UILabelStay, "Stay")
+	return sectionTitleOrDefault(t.UILabelStay, "Accommodation")
 }
 
 func (t Trip) VehicleSectionTitle() string {
-	return sectionTitleOrDefault(t.UILabelVehicle, "Vehicle")
+	return sectionTitleOrDefault(t.UILabelVehicle, "Vehicle Rental")
 }
 
 func (t Trip) FlightsSectionTitle() string {
@@ -28,7 +28,11 @@ func (t Trip) FlightsSectionTitle() string {
 }
 
 func (t Trip) SpendsSectionTitle() string {
-	return sectionTitleOrDefault(t.UILabelSpends, "Spends")
+	return sectionTitleOrDefault(t.UILabelSpends, "Expenses")
+}
+
+func (t Trip) GroupExpensesSectionTitle() string {
+	return sectionTitleOrDefault(t.UILabelGroupExpenses, "Group Expenses")
 }
 
 // ItineraryDayDefaultOpen controls initial <details open> for itinerary day groups (index 0 = first day).
@@ -62,3 +66,4 @@ func (t Trip) SectionEnabledFlights() bool   { return t.UIShowFlights }
 func (t Trip) SectionEnabledSpends() bool    { return t.UIShowSpends }
 func (t Trip) SectionEnabledItinerary() bool { return t.UIShowItinerary }
 func (t Trip) SectionEnabledChecklist() bool { return t.UIShowChecklist }
+func (t Trip) SectionEnabledTheTab() bool    { return t.UIShowTheTab && t.UIShowSpends }

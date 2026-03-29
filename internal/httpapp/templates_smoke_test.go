@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	ht "html/template"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,21 +18,24 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 	tmpl := ht.Must(
 		ht.New("").
 			Funcs(ht.FuncMap{
-				"formatDateTime":                  func(s string) string { return s },
-				"formatUIDate":                    func(s string) string { return s },
-				"formatTripDateTime":              func(_ trips.Trip, s string) string { return s },
-				"formatTripClock":                 func(_ trips.Trip, s string) string { return s },
-				"formatTripDateRange":             func(a, b string) string { return a + "–" + b },
-				"formatTripDateShort":             func(a, b string) string { return "Jan 1 – 7" },
-				"formatTripMoney":                 func(f float64) string { return fmt.Sprintf("%.0f", f) },
-				"abbrevMoney":                     func(sym string, f float64) string { return sym + fmt.Sprintf("%.2f", f) },
-				"expenseCategoryStyle":            func(s string) string { return "" },
-				"expenseCategoryIcon":             func(s string) string { return "" },
-				"listContains":                    func(a string, b []string) bool { return false },
-				"hasPrefix":                       strings.HasPrefix,
-				"mainSectionVisible":              func(string, trips.Trip) bool { return true },
-				"tripSectionEnabled":              func(string, trips.Trip) bool { return true },
-				"sidebarWidgetVisible":            func(string, trips.Trip) bool { return true },
+				"formatDateTime":       func(s string) string { return s },
+				"formatTripUIDate":     func(any, string) string { return "d" },
+				"formatTripDateTime":   func(_ trips.Trip, s string) string { return s },
+				"formatTripClock":      func(_ trips.Trip, s string) string { return s },
+				"formatTripDateRange":  func(any, string, string) string { return "a–b" },
+				"formatTripDateShort":  func(any, string, string) string { return "Jan 1 – 7" },
+				"formatTripMoney":      func(f float64) string { return fmt.Sprintf("%.0f", f) },
+				"abbrevMoney":          func(sym string, f float64) string { return sym + fmt.Sprintf("%.2f", f) },
+				"expenseCategoryStyle": func(s string) string { return "" },
+				"expenseCategoryIcon":  func(s string) string { return "" },
+				"listContains":         func(a string, b []string) bool { return false },
+				"hasPrefix":            strings.HasPrefix,
+				"mainSectionVisible":   func(string, trips.Trip) bool { return true },
+				"tripSectionEnabled":   func(string, trips.Trip) bool { return true },
+				"sidebarWidgetVisible": func(string, trips.Trip) bool { return true },
+				"effectiveDistanceUnit": func(trip trips.Trip, settings trips.AppSettings) string {
+					return trips.EffectiveDistanceUnit(&trip, settings)
+				},
 				"tripMainSectionLabel":            func(s string) string { return s },
 				"tripSidebarWidgetLabel":          func(s string) string { return s },
 				"tripMainSectionVisibilityIcon":   trips.MainSectionVisibilityIcon,
@@ -47,6 +51,86 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 				},
 				"profileAvatarURL": func(u trips.User) string { return "" },
 				"sub":              func(a, b int) int { return a - b },
+				"dict": func(values ...any) (map[string]any, error) {
+					if len(values)%2 != 0 {
+						return nil, fmt.Errorf("dict: expected even number of arguments")
+					}
+					m := make(map[string]any, len(values)/2)
+					for i := 0; i < len(values); i += 2 {
+						k, ok := values[i].(string)
+						if !ok {
+							return nil, fmt.Errorf("dict: key at %d must be string", i)
+						}
+						m[k] = values[i+1]
+					}
+					return m, nil
+				},
+				"tabEffectivePaidBy": func(e trips.Expense, ownerID string) string {
+					return trips.EffectivePaidBy(e, ownerID)
+				},
+				"tabSettlementParticipantKey": trips.TabSettlementParticipantKey,
+				"tabSplitModeShort": func(mode string) string {
+					switch strings.ToLower(strings.TrimSpace(mode)) {
+					case trips.TabSplitEqual, "":
+						return "Equal"
+					case trips.TabSplitExact:
+						return "Exact"
+					case trips.TabSplitPercent:
+						return "Percent"
+					case trips.TabSplitShares:
+						return "Shares"
+					default:
+						return mode
+					}
+				},
+				"add": func(a, b int) int { return a + b },
+				"mod": func(a, b int) int {
+					if b == 0 {
+						return 0
+					}
+					return a % b
+				},
+				"guestInitial":  trips.GuestInitialFromDisplayName,
+				"tabPayerThumb": tabPayerThumb,
+				"tabAvatarURL": func(s string) string {
+					s = strings.TrimSpace(s)
+					if s == "" {
+						return ""
+					}
+					if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+						return s
+					}
+					if strings.HasPrefix(s, "/") {
+						return s
+					}
+					return "/" + s
+				},
+				"tabSplitMethodBadgeClass": func(mode string) string {
+					switch strings.ToLower(strings.TrimSpace(mode)) {
+					case trips.TabSplitEqual, "":
+						return "tab-split-method-badge--equal"
+					default:
+						return "tab-split-method-badge--neutral"
+					}
+				},
+				"tabTabQueryString": func(balanceView, q, tabCat string) string {
+					v := url.Values{}
+					bv := strings.ToLower(strings.TrimSpace(balanceView))
+					if bv == "debts" {
+						v.Set("balance_view", "debts")
+					}
+					if strings.TrimSpace(q) != "" {
+						v.Set("q", strings.TrimSpace(q))
+					}
+					if strings.TrimSpace(tabCat) != "" {
+						v.Set("tab_cat", strings.TrimSpace(tabCat))
+					}
+					s := v.Encode()
+					if s == "" {
+						return ""
+					}
+					return "?" + s
+				},
 			}).
 			ParseGlob(filepath.Join(root, "web", "templates", "*.html")),
 	)
@@ -84,6 +168,8 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 			DashboardTripLayout:   "grid",
 		},
 		"TravelStats":            trips.TravelStats{MilesDisplay: "0"},
+		"TravelDistanceDisplay":  "0 km",
+		"HomeDistanceUnit":       "km",
 		"DashboardListLayout":    false,
 		"HeroPatternClass":       "",
 		"HeroImageURL":           "",
@@ -128,21 +214,24 @@ func TestAboutPageTemplateRenders(t *testing.T) {
 	tmpl := ht.Must(
 		ht.New("").
 			Funcs(ht.FuncMap{
-				"hasPrefix":                       strings.HasPrefix,
-				"formatDateTime":                  func(s string) string { return s },
-				"formatUIDate":                    func(s string) string { return s },
-				"formatTripDateTime":              func(_ trips.Trip, s string) string { return s },
-				"formatTripClock":                 func(_ trips.Trip, s string) string { return s },
-				"formatTripDateRange":             func(a, b string) string { return a + "–" + b },
-				"formatTripDateShort":             func(a, b string) string { return "Jan 1 – 7" },
-				"formatTripMoney":                 func(f float64) string { return fmt.Sprintf("%.0f", f) },
-				"abbrevMoney":                     func(sym string, f float64) string { return sym + fmt.Sprintf("%.2f", f) },
-				"expenseCategoryStyle":            func(s string) string { return "" },
-				"expenseCategoryIcon":             func(s string) string { return "" },
-				"listContains":                    func(a string, b []string) bool { return false },
-				"mainSectionVisible":              func(string, trips.Trip) bool { return true },
-				"tripSectionEnabled":              func(string, trips.Trip) bool { return true },
-				"sidebarWidgetVisible":            func(string, trips.Trip) bool { return true },
+				"hasPrefix":            strings.HasPrefix,
+				"formatDateTime":       func(s string) string { return s },
+				"formatTripUIDate":     func(any, string) string { return "d" },
+				"formatTripDateTime":   func(_ trips.Trip, s string) string { return s },
+				"formatTripClock":      func(_ trips.Trip, s string) string { return s },
+				"formatTripDateRange":  func(any, string, string) string { return "a–b" },
+				"formatTripDateShort":  func(any, string, string) string { return "Jan 1 – 7" },
+				"formatTripMoney":      func(f float64) string { return fmt.Sprintf("%.0f", f) },
+				"abbrevMoney":          func(sym string, f float64) string { return sym + fmt.Sprintf("%.2f", f) },
+				"expenseCategoryStyle": func(s string) string { return "" },
+				"expenseCategoryIcon":  func(s string) string { return "" },
+				"listContains":         func(a string, b []string) bool { return false },
+				"mainSectionVisible":   func(string, trips.Trip) bool { return true },
+				"tripSectionEnabled":   func(string, trips.Trip) bool { return true },
+				"sidebarWidgetVisible": func(string, trips.Trip) bool { return true },
+				"effectiveDistanceUnit": func(trip trips.Trip, settings trips.AppSettings) string {
+					return trips.EffectiveDistanceUnit(&trip, settings)
+				},
 				"tripMainSectionLabel":            func(s string) string { return s },
 				"tripSidebarWidgetLabel":          func(s string) string { return s },
 				"tripMainSectionVisibilityIcon":   trips.MainSectionVisibilityIcon,
@@ -156,6 +245,86 @@ func TestAboutPageTemplateRenders(t *testing.T) {
 				},
 				"profileAvatarURL": func(u trips.User) string { return "" },
 				"sub":              func(a, b int) int { return a - b },
+				"dict": func(values ...any) (map[string]any, error) {
+					if len(values)%2 != 0 {
+						return nil, fmt.Errorf("dict: expected even number of arguments")
+					}
+					m := make(map[string]any, len(values)/2)
+					for i := 0; i < len(values); i += 2 {
+						k, ok := values[i].(string)
+						if !ok {
+							return nil, fmt.Errorf("dict: key at %d must be string", i)
+						}
+						m[k] = values[i+1]
+					}
+					return m, nil
+				},
+				"tabEffectivePaidBy": func(e trips.Expense, ownerID string) string {
+					return trips.EffectivePaidBy(e, ownerID)
+				},
+				"tabSettlementParticipantKey": trips.TabSettlementParticipantKey,
+				"tabSplitModeShort": func(mode string) string {
+					switch strings.ToLower(strings.TrimSpace(mode)) {
+					case trips.TabSplitEqual, "":
+						return "Equal"
+					case trips.TabSplitExact:
+						return "Exact"
+					case trips.TabSplitPercent:
+						return "Percent"
+					case trips.TabSplitShares:
+						return "Shares"
+					default:
+						return mode
+					}
+				},
+				"add": func(a, b int) int { return a + b },
+				"mod": func(a, b int) int {
+					if b == 0 {
+						return 0
+					}
+					return a % b
+				},
+				"guestInitial":  trips.GuestInitialFromDisplayName,
+				"tabPayerThumb": tabPayerThumb,
+				"tabAvatarURL": func(s string) string {
+					s = strings.TrimSpace(s)
+					if s == "" {
+						return ""
+					}
+					if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+						return s
+					}
+					if strings.HasPrefix(s, "/") {
+						return s
+					}
+					return "/" + s
+				},
+				"tabSplitMethodBadgeClass": func(mode string) string {
+					switch strings.ToLower(strings.TrimSpace(mode)) {
+					case trips.TabSplitEqual, "":
+						return "tab-split-method-badge--equal"
+					default:
+						return "tab-split-method-badge--neutral"
+					}
+				},
+				"tabTabQueryString": func(balanceView, q, tabCat string) string {
+					v := url.Values{}
+					bv := strings.ToLower(strings.TrimSpace(balanceView))
+					if bv == "debts" {
+						v.Set("balance_view", "debts")
+					}
+					if strings.TrimSpace(q) != "" {
+						v.Set("q", strings.TrimSpace(q))
+					}
+					if strings.TrimSpace(tabCat) != "" {
+						v.Set("tab_cat", strings.TrimSpace(tabCat))
+					}
+					s := v.Encode()
+					if s == "" {
+						return ""
+					}
+					return "?" + s
+				},
 			}).
 			ParseGlob(filepath.Join(root, "web", "templates", "*.html")),
 	)

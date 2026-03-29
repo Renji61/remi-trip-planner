@@ -10,16 +10,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=87">
+  <link rel="stylesheet" href="/static/app.css?v=136">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js"></script>
+  <script defer src="/static/app.js?v=121"></script>
 </head>
-<body>
+<body class="page-profile-settings">
   <main class="app-shell">
     <aside class="sidebar">
       {{template "dashboardShellSidebar" .}}
     </aside>
-    <section class="main" aria-label="Profile">
+    <section class="main profile-settings-main" aria-label="Profile">
       <header class="trip-mobile-header">
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
           <span class="material-symbols-outlined" aria-hidden="true">home</span>
@@ -38,7 +38,7 @@
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
           <h2>Profile</h2>
-          <p>Account Settings</p>
+          <p>Account settings</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           <a href="/" class="icon-btn" aria-label="Go to dashboard">
@@ -47,32 +47,40 @@
           <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
+          {{template "desktopDashboardProfileMenu" .}}
         </div>
       </header>
-      <div class="settings-grid">
+      <div class="settings-grid profile-settings-page">
         {{if .Saved}}<p class="profile-updated-banner" role="status">✓ Profile updated.</p>{{end}}
         {{if .Error}}<p class="settings-field-hint error">{{.Error}}</p>{{end}}
-        <section class="card">
-          <h3>Account</h3>
+        <div class="trip-settings-subcard" aria-labelledby="profile-account-title">
+          <div class="trip-settings-card-head">
+            <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">badge</span>
+            <h3 class="trip-settings-card-title" id="profile-account-title">Account</h3>
+          </div>
           {{if not .EmailVerified}}
-          <p class="muted">Email not verified.</p>
-          <form method="post" action="/profile/resend-verify" class="form-grid" style="margin-bottom:12px;" data-toast-message="Verification link sent.">
+          <p class="muted trip-settings-section-hint">Email not verified.</p>
+          <form method="post" action="/profile/resend-verify" class="form-grid trip-settings-form-grid remi-trip-widget-form profile-inline-action-form" data-toast-message="Verification link sent.">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-            <button type="submit" class="secondary-btn">Resend verification link</button>
+            <button type="submit" class="secondary-btn full">Resend verification link</button>
           </form>
           <p class="muted settings-field-hint">In development the link is logged on the server.</p>
           {{end}}
-          <form method="post" action="/profile" class="form-grid" data-toast-message="Profile updated.">
+          <form method="post" action="/profile" class="form-grid trip-settings-form-grid remi-trip-widget-form" data-toast-message="Profile updated.">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <label class="full">Email<input type="email" name="email" value="{{.User.Email}}" required autocomplete="email"></label>
             <label class="full">Username<input type="text" name="username" value="{{.User.Username}}" required autocomplete="username"></label>
             <label class="full">Display name<input type="text" name="display_name" value="{{.User.DisplayName}}" autocomplete="name"></label>
-            <button type="submit" class="full">Update Profile</button>
+            <button type="submit" class="full">Update profile</button>
           </form>
-        </section>
-        <section class="card">
-          <h3>Password</h3>
-          <form method="post" action="/profile/password" class="form-grid" data-toast-message="Password updated.">
+        </div>
+        <div class="trip-settings-subcard" aria-labelledby="profile-password-title">
+          <div class="trip-settings-card-head">
+            <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">lock</span>
+            <h3 class="trip-settings-card-title" id="profile-password-title">Password</h3>
+          </div>
+          <p class="muted trip-settings-section-hint">Use a strong password you do not reuse elsewhere.</p>
+          <form method="post" action="/profile/password" class="form-grid trip-settings-form-grid remi-trip-widget-form" data-toast-message="Password updated.">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <label class="full">Current password<input type="password" name="current_password" required autocomplete="current-password"{{if .CurrentPasswordError}} aria-invalid="true" aria-describedby="profile-current-password-error"{{end}}></label>
             {{if .CurrentPasswordError}}<p id="profile-current-password-error" class="settings-field-hint error full auth-password-hint" role="alert">{{.CurrentPasswordError}}</p>{{end}}
@@ -82,7 +90,7 @@
             {{if .PasswordError}}<p class="settings-field-hint error full auth-setup-error" role="alert">{{.PasswordError}}</p>{{end}}
             <button type="submit" class="full">Update password</button>
           </form>
-        </section>
+        </div>
       </div>
     </section>
   </main>

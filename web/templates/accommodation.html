@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=86">
+  <link rel="stylesheet" href="/static/app.css?v=143">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=83"></script>
+  <script defer src="/static/app.js?v=124"></script>
 </head>
 <body>
   <main class="app-shell" aria-label="{{.Details.Trip.StaySectionTitle}}" data-long-press-sheet-root>
@@ -41,14 +41,12 @@
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
           <span class="material-symbols-outlined" aria-hidden="true">home</span>
         </a>
-        <h2>{{.Details.Trip.StaySectionTitle}}</h2>
+        <h2 class="trip-mobile-header-title">{{.Details.Trip.StaySectionTitle}}</h2>
         <div class="budget-mobile-header-actions">
           <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
-          <button type="button" class="budget-mobile-header-btn" data-trip-mobile-profile-open aria-label="Open account menu">
-            <span class="material-symbols-outlined" aria-hidden="true">person</span>
-          </button>
+          {{template "tripMobileHeaderProfileBtn" .}}
         </div>
       </header>
       <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
@@ -59,12 +57,7 @@
           <p>Manage your {{.Details.Trip.StaySectionTitle}} bookings.</p>
         </div>
         <div class="topbar-right topbar-right--tools">
-          <a href="/" class="icon-btn" aria-label="Go to dashboard">
-            <span class="material-symbols-outlined" aria-hidden="true">home</span>
-          </a>
-          <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
-            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
-          </button>
+          {{template "tripDesktopHeaderTools" .}}
         </div>
       </header>
 
@@ -72,7 +65,10 @@
         <section class="accommodation-form-panel" aria-labelledby="stay-form-title">
           <div class="accommodation-form-head">
             <div class="accommodation-form-icon" aria-hidden="true"><span class="material-symbols-outlined">add_business</span></div>
-            <h3 id="stay-form-title">New {{.Details.Trip.StaySectionTitle}} booking</h3>
+            <div class="accommodation-form-head-text">
+              <h3 id="stay-form-title">New {{.Details.Trip.StaySectionTitle}} booking</h3>
+              <p class="trip-resource-form-subtitle">Details sync to your itinerary and expenses.</p>
+            </div>
           </div>
           {{if .Details.Trip.IsArchived}}
           <p class="muted">Trip is archived. New accommodation entries are disabled.</p>
@@ -83,10 +79,10 @@
             <p class="full location-hint" data-accommodation-status>We will try to auto-fill address from the name you enter.</p>
             <label>Check-in Date/Time<input type="datetime-local" name="check_in_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
             <label>Check-out Date/Time<input type="datetime-local" name="check_out_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
-            <label class="full">Cost<input type="number" step="0.01" name="cost" placeholder="0.00"></label>
-            <label class="full">Booking Confirmation #<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
-            <label class="full">Notes<input type="text" name="notes" placeholder="Breakfast included, high floor requested..."></label>
-            <label class="full">Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
+            <label>Cost<input type="number" step="0.01" name="cost" placeholder="0.00"></label>
+            <label>Booking Confirmation #<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
+            <label>Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
+            <label>Notes<input type="text" name="notes" placeholder="Breakfast included, high floor requested..."></label>
             <button class="full accommodation-save-btn" type="submit">Save {{.Details.Trip.StaySectionTitle}} booking</button>
           </form>
           {{end}}
@@ -98,7 +94,7 @@
           </div>
           {{if .Details.Lodgings}}
             <div class="mobile-entry-carousel" data-mobile-entry-carousel>
-              <button type="button" class="mobile-entry-carousel__hint mobile-entry-carousel__hint--prev" aria-label="Previous stay"><span class="material-symbols-outlined" aria-hidden="true">chevron_left</span></button>
+              <button type="button" class="mobile-entry-carousel__hint mobile-entry-carousel__hint--prev" aria-label="Previous accommodation"><span class="material-symbols-outlined" aria-hidden="true">chevron_left</span></button>
               <div class="mobile-entry-carousel__viewport">
             <ul class="list accommodation-card-list accommodation-stays-list mobile-entry-carousel__track">
               {{range .Details.Lodgings}}
@@ -107,12 +103,12 @@
                   <details class="item-actions accommodation-card-actions trip-inline-actions-dropdown">
                     <summary class="trip-inline-actions-summary">
                       <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
-                      <span class="trip-inline-actions-summary-label">Stay actions</span>
+                      <span class="trip-inline-actions-summary-label">Accommodation actions</span>
                     </summary>
                     <div class="trip-inline-actions-buttons">
-                      <button type="button" class="item-action-btn" data-inline-edit-open="accommodation-edit-{{.ID}}" aria-label="Edit stay: {{.Name}}" title="Edit this stay">Edit</button>
-                      <form method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this stay?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete stay" data-confirm-icon="hotel" data-confirm-variant="danger">
-                        <button type="submit" class="item-action-btn danger" aria-label="Delete stay: {{.Name}}" title="Delete this stay">Delete</button>
+                      <button type="button" class="item-action-btn" data-inline-edit-open="accommodation-edit-{{.ID}}" aria-label="Edit accommodation: {{.Name}}" title="Edit this accommodation">Edit</button>
+                      <form method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this accommodation?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete accommodation" data-confirm-icon="hotel" data-confirm-variant="danger">
+                        <button type="submit" class="item-action-btn danger" aria-label="Delete accommodation: {{.Name}}" title="Delete this accommodation">Delete</button>
                       </form>
                     </div>
                   </details>
@@ -134,11 +130,11 @@
                         <div class="vehicle-main-top">
                           <div>
                             <h4>{{.Name}}</h4>
-                            <p>{{if .Address}}{{.Address}}{{else}}—{{end}}{{with googleMapsSearchURL .Latitude .Longitude .Address}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</p>
+                            <p class="stay-address-line">{{if .Address}}{{locationLineBeforeComma .Address}}{{else}}—{{end}}{{with googleMapsSearchURL .Latitude .Longitude .Address}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</p>
                           </div>
                           <div class="vehicle-cost-block">
                             <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}}</strong>
-                            <small>Total Stay</small>
+                            <small>Total accommodation</small>
                           </div>
                         </div>
                         <div class="vehicle-meta-grid">
@@ -153,28 +149,32 @@
                   </div>
 
                   {{if not $.Details.Trip.IsArchived}}
-                  <form id="accommodation-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/update" class="form-grid item-edit hidden full accommodation-edit-form" enctype="multipart/form-data">
-                    <div class="full accommodation-edit-head">
-                      <h5>Edit {{$.Details.Trip.StaySectionTitle}}</h5>
-                      <p>Update details here and it will sync to itinerary and expenses.</p>
+                  <form id="accommodation-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/update" class="form-grid item-edit hidden full accommodation-edit-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form>
+                    <div class="full accommodation-form-head accommodation-edit-form-head">
+                      <div class="accommodation-form-icon" aria-hidden="true"><span class="material-symbols-outlined">edit_square</span></div>
+                      <div class="accommodation-form-head-text">
+                        <h3>Edit {{$.Details.Trip.StaySectionTitle}}</h3>
+                        <p class="accommodation-edit-subtitle muted">Update details here and it will sync to itinerary and expenses.</p>
+                      </div>
                     </div>
-                    <label class="full">Hotel or Residence Name<input type="text" name="name" value="{{.Name}}" required></label>
-                    <label class="full">Address<input type="text" name="address" value="{{.Address}}" required data-location-autocomplete></label>
+                    <label class="full">Hotel or Residence Name<input type="text" name="name" value="{{.Name}}" required data-accommodation-name></label>
+                    <label class="full">Address<input type="text" name="address" value="{{.Address}}" required data-accommodation-address data-location-autocomplete></label>
+                    <p class="full location-hint" data-accommodation-status>We will try to auto-fill address from the name you enter.</p>
                     <label>Check-in Date/Time<input type="datetime-local" name="check_in_at" value="{{.CheckInAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
                     <label>Check-out Date/Time<input type="datetime-local" name="check_out_at" value="{{.CheckOutAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
-                    <label>Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Cost}}"></label>
-                    <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}"></label>
+                    <label>Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
+                    <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
                     <input type="hidden" name="current_attachment_path" value="{{.AttachmentPath}}">
-                    <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}"></label>
-                    <label class="full">Replace Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
-                    <label class="full">Attachment Action
+                    <label>Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
+                    <label>Notes<input type="text" name="notes" value="{{.Notes}}" placeholder="Breakfast included, high floor requested..."></label>
+                    <label class="full">Attachment action
                       <select name="remove_attachment">
                         <option value="false" selected>Keep existing attachment</option>
                         <option value="true">Delete existing attachment</option>
                       </select>
                     </label>
                     <div class="full accommodation-edit-actions">
-                      <button type="submit">Save Changes</button>
+                      <button type="submit" class="accommodation-save-btn">Save Changes</button>
                       <button type="button" class="secondary-btn" data-inline-edit-cancel="accommodation-edit-{{.ID}}">Cancel</button>
                     </div>
                   </form>
@@ -183,13 +183,13 @@
               {{end}}
             </ul>
               </div>
-              <button type="button" class="mobile-entry-carousel__hint mobile-entry-carousel__hint--next" aria-label="Next stay"><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></button>
+              <button type="button" class="mobile-entry-carousel__hint mobile-entry-carousel__hint--next" aria-label="Next accommodation"><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></button>
             </div>
           {{else}}
           <div class="accommodation-empty">
             <div aria-hidden="true"><span class="material-symbols-outlined">hotel</span></div>
             <h4>Add Next Destination</h4>
-            <p>Keep your journey organized by adding another stay.</p>
+            <p>Keep your journey organized by adding another accommodation.</p>
           </div>
           {{end}}
         </section>
@@ -201,21 +201,10 @@
       <span class="material-symbols-outlined" aria-hidden="true">add</span>
     </button>
     <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
-      {{if .Details.Trip.UIShowItinerary}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}?open=stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>Add Stop</a>{{end}}
-      {{if .Details.Trip.UIShowSpends}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/budget#add-expense"><span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>Add {{.Details.Trip.SpendsSectionTitle}}</a>{{end}}
-      {{if .Details.Trip.UIShowStay}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add {{.Details.Trip.StaySectionTitle}}</a>{{end}}
-      {{if .Details.Trip.UIShowVehicle}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add {{.Details.Trip.VehicleSectionTitle}}</a>{{end}}
-      {{if .Details.Trip.UIShowFlights}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>Add {{.Details.Trip.FlightsSectionTitle}}</a>{{end}}
-      {{if sidebarWidgetVisible "checklist" .Details.Trip}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}?open=checklist"><span class="material-symbols-outlined" aria-hidden="true">playlist_add</span>Add to Checklist</a>{{end}}
+      {{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}
     </div>
   </div>
-  <nav class="bottom-nav" aria-label="Trip sections">
-    <a href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined" aria-hidden="true">map</span><span>My Trip</span></a>
-    {{if .Details.Trip.UIShowStay}}<a class="active" href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span><span>{{.Details.Trip.StaySectionTitle}}</span></a>{{end}}
-    {{if .Details.Trip.UIShowVehicle}}<a href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span><span>{{.Details.Trip.VehicleSectionTitle}}</span></a>{{end}}
-    {{if .Details.Trip.UIShowFlights}}<a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span><span>{{.Details.Trip.FlightsSectionTitle}}</span></a>{{end}}
-    {{if .Details.Trip.UIShowSpends}}<a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>{{.Details.Trip.SpendsSectionTitle}}</span></a>{{end}}
-  </nav>
+  {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "stay")}}
   {{template "tripLongPressSheet"}}
   {{template "tripMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}

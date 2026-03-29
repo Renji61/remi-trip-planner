@@ -28,7 +28,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 - **Own your data** — SQLite file on disk, no vendor lock-in.
 - **Fast to run** — Go + Chi, minimal JavaScript; suitable for a small VPS or homelab.
-- **Practical trip workflow** — itinerary on a map, spends vs budget, stays, rentals, flights, and packing-style checklists in one place.
+- **Practical trip workflow** — itinerary on a map, expenses vs budget, stays, rentals, flights, and packing-style checklists in one place.
 
 ---
 
@@ -50,7 +50,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### Trips & dashboard
 
 - Create trips from the home page (optional **place lookup** for trip map center; falls back to site default location); view **active**, **draft**, and **archived** groups.
-- **Dashboard sidebar & mobile bottom bar:** up to **two** shortcuts to trips that are **in progress** or **upcoming** (in that priority order), in addition to **My Trip** and **Settings**.
+- **Dashboard sidebar & mobile bottom bar:** up to **two** shortcuts to trips that are **in progress** or **upcoming** (in that priority order), in addition to **My Trip**, **Profile**, and **Settings**.
 - **Dashboard customization:** grid vs list cards, sort order, hero background style, heading text (app settings).
 - Per-trip: name, description, dates, **cover image URL**, **currency**, archive/delete.
 
@@ -62,12 +62,13 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - **Search** across itinerary text from the trip header.
 - **Geocoding** can be disabled globally (app settings) for privacy or rate-limit reasons.
 
-### Spends & budget
+### Expenses & group expenses
 
-- Manual expenses (category, amount, date, payment method, notes).
-- **Budget summary** on the trip page (budgeted vs spent); dedicated **budget** subpage with transactions and export.
-- **Quick spend** entry from the trip sidebar (when Spends is enabled).
-- Some spends are **linked** to stay, vehicle, or flight bookings and edited from those flows.
+- Manual **expenses** (category, amount, date, payment method, notes) at `/trips/{id}/expenses`; **group expenses (tab)** at `/trips/{id}/group-expenses` with equal, exact, percent, and share-based splits; **301** redirects from legacy `/budget` and `/tab` URLs.
+- **Budget summary** on the trip page (budgeted vs spent); dedicated expenses subpage with transactions and export.
+- **Quick expense** entry from the trip sidebar (when the expenses section is enabled).
+- Some expenses are **linked** to stay, vehicle, or flight bookings and edited from those flows.
+- **Departed participants** on group expenses keep historical splits and settlements consistent when collaborators leave; labels show **Left trip** where applicable.
 
 ### Stay, vehicle, flights
 
@@ -80,17 +81,18 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 ### Trip page layout & personalization
 
-- Toggle visibility of **Stay**, **Vehicle**, **Flights**, and **Spends** (and related nav/widgets).
+- Toggle visibility of **Stay**, **Vehicle**, **Flights**, and **Expenses** (and related nav/widgets).
 - Rename section labels for nav and headings.
-- Control **default expanded** state for itinerary and spend day groups.
-- **12h / 24h** clock display per trip.
-- **Reorder** main column sections: Trip Map, Itinerary, Spends, Reminder Checklist, Stay, Vehicle, Flights (hero and trip edit panel stay at the top).
-- **Reorder** right-sidebar widgets: Add New Stop, Total Budgeted Cost, Quick Spends, Add to Checklist (wide layouts; budget/quick respect Spends toggle).
+- Control **default expanded** state for itinerary and expense day groups.
+- **12h / 24h** clock and **DD/MM/YYYY** vs **MM/DD/YYYY** calendar date format per trip.
+- **Reorder** main column sections: Trip Map, Itinerary, Expenses, Reminder Checklist, Stay, Vehicle, Flights (hero and trip edit panel stay at the top).
+- **Reorder** right-sidebar widgets: Add New Stop, Total Budgeted Cost, Quick expenses, Add to Checklist (wide layouts; budget/quick respect the expenses section toggle).
 - **Mobile:** the bottom **Trip sections** navigation **scrolls horizontally** when many sections are on, so every tab stays reachable.
 
 ### App-wide settings
 
 - App title, default currency, **default map location** (place search with short name stored; Tokyo fallback), map zoom, theme (light / dark / system), location lookup, dashboard presentation options — via **Settings** and quick theme POST from the trip shell.
+- **Desktop:** shared **account** dropdown (profile initial, **Profile**, **App settings**, **Log out**) on trip topbars and other app-shell pages for consistent navigation.
 
 ### About & updates
 
@@ -140,7 +142,7 @@ Environment variables (all optional except as noted):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `APP_ADDR` | `:4122` | HTTP listen address for **native** runs. Inside Docker the image uses `:8080`; map host port in Compose (default **4122**). |
+| `APP_ADDR` | `127.0.0.1:4122` | HTTP listen address for **native** runs (loopback only; not reachable from other machines). Set `:4122` to listen on all interfaces. Inside Docker the image uses `:8080`; map host port in Compose (default **4122**). |
 | `SQLITE_PATH` | `./data/trips.db` | SQLite database file path. |
 | `REMI_ROOT` | _(unset)_ | Absolute path to repo root if the process cwd is not the module directory. |
 
@@ -159,7 +161,7 @@ mkdir -p data
 go run ./cmd/server
 ```
 
-Open [http://localhost:4122](http://localhost:4122).
+Open [http://127.0.0.1:4122](http://127.0.0.1:4122) (or [http://localhost:4122](http://localhost:4122) if your system resolves `localhost` to IPv4).
 
 Use another port:
 
@@ -188,7 +190,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.45.0` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.46.0` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 

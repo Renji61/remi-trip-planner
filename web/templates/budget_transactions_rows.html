@@ -11,7 +11,7 @@
       </div>
     </div>
   </td>
-  <td class="budget-table-description">{{if .Description}}{{.Description}}{{else}}--{{end}}</td>
+  <td class="budget-table-description">{{if .Description}}{{.Description}}{{else}}--{{end}}{{if .ReceiptPath}} <a href="{{.ReceiptPath}}" target="_blank" rel="noopener">Receipt</a>{{end}}</td>
   <td class="budget-table-method">{{.Method}}</td>
   <td class="budget-table-amount budget-table-right">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</td>
   <td class="budget-table-actions">
@@ -24,7 +24,7 @@
       <div class="trip-inline-actions-buttons">
         <button type="button" class="item-action-btn" data-inline-edit-open="expense-edit-budget-{{.ExpenseID}}">Edit</button>
         <form method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ExpenseID}}/delete" data-app-confirm data-confirm-title="Delete this spend?" data-confirm-body="This expense will be removed from your trip." data-confirm-ok="Delete spend" data-confirm-icon="receipt_long" data-confirm-variant="danger" data-ajax-submit data-toast-message="Spend deleted.">
-          <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/budget">
+          <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/expenses">
           <button type="submit" class="item-action-btn danger">Delete</button>
         </form>
       </div>
@@ -37,10 +37,15 @@
 {{if .CanEdit}}
 <tr class="budget-expense-edit-row hidden" data-budget-edit-for="{{.ExpenseID}}">
   <td colspan="6" class="budget-expense-edit-cell">
-    <form id="expense-edit-budget-{{.ExpenseID}}" method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ExpenseID}}/update" class="form-grid item-edit budget-expense-edit-form hidden full" data-ajax-submit data-toast-message="Spend updated." data-budget-expense-id="{{.ExpenseID}}">
-      <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/budget">
+    <form id="expense-edit-budget-{{.ExpenseID}}" method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ExpenseID}}/update" class="form-grid item-edit budget-expense-edit-form remi-expense-edit-form hidden full"{{if or .FromTab .ReceiptPath}} enctype="multipart/form-data"{{end}} data-ajax-submit data-toast-message="Expense updated." data-budget-expense-id="{{.ExpenseID}}">
+      <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/expenses">
+      <div class="full budget-expense-edit-head">
+        <h3>Edit {{$.Trip.SpendsSectionTitle}}</h3>
+        <p class="trip-resource-form-subtitle">Update details below; changes sync to this trip.</p>
+      </div>
       {{$curCat := .CategoryName}}
       {{$curMethod := .Method}}
+      <label>Title (optional)<input type="text" name="title" value="{{.TitleRaw}}" maxlength="200" autocomplete="off"></label>
       <label>Category
         <select name="category" required>
           {{range $.ExpenseCategories}}
@@ -63,7 +68,14 @@
       </label>
       <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" .Amount}}" required></label>
       <label>Date<input type="date" name="spent_on" value="{{.SpentOn}}"></label>
-      <label class="full">Notes<input type="text" name="notes" value="{{.NotesRaw}}"></label>
+      <label>Notes<input type="text" name="notes" value="{{.NotesRaw}}"></label>
+      {{if or .FromTab .ReceiptPath}}
+      {{if .ReceiptPath}}
+      <p class="full muted">Current attachment: <a href="{{.ReceiptPath}}" target="_blank" rel="noopener">Open receipt</a></p>
+      <label class="full"><input type="checkbox" name="remove_tab_attachment" value="1"> Remove attachment</label>
+      {{end}}
+      <label class="full">Replace attachment (optional)<input type="file" name="tab_attachment" accept=".pdf,image/*"></label>
+      {{end}}
       <div class="full expense-edit-actions">
         <button type="submit">Save</button>
         <button type="button" class="secondary-btn" data-inline-edit-cancel="expense-edit-budget-{{.ExpenseID}}">Cancel</button>

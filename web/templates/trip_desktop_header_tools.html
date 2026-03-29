@@ -1,0 +1,11 @@
+{{define "tripDesktopHeaderTools"}}
+<div class="trip-desktop-header-tools" role="group" aria-label="Page tools">
+  <a href="/" class="trip-desktop-header-btn trip-desktop-header-btn--icon" aria-label="Go to dashboard" title="Go to dashboard">
+    <span class="material-symbols-outlined" aria-hidden="true">home</span>
+  </a>
+  <button type="button" class="trip-desktop-header-btn trip-desktop-header-btn--icon" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+    <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+  </button>
+  {{template "desktopDashboardProfileMenu" .}}
+</div>
+{{end}}

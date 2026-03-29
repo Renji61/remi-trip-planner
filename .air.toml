@@ -1,7 +1,7 @@
 # Auto-restart dev server on Go/template/static changes.
 # Easiest:  .\scripts\dev.ps1   (uses Air if available, else built-in PowerShell watcher)
 # Or:       air                 (after: go install github.com/air-verse/air@latest)
-# Listen address: set APP_ADDR before air or rely on scripts/run-dev.cmd default :4122.
+# Listen address: set APP_ADDR before air or rely on scripts/run-dev.cmd default 127.0.0.1:4122.
 
 root = "."
 tmp_dir = "tmp"

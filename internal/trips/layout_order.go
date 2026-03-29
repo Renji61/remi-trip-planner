@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-// Main trip page section keys (hero + edit panel stay fixed above these).
+// Main trip page section keys (hero + edit panel remain fixed above these).
 const (
 	MainSectionMap       = "map"
 	MainSectionItinerary = "itinerary"
@@ -13,6 +13,7 @@ const (
 	MainSectionStay      = "stay"
 	MainSectionVehicle   = "vehicle"
 	MainSectionFlights   = "flights"
+	MainSectionTheTab    = "the_tab"
 )
 
 // DefaultMainSectionOrder matches the historical trip page layout.
@@ -20,6 +21,7 @@ var DefaultMainSectionOrder = []string{
 	MainSectionMap,
 	MainSectionItinerary,
 	MainSectionSpends,
+	MainSectionTheTab,
 	MainSectionChecklist,
 	MainSectionStay,
 	MainSectionVehicle,
@@ -30,6 +32,7 @@ var mainSectionSet = map[string]struct{}{
 	MainSectionMap:       {},
 	MainSectionItinerary: {},
 	MainSectionSpends:    {},
+	MainSectionTheTab:    {},
 	MainSectionChecklist: {},
 	MainSectionStay:      {},
 	MainSectionVehicle:   {},
@@ -41,6 +44,7 @@ const (
 	SidebarAddStop      = "add_stop"
 	SidebarBudget       = "budget"
 	SidebarQuickSpends  = "quick_spends"
+	SidebarAddTab       = "add_tab"
 	SidebarAddChecklist = "checklist"
 )
 
@@ -48,6 +52,7 @@ var DefaultSidebarWidgetOrder = []string{
 	SidebarAddStop,
 	SidebarBudget,
 	SidebarQuickSpends,
+	SidebarAddTab,
 	SidebarAddChecklist,
 }
 
@@ -55,6 +60,7 @@ var sidebarWidgetSet = map[string]struct{}{
 	SidebarAddStop:      {},
 	SidebarBudget:       {},
 	SidebarQuickSpends:  {},
+	SidebarAddTab:       {},
 	SidebarAddChecklist: {},
 }
 
@@ -155,6 +161,13 @@ func MainSectionVisible(key string, t Trip) bool {
 		if !t.UIShowSpends {
 			return false
 		}
+	case MainSectionTheTab:
+		if !t.UIShowTheTab {
+			return false
+		}
+		if !t.UIShowSpends {
+			return false
+		}
 	}
 	if strings.TrimSpace(t.UIMainSectionHidden) != "" {
 		return !parseCommaKeySet(t.UIMainSectionHidden)[key]
@@ -170,7 +183,10 @@ func SidebarWidgetVisible(key string, t Trip) bool {
 	if !t.UIShowChecklist && key == SidebarAddChecklist {
 		return false
 	}
-	if !t.UIShowSpends && (key == SidebarBudget || key == SidebarQuickSpends) {
+	if !t.UIShowSpends && (key == SidebarBudget || key == SidebarQuickSpends || key == SidebarAddTab) {
+		return false
+	}
+	if !t.UIShowTheTab && key == SidebarAddTab {
 		return false
 	}
 	if strings.TrimSpace(t.UISidebarWidgetHidden) != "" {
@@ -199,6 +215,8 @@ func MainSectionVisibilityIcon(key string) string {
 		return "directions_car"
 	case MainSectionFlights:
 		return "flight"
+	case MainSectionTheTab:
+		return "tab"
 	default:
 		return "widgets"
 	}
@@ -213,6 +231,8 @@ func SidebarWidgetVisibilityIcon(key string) string {
 		return "account_balance_wallet"
 	case SidebarQuickSpends:
 		return "receipt_long"
+	case SidebarAddTab:
+		return "post_add"
 	case SidebarAddChecklist:
 		return "playlist_add"
 	default:
@@ -228,15 +248,17 @@ func MainSectionLabel(key string) string {
 	case MainSectionItinerary:
 		return "Itinerary"
 	case MainSectionSpends:
-		return "Spends"
+		return "Expenses"
 	case MainSectionChecklist:
 		return "Reminder Checklist"
 	case MainSectionStay:
-		return "Stay"
+		return "Accommodation"
 	case MainSectionVehicle:
-		return "Vehicle"
+		return "Vehicle Rental"
 	case MainSectionFlights:
 		return "Flights"
+	case MainSectionTheTab:
+		return "Group Expenses"
 	default:
 		return key
 	}
@@ -248,9 +270,11 @@ func SidebarWidgetLabel(key string) string {
 	case SidebarAddStop:
 		return "Add New Stop"
 	case SidebarBudget:
-		return "Total Budgeted Cost"
+		return "Budget Limit"
 	case SidebarQuickSpends:
-		return "Quick Spends"
+		return "Quick Expenses"
+	case SidebarAddTab:
+		return "Add to Group Expenses"
 	case SidebarAddChecklist:
 		return "Add to Checklist"
 	default:

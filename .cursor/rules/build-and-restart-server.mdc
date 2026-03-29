@@ -6,6 +6,6 @@ alwaysApply: false
 
 # Use `remi-dev-auto-restart.mdc`
 
-Project convention: **rebuild and restart on port 4122** after changes. See **`remi-dev-auto-restart.mdc`** for the mandatory PowerShell steps.
+Project convention: **rebuild and restart on 127.0.0.1:4122** after changes. See **`remi-dev-auto-restart.mdc`** for the mandatory PowerShell steps.
 
-Docker (`docker compose` / `deploy-docker.ps1`) is optional; default local workflow is **native Go** on **`:4122`**.
+Docker (`docker compose` / `deploy-docker.ps1`) is optional; default local workflow is **native Go** on **`127.0.0.1:4122`**.

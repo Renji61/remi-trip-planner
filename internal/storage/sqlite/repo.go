@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -29,25 +32,29 @@ func sqliteBool(b bool) int {
 
 const tripSelectCols = `id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, home_map_latitude, home_map_longitude, is_archived, owner_user_id,
 		ui_show_stay, ui_show_vehicle, ui_show_flights, ui_show_spends, ui_show_itinerary, ui_show_checklist,
-		ui_itinerary_expand, ui_spends_expand, ui_time_format,
-		ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends,
+		ui_itinerary_expand, ui_spends_expand, ui_tab_expand, ui_time_format, ui_date_format,
+		ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends, ui_label_group_expenses,
 		ui_main_section_order, ui_sidebar_widget_order,
 		ui_main_section_hidden, ui_sidebar_widget_hidden,
 		ui_show_custom_links, ui_custom_sidebar_links,
-		created_at, updated_at`
+		created_at, updated_at, budget_cap, ui_show_the_tab,
+		tab_default_split_mode, tab_default_split_json, distance_unit`
 
 func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
 	var t trips.Trip
-	var ss, sv, sf, sp, sit, sck, scl int
+	var ss, sv, sf, sp, sit, sck, scl, stt int
 	err := scan(
 		&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.HomeMapLatitude, &t.HomeMapLongitude, &t.IsArchived, &t.OwnerUserID,
 		&ss, &sv, &sf, &sp, &sit, &sck,
-		&t.UIItineraryExpand, &t.UISpendsExpand, &t.UITimeFormat,
-		&t.UILabelStay, &t.UILabelVehicle, &t.UILabelFlights, &t.UILabelSpends,
+		&t.UIItineraryExpand, &t.UISpendsExpand, &t.UITabExpand, &t.UITimeFormat, &t.UIDateFormat,
+		&t.UILabelStay, &t.UILabelVehicle, &t.UILabelFlights, &t.UILabelSpends, &t.UILabelGroupExpenses,
 		&t.UIMainSectionOrder, &t.UISidebarWidgetOrder,
 		&t.UIMainSectionHidden, &t.UISidebarWidgetHidden,
 		&scl, &t.UICustomSidebarLinks,
 		&t.CreatedAt, &t.UpdatedAt,
+		&t.BudgetCap, &stt,
+		&t.TabDefaultSplitMode, &t.TabDefaultSplitJSON,
+		&t.DistanceUnit,
 	)
 	if err != nil {
 		return t, err
@@ -59,6 +66,8 @@ func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
 	t.UIShowItinerary = sit != 0
 	t.UIShowChecklist = sck != 0
 	t.UIShowCustomLinks = scl != 0
+	t.UIShowTheTab = stt != 0
+	t.UIDateFormat = trips.NormalizeUIDateFormat(t.UIDateFormat)
 	return t, nil
 }
 
@@ -71,14 +80,17 @@ func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) (string, erro
 		INSERT INTO trips (
 			id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, home_map_latitude, home_map_longitude, is_archived, owner_user_id,
 			ui_show_stay, ui_show_vehicle, ui_show_flights, ui_show_spends, ui_show_itinerary, ui_show_checklist,
-			ui_itinerary_expand, ui_spends_expand, ui_time_format,
-			ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends,
+			ui_itinerary_expand, ui_spends_expand, ui_tab_expand, ui_time_format, ui_date_format,
+			ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends, ui_label_group_expenses,
 			ui_main_section_order, ui_sidebar_widget_order,
 			ui_main_section_hidden, ui_sidebar_widget_hidden,
 			ui_show_custom_links, ui_custom_sidebar_links,
+			budget_cap, ui_show_the_tab, tab_default_split_mode, tab_default_split_json, distance_unit,
 			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 'first', 'first', '12h', '', '', '', '', '', '', '', '', 1, '', ?, ?)`,
-		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude, t.IsArchived, t.OwnerUserID, now, now,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 'first', 'first', 'first', '12h', ?, '', '', '', '', '', '', '', '', '', 1, '', ?, 1, '', '', ?, ?, ?)`,
+		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude, t.IsArchived, t.OwnerUserID,
+		trips.NormalizeUIDateFormat(t.UIDateFormat),
+		t.BudgetCap, t.DistanceUnit, now, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, t.ID, "trip", t.ID, "create", map[string]any{"name": t.Name})
@@ -109,27 +121,36 @@ func (r *Repository) GetTrip(ctx context.Context, tripID string) (trips.Trip, er
 }
 
 func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
+	t.UIDateFormat = trips.NormalizeUIDateFormat(t.UIDateFormat)
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE trips
 		SET name = ?, description = ?, start_date = ?, end_date = ?, cover_image_url = ?, currency_name = ?, currency_symbol = ?,
 		    home_map_latitude = ?, home_map_longitude = ?,
+		    budget_cap = ?,
 		    ui_show_stay = ?, ui_show_vehicle = ?, ui_show_flights = ?, ui_show_spends = ?, ui_show_itinerary = ?, ui_show_checklist = ?,
-		    ui_itinerary_expand = ?, ui_spends_expand = ?, ui_time_format = ?,
-		    ui_label_stay = ?, ui_label_vehicle = ?, ui_label_flights = ?, ui_label_spends = ?,
+		    ui_show_the_tab = ?,
+		    ui_itinerary_expand = ?, ui_spends_expand = ?, ui_tab_expand = ?, ui_time_format = ?, ui_date_format = ?,
+		    ui_label_stay = ?, ui_label_vehicle = ?, ui_label_flights = ?, ui_label_spends = ?, ui_label_group_expenses = ?,
 		    ui_main_section_order = ?, ui_sidebar_widget_order = ?,
 		    ui_main_section_hidden = ?, ui_sidebar_widget_hidden = ?,
 		    ui_show_custom_links = ?, ui_custom_sidebar_links = ?,
+		    tab_default_split_mode = ?, tab_default_split_json = ?,
+		    distance_unit = ?,
 		    updated_at = ?
 		WHERE id = ?`,
 		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude,
+		t.BudgetCap,
 		sqliteBool(t.UIShowStay), sqliteBool(t.UIShowVehicle), sqliteBool(t.UIShowFlights), sqliteBool(t.UIShowSpends),
 		sqliteBool(t.UIShowItinerary), sqliteBool(t.UIShowChecklist),
-		t.UIItineraryExpand, t.UISpendsExpand, t.UITimeFormat,
-		t.UILabelStay, t.UILabelVehicle, t.UILabelFlights, t.UILabelSpends,
+		sqliteBool(t.UIShowTheTab),
+		t.UIItineraryExpand, t.UISpendsExpand, t.UITabExpand, t.UITimeFormat, t.UIDateFormat,
+		t.UILabelStay, t.UILabelVehicle, t.UILabelFlights, t.UILabelSpends, t.UILabelGroupExpenses,
 		t.UIMainSectionOrder, t.UISidebarWidgetOrder,
 		t.UIMainSectionHidden, t.UISidebarWidgetHidden,
 		sqliteBool(t.UIShowCustomLinks), t.UICustomSidebarLinks,
+		t.TabDefaultSplitMode, t.TabDefaultSplitJSON,
+		t.DistanceUnit,
 		now, t.ID,
 	)
 	if err == nil {
@@ -260,12 +281,14 @@ func (r *Repository) AddExpense(ctx context.Context, e trips.Expense) error {
 	}
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO expenses (id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.TripID, e.Category, e.Amount, e.Notes, e.SpentOn, e.PaymentMethod, e.LodgingID, now,
+		INSERT INTO expenses (id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, from_tab, receipt_path, title, paid_by, split_mode, split_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.TripID, e.Category, e.Amount, e.Notes, e.SpentOn, e.PaymentMethod, e.LodgingID, sqliteBool(e.FromTab), e.ReceiptPath,
+		e.Title, e.PaidBy, e.SplitMode, e.SplitJSON, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, e.TripID, "expense", e.ID, "create", map[string]any{"amount": e.Amount, "category": e.Category})
+		_ = r.syncTabExpenseFTS(ctx, e)
 	}
 	return err
 }
@@ -276,19 +299,23 @@ func (r *Repository) UpdateExpense(ctx context.Context, e trips.Expense) error {
 	}
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE expenses
-		SET category = ?, amount = ?, notes = ?, spent_on = ?, payment_method = ?, lodging_id = ?
+		SET category = ?, amount = ?, notes = ?, spent_on = ?, payment_method = ?, lodging_id = ?, from_tab = ?, receipt_path = ?,
+		    title = ?, paid_by = ?, split_mode = ?, split_json = ?
 		WHERE id = ? AND trip_id = ?`,
-		e.Category, e.Amount, e.Notes, e.SpentOn, e.PaymentMethod, e.LodgingID, e.ID, e.TripID,
+		e.Category, e.Amount, e.Notes, e.SpentOn, e.PaymentMethod, e.LodgingID, sqliteBool(e.FromTab), e.ReceiptPath,
+		e.Title, e.PaidBy, e.SplitMode, e.SplitJSON, e.ID, e.TripID,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, e.TripID, "expense", e.ID, "update", map[string]any{
 			"amount": e.Amount, "category": e.Category,
 		})
+		_ = r.syncTabExpenseFTS(ctx, e)
 	}
 	return err
 }
 
 func (r *Repository) DeleteExpense(ctx context.Context, tripID, expenseID string) error {
+	_, _ = r.db.ExecContext(ctx, `DELETE FROM tab_expense_search WHERE expense_id = ?`, expenseID)
 	_, err := r.db.ExecContext(ctx, `DELETE FROM expenses WHERE id = ? AND trip_id = ?`, expenseID, tripID)
 	if err == nil {
 		_ = r.logChange(ctx, tripID, "expense", expenseID, "delete", map[string]any{})
@@ -298,19 +325,25 @@ func (r *Repository) DeleteExpense(ctx context.Context, tripID, expenseID string
 
 func (r *Repository) GetExpense(ctx context.Context, tripID, expenseID string) (trips.Expense, error) {
 	var e trips.Expense
+	var ft int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, created_at
+		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, from_tab, receipt_path, title, paid_by, split_mode, split_json, created_at
 		FROM expenses WHERE id = ? AND trip_id = ?`, expenseID, tripID,
-	).Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &e.CreatedAt)
+	).Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &ft, &e.ReceiptPath,
+		&e.Title, &e.PaidBy, &e.SplitMode, &e.SplitJSON, &e.CreatedAt)
+	e.FromTab = ft != 0
 	return e, err
 }
 
 func (r *Repository) GetExpenseByLodgingID(ctx context.Context, tripID, lodgingID string) (trips.Expense, error) {
 	var e trips.Expense
+	var ft int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, created_at
+		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, from_tab, receipt_path, title, paid_by, split_mode, split_json, created_at
 		FROM expenses WHERE trip_id = ? AND lodging_id = ?`, tripID, lodgingID,
-	).Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &e.CreatedAt)
+	).Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &ft, &e.ReceiptPath,
+		&e.Title, &e.PaidBy, &e.SplitMode, &e.SplitJSON, &e.CreatedAt)
+	e.FromTab = ft != 0
 	return e, err
 }
 
@@ -327,7 +360,7 @@ func (r *Repository) DeleteExpenseByLodgingID(ctx context.Context, tripID, lodgi
 
 func (r *Repository) ListExpenses(ctx context.Context, tripID string) ([]trips.Expense, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, created_at
+		SELECT id, trip_id, category, amount, notes, spent_on, payment_method, lodging_id, from_tab, receipt_path, title, paid_by, split_mode, split_json, created_at
 		FROM expenses WHERE trip_id = ? ORDER BY created_at DESC`, tripID)
 	if err != nil {
 		return nil, err
@@ -336,9 +369,12 @@ func (r *Repository) ListExpenses(ctx context.Context, tripID string) ([]trips.E
 	out := []trips.Expense{}
 	for rows.Next() {
 		var e trips.Expense
-		if err := rows.Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &e.CreatedAt); err != nil {
+		var ft int
+		if err := rows.Scan(&e.ID, &e.TripID, &e.Category, &e.Amount, &e.Notes, &e.SpentOn, &e.PaymentMethod, &e.LodgingID, &ft, &e.ReceiptPath,
+			&e.Title, &e.PaidBy, &e.SplitMode, &e.SplitJSON, &e.CreatedAt); err != nil {
 			return nil, err
 		}
+		e.FromTab = ft != 0
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -526,9 +562,9 @@ func (r *Repository) AddVehicleRental(ctx context.Context, item trips.VehicleRen
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO vehicle_rentals
-		(id, trip_id, pick_up_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.PickUpLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
+		(id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.PickUpLocation, item.DropOffLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
 		item.PickUpItineraryID, item.DropOffItineraryID, item.RentalExpenseID, item.InsuranceExpenseID, now,
 	)
 	return err
@@ -537,10 +573,10 @@ func (r *Repository) AddVehicleRental(ctx context.Context, item trips.VehicleRen
 func (r *Repository) GetVehicleRental(ctx context.Context, tripID, rentalID string) (trips.VehicleRental, error) {
 	var v trips.VehicleRental
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, trip_id, pick_up_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
+		SELECT id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
 		FROM vehicle_rentals WHERE id = ? AND trip_id = ?`,
 		rentalID, tripID,
-	).Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
+	).Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.DropOffLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
 		&v.PickUpItineraryID, &v.DropOffItineraryID, &v.RentalExpenseID, &v.InsuranceExpenseID, &v.CreatedAt)
 	return v, err
 }
@@ -548,9 +584,9 @@ func (r *Repository) GetVehicleRental(ctx context.Context, tripID, rentalID stri
 func (r *Repository) UpdateVehicleRental(ctx context.Context, item trips.VehicleRental) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE vehicle_rentals
-		SET pick_up_location = ?, vehicle_detail = ?, pick_up_at = ?, drop_off_at = ?, booking_confirmation = ?, notes = ?, vehicle_image_path = ?, cost = ?, insurance_cost = ?, pay_at_pick_up = ?, pick_up_itinerary_id = ?, drop_off_itinerary_id = ?, rental_expense_id = ?, insurance_expense_id = ?
+		SET pick_up_location = ?, drop_off_location = ?, vehicle_detail = ?, pick_up_at = ?, drop_off_at = ?, booking_confirmation = ?, notes = ?, vehicle_image_path = ?, cost = ?, insurance_cost = ?, pay_at_pick_up = ?, pick_up_itinerary_id = ?, drop_off_itinerary_id = ?, rental_expense_id = ?, insurance_expense_id = ?
 		WHERE id = ? AND trip_id = ?`,
-		item.PickUpLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
+		item.PickUpLocation, item.DropOffLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
 		item.PickUpItineraryID, item.DropOffItineraryID, item.RentalExpenseID, item.InsuranceExpenseID,
 		item.ID, item.TripID,
 	)
@@ -564,7 +600,7 @@ func (r *Repository) DeleteVehicleRental(ctx context.Context, tripID, rentalID s
 
 func (r *Repository) ListVehicleRentals(ctx context.Context, tripID string) ([]trips.VehicleRental, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, pick_up_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
+		SELECT id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
 		FROM vehicle_rentals
 		WHERE trip_id = ?
 		ORDER BY pick_up_at ASC, created_at ASC`, tripID)
@@ -575,7 +611,7 @@ func (r *Repository) ListVehicleRentals(ctx context.Context, tripID string) ([]t
 	out := []trips.VehicleRental{}
 	for rows.Next() {
 		var v trips.VehicleRental
-		if err := rows.Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
+		if err := rows.Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.DropOffLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
 			&v.PickUpItineraryID, &v.DropOffItineraryID, &v.RentalExpenseID, &v.InsuranceExpenseID, &v.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -694,7 +730,9 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 		       map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
 		       COALESCE(registration_enabled, 1),
 		       COALESCE(theme_preference, 'system'), COALESCE(dashboard_trip_layout, 'grid'), COALESCE(dashboard_trip_sort, 'name'), COALESCE(dashboard_hero_background, 'default'),
-		       COALESCE(NULLIF(TRIM(trip_dashboard_heading), ''), 'Trip Dashboard')
+		       COALESCE(NULLIF(TRIM(trip_dashboard_heading), ''), 'Trip Dashboard'),
+		       COALESCE(TRIM(google_maps_api_key), ''),
+		       COALESCE(NULLIF(TRIM(default_distance_unit), ''), 'km')
 		FROM app_settings
 		WHERE id = 1`).
 		Scan(
@@ -712,6 +750,8 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 			&settings.DashboardTripSort,
 			&settings.DashboardHeroBackground,
 			&settings.TripDashboardHeading,
+			&settings.GoogleMapsAPIKey,
+			&settings.DefaultDistanceUnit,
 		)
 	return settings, err
 }
@@ -724,9 +764,9 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO app_settings
 			(id, app_title, default_currency_name, default_currency_symbol, map_default_place_label, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
-			 registration_enabled, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background, trip_dashboard_heading, updated_at)
+			 registration_enabled, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background, trip_dashboard_heading, google_maps_api_key, default_distance_unit, updated_at)
 		VALUES
-			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			app_title = excluded.app_title,
 			default_currency_name = excluded.default_currency_name,
@@ -742,6 +782,8 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 			dashboard_trip_sort = excluded.dashboard_trip_sort,
 			dashboard_hero_background = excluded.dashboard_hero_background,
 			trip_dashboard_heading = excluded.trip_dashboard_heading,
+			google_maps_api_key = excluded.google_maps_api_key,
+			default_distance_unit = excluded.default_distance_unit,
 			updated_at = excluded.updated_at
 	`,
 		settings.AppTitle,
@@ -758,6 +800,8 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 		settings.DashboardTripSort,
 		settings.DashboardHeroBackground,
 		settings.TripDashboardHeading,
+		settings.GoogleMapsAPIKey,
+		settings.DefaultDistanceUnit,
 		time.Now().UTC(),
 	)
 	return err
@@ -801,4 +845,239 @@ func (r *Repository) SaveTripDayLabel(ctx context.Context, tripID string, dayNum
 		tripID, dayNumber, trimmed, time.Now().UTC(),
 	)
 	return err
+}
+
+func (r *Repository) syncTabExpenseFTS(ctx context.Context, e trips.Expense) error {
+	_, _ = r.db.ExecContext(ctx, `DELETE FROM tab_expense_search WHERE expense_id = ?`, e.ID)
+	if !e.FromTab {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString(strings.ToLower(strings.TrimSpace(e.Title)))
+	b.WriteByte(' ')
+	b.WriteString(strings.ToLower(strings.TrimSpace(e.Notes)))
+	b.WriteByte(' ')
+	b.WriteString(strings.ToLower(strings.TrimSpace(e.Category)))
+	b.WriteByte(' ')
+	b.WriteString(strings.ToLower(strings.TrimSpace(e.PaymentMethod)))
+	b.WriteByte(' ')
+	fmt.Fprintf(&b, "%.2f", e.Amount)
+	body := strings.TrimSpace(b.String())
+	if body == "" {
+		body = "expense"
+	}
+	_, err := r.db.ExecContext(ctx, `INSERT INTO tab_expense_search(trip_id, expense_id, body) VALUES(?,?,?)`, e.TripID, e.ID, body)
+	return err
+}
+
+// SearchTabExpenseIDs returns expense IDs for Tab entries matching the query (FTS).
+func (r *Repository) SearchTabExpenseIDs(ctx context.Context, tripID, query string) ([]string, error) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+	parts := regexp.MustCompile(`\s+`).Split(q, -1)
+	nonAlnum := regexp.MustCompile(`[^\p{L}\p{N}]+`)
+	var terms []string
+	for _, t := range parts {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		t = nonAlnum.ReplaceAllString(t, "")
+		if t == "" {
+			continue
+		}
+		terms = append(terms, t+`*`)
+	}
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	match := strings.Join(terms, ` AND `)
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT expense_id FROM tab_expense_search WHERE trip_id = ? AND tab_expense_search MATCH ? ORDER BY rowid DESC`,
+		tripID, match)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (r *Repository) ListTripGuests(ctx context.Context, tripID string) ([]trips.TripGuest, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, trip_id, display_name, created_at FROM trip_guests WHERE trip_id = ? ORDER BY display_name COLLATE NOCASE`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []trips.TripGuest
+	for rows.Next() {
+		var g trips.TripGuest
+		if err := rows.Scan(&g.ID, &g.TripID, &g.DisplayName, &g.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) UpdateTripTabDefaults(ctx context.Context, tripID, mode, splitJSON string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE trips SET tab_default_split_mode = ?, tab_default_split_json = ? WHERE id = ?`,
+		strings.TrimSpace(mode), splitJSON, tripID)
+	return err
+}
+
+func (r *Repository) AddTripGuest(ctx context.Context, g trips.TripGuest) error {
+	if g.ID == "" {
+		g.ID = uuid.NewString()
+	}
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO trip_guests (id, trip_id, display_name, created_at) VALUES (?, ?, ?, ?)`,
+		g.ID, g.TripID, strings.TrimSpace(g.DisplayName), now,
+	)
+	return err
+}
+
+func (r *Repository) DeleteTripGuest(ctx context.Context, tripID, guestID string) error {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM trip_guests WHERE id = ? AND trip_id = ?`, guestID, tripID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (r *Repository) GetTripGuest(ctx context.Context, tripID, guestID string) (trips.TripGuest, error) {
+	var g trips.TripGuest
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, trip_id, display_name, created_at FROM trip_guests WHERE id = ? AND trip_id = ?`,
+		guestID, tripID,
+	).Scan(&g.ID, &g.TripID, &g.DisplayName, &g.CreatedAt)
+	return g, err
+}
+
+func (r *Repository) ListDepartedTabParticipants(ctx context.Context, tripID string) ([]trips.DepartedTabParticipant, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT trip_id, participant_key, display_name, left_at
+		FROM trip_departed_tab_participants WHERE trip_id = ?
+		ORDER BY display_name COLLATE NOCASE`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []trips.DepartedTabParticipant
+	for rows.Next() {
+		var d trips.DepartedTabParticipant
+		var leftS string
+		if err := rows.Scan(&d.TripID, &d.ParticipantKey, &d.DisplayName, &leftS); err != nil {
+			return nil, err
+		}
+		d.LeftAt, _ = time.Parse(time.RFC3339, leftS)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) UpsertDepartedTabParticipant(ctx context.Context, tripID, participantKey, displayName string) error {
+	tripID = strings.TrimSpace(tripID)
+	participantKey = strings.TrimSpace(participantKey)
+	displayName = strings.TrimSpace(displayName)
+	if tripID == "" || participantKey == "" {
+		return errors.New("invalid departed tab participant")
+	}
+	if displayName == "" {
+		displayName = participantKey
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO trip_departed_tab_participants (trip_id, participant_key, display_name, left_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(trip_id, participant_key) DO UPDATE SET
+			display_name = excluded.display_name,
+			left_at = excluded.left_at`,
+		tripID, participantKey, displayName, now)
+	return err
+}
+
+func (r *Repository) ClearDepartedTabParticipant(ctx context.Context, tripID, participantKey string) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM trip_departed_tab_participants WHERE trip_id = ? AND participant_key = ?`,
+		strings.TrimSpace(tripID), strings.TrimSpace(participantKey))
+	return err
+}
+
+func (r *Repository) ListTabSettlements(ctx context.Context, tripID string) ([]trips.TabSettlement, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, trip_id, payer_user_id, payee_user_id, amount, method, settled_on, notes, created_at
+		FROM tab_settlements WHERE trip_id = ? ORDER BY created_at DESC`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []trips.TabSettlement
+	for rows.Next() {
+		var s trips.TabSettlement
+		if err := rows.Scan(&s.ID, &s.TripID, &s.PayerUserID, &s.PayeeUserID, &s.Amount, &s.Method, &s.SettledOn, &s.Notes, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) AddTabSettlement(ctx context.Context, s trips.TabSettlement) error {
+	if s.ID == "" {
+		s.ID = uuid.NewString()
+	}
+	if strings.TrimSpace(s.Method) == "" {
+		s.Method = "Cash"
+	}
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO tab_settlements (id, trip_id, payer_user_id, payee_user_id, amount, method, settled_on, notes, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.TripID, s.PayerUserID, s.PayeeUserID, s.Amount, s.Method, s.SettledOn, s.Notes, now,
+	)
+	return err
+}
+
+func (r *Repository) UpdateTabSettlement(ctx context.Context, s trips.TabSettlement) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE tab_settlements SET payer_user_id = ?, payee_user_id = ?, amount = ?, method = ?, settled_on = ?, notes = ?
+		WHERE id = ? AND trip_id = ?`,
+		s.PayerUserID, s.PayeeUserID, s.Amount, s.Method, s.SettledOn, s.Notes, s.ID, s.TripID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (r *Repository) DeleteTabSettlement(ctx context.Context, tripID, settlementID string) error {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM tab_settlements WHERE id = ? AND trip_id = ?`, settlementID, tripID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

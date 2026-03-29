@@ -1,0 +1,25 @@
+{{define "desktopDashboardProfileMenu"}}
+<div class="dashboard-profile-menu" data-dashboard-profile-menu-root>
+  <button type="button" class="trip-desktop-header-profile" data-dashboard-profile-menu-toggle aria-label="Open account menu" title="Account menu" aria-haspopup="menu" aria-expanded="false" aria-controls="dashboard-profile-menu-panel">
+    <span class="trip-desktop-header-profile-initial" aria-hidden="true">{{profileInitial .CurrentUser}}</span>
+  </button>
+  <div class="dashboard-profile-menu__panel" id="dashboard-profile-menu-panel" role="menu" aria-label="Account menu" hidden>
+    <a class="dashboard-profile-menu__item" role="menuitem" href="/profile">
+      <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">account_circle</span>
+      <span>Profile</span>
+    </a>
+    <a class="dashboard-profile-menu__item" role="menuitem" href="/settings{{if and .Details .Details.Trip}}?trip_id={{.Details.Trip.ID}}{{else if .TripID}}?trip_id={{.TripID}}{{else if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}">
+      <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">settings</span>
+      <span>App settings</span>
+    </a>
+    <hr class="dashboard-profile-menu__sep" aria-hidden="true">
+    <form method="post" action="/logout" class="dashboard-profile-menu__logout-form">
+      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+      <button type="submit" class="dashboard-profile-menu__item dashboard-profile-menu__item--button dashboard-profile-menu__item--logout">
+        <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">logout</span>
+        <span>Log out</span>
+      </button>
+    </form>
+  </div>
+</div>
+{{end}}

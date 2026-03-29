@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=89">
+  <link rel="stylesheet" href="/static/app.css?v=143">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=89"></script>
+  <script defer src="/static/app.js?v=124"></script>
 </head>
 <body class="page-site-settings">
-  <main class="app-shell" aria-label="Site settings" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}">
+  <main class="app-shell" aria-label="Site settings" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{if eq .Settings.UserDistanceUnit "mi"}}mi{{else if eq .Settings.UserDistanceUnit "km"}}km{{else if eq .Settings.DefaultDistanceUnit "mi"}}mi{{else}}km{{end}}">
     <aside class="sidebar">
       {{template "dashboardShellSidebar" .}}
     </aside>
@@ -30,9 +30,7 @@
           <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
-          <button type="button" class="budget-mobile-header-btn" data-mobile-profile-open data-mobile-profile-target="#app-mobile-profile-sheet" aria-label="Open account menu">
-            <span class="material-symbols-outlined" aria-hidden="true">person</span>
-          </button>
+          {{template "appHeaderProfileBtn" .}}
         </div>
       </header>
 
@@ -48,6 +46,7 @@
           <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
+          {{template "desktopDashboardProfileMenu" .}}
         </div>
       </header>
 
@@ -67,7 +66,7 @@
                 <h3 class="trip-settings-card-title" id="settings-general-title">General</h3>
               </div>
               <p class="muted trip-settings-section-hint" id="hint-instance">App title, map defaults, and location lookup apply to <strong>everyone</strong> on this server. Dashboard heading, currency, and registration below are saved to <strong>your account</strong> together with this form.</p>
-              <form method="post" action="/settings" class="form-grid trip-settings-form-grid" data-site-settings-map-form>
+              <form method="post" action="/settings" class="form-grid trip-settings-form-grid remi-trip-widget-form" data-site-settings-map-form>
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                 {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
                 <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
@@ -100,12 +99,35 @@
                   </select>
                 </label>
                 <p id="hint-lookup" class="settings-field-hint muted full">When enabled, the app can suggest coordinates for locations (may use external lookup).</p>
+                <label class="full">Google Maps API key <span class="muted">(optional)</span>
+                  <input type="text" name="google_maps_api_key" value="" autocomplete="off" placeholder="Paste a browser key for Maps, Places, and Geocoding" aria-describedby="hint-gmaps">
+                </label>
+                <p id="hint-gmaps" class="settings-field-hint muted full">When set, the app uses Google for location search, geocoding, and trip maps. Leave blank to keep the current key; use “Clear key” to remove it and fall back to OpenStreetMap.</p>
+                <label class="trip-settings-toggle-row">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">delete</span>
+                  <span class="trip-settings-toggle-text">Clear stored Google Maps key</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="clear_google_maps_key" value="0">
+                    <input type="checkbox" name="clear_google_maps_key" value="1">
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                {{if .Settings.GoogleMapsAPIKey}}<p class="muted full">A key is already saved. Enter a new value to replace it, or check “Clear stored key”.</p>{{end}}
+                <label class="full">Default distance unit <span class="muted">(instance)</span>
+                  <select name="default_distance_unit" aria-describedby="hint-dist-app">
+                    <option value="km" {{if eq .Settings.DefaultDistanceUnit "km"}}selected{{end}}>Kilometres</option>
+                    <option value="mi" {{if eq .Settings.DefaultDistanceUnit "mi"}}selected{{end}}>Miles</option>
+                  </select>
+                </label>
+                <p id="hint-dist-app" class="settings-field-hint muted full">Used when a user or trip does not override distance units.</p>
+                <input type="hidden" name="user_distance_unit" value="{{.Settings.UserDistanceUnit}}">
                 <input type="hidden" name="theme_preference" value="{{.Settings.ThemePreference}}">
                 <input type="hidden" name="dashboard_trip_layout" value="{{.Settings.DashboardTripLayout}}">
                 <input type="hidden" name="dashboard_trip_sort" value="{{.Settings.DashboardTripSort}}">
                 <input type="hidden" name="dashboard_hero_background" value="{{.Settings.DashboardHeroBackground}}">
-                <input type="hidden" name="dashboard_hero_background_mode" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}custom_url{{else}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <input type="hidden" name="dashboard_hero_background_mode" value="{{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}custom_upload{{else if hasPrefix .Settings.DashboardHeroBackground "https://"}}custom_url{{else}}{{.Settings.DashboardHeroBackground}}{{end}}">
                 <input type="hidden" name="dashboard_hero_background_url" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <input type="hidden" name="dashboard_hero_existing_path" value="{{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}{{.Settings.DashboardHeroBackground}}{{end}}">
                 <label class="trip-settings-toggle-row">
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">person_add</span>
                   <span class="trip-settings-toggle-text">Allow new users to register <span class="trip-settings-vis-lock-hint">(public sign-up)</span></span>
@@ -126,7 +148,7 @@
                 <h3 class="trip-settings-card-title" id="settings-appearance-title">Appearance</h3>
               </div>
               <p class="muted trip-settings-section-hint">Theme and dashboard hero background. Saves independently from General and Dashboard.</p>
-              <form method="post" action="/settings" class="form-grid trip-settings-form-grid">
+              <form method="post" action="/settings" enctype="multipart/form-data" class="form-grid trip-settings-form-grid remi-trip-widget-form">
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                 {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
                 <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
@@ -141,6 +163,8 @@
                 <input type="hidden" name="site_registration_enabled" value="{{if .Settings.RegistrationEnabled}}1{{else}}0{{end}}">
                 <input type="hidden" name="dashboard_trip_layout" value="{{.Settings.DashboardTripLayout}}">
                 <input type="hidden" name="dashboard_trip_sort" value="{{.Settings.DashboardTripSort}}">
+                <input type="hidden" name="default_distance_unit" value="{{.Settings.DefaultDistanceUnit}}">
+                <input type="hidden" name="user_distance_unit" value="{{.Settings.UserDistanceUnit}}">
                 <label class="full">Theme
                   <select name="theme_preference" aria-describedby="hint-theme" title="Choose app color theme">
                     <option value="light" {{if eq .Settings.ThemePreference "light"}}selected{{end}}>Light</option>
@@ -156,13 +180,25 @@
                     <option value="pattern:grid" {{if eq .Settings.DashboardHeroBackground "pattern:grid"}}selected{{end}}>Muted pattern: grid</option>
                     <option value="pattern:noise" {{if eq .Settings.DashboardHeroBackground "pattern:noise"}}selected{{end}}>Muted pattern: noise</option>
                     <option value="pattern:waves" {{if eq .Settings.DashboardHeroBackground "pattern:waves"}}selected{{end}}>Muted pattern: waves</option>
+                    <option value="custom_upload" {{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}selected{{end}}>Upload image</option>
                     <option value="custom_url" {{if hasPrefix .Settings.DashboardHeroBackground "https://"}}selected{{end}}>Custom image URL (HTTPS only)</option>
                   </select>
                 </label>
+                <input type="hidden" name="dashboard_hero_existing_path" value="{{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <div class="hero-image-field full" data-hero-image-field>
+                  <p class="settings-field-hint muted" id="hint-hero-upload">Upload a JPG, PNG, WebP, or GIF (stored under <code>/static/uploads/hero/</code>).</p>
+                  <div class="hero-image-field__preview-wrap">
+                    {{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}<img class="hero-image-field__preview" src="{{.Settings.DashboardHeroBackground}}" alt="Current hero preview">{{else}}<div class="hero-image-field__preview hero-image-field__preview--empty muted">No uploaded hero yet</div>{{end}}
+                  </div>
+                  <label class="hero-image-field__file">
+                    <span class="btn secondary-btn">Choose file</span>
+                    <input type="file" name="dashboard_hero_upload" accept="image/jpeg,image/png,image/webp,image/gif" class="sr-only">
+                  </label>
+                </div>
                 <label class="full">Custom image URL
                   <input type="url" name="dashboard_hero_background_url" placeholder="https://…" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}" autocomplete="off" aria-describedby="hint-hero">
                 </label>
-                <p id="hint-hero" class="settings-field-hint muted full">Choose “Custom image URL” and paste an HTTPS address, then save.</p>
+                <p id="hint-hero" class="settings-field-hint muted full">Pick “Upload image” or “Custom image URL”, then save. Paths are stored from the site root so they keep working if the domain changes.</p>
                 <button type="submit" class="trip-settings-save-btn">Save appearance</button>
               </form>
             </div>
@@ -173,7 +209,7 @@
                 <h3 class="trip-settings-card-title" id="settings-dashboard-title">Dashboard</h3>
               </div>
               <p class="muted trip-settings-section-hint">How trips are listed on your home dashboard.</p>
-              <form method="post" action="/settings" class="form-grid trip-settings-form-grid">
+              <form method="post" action="/settings" class="form-grid trip-settings-form-grid remi-trip-widget-form">
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                 {{if .TripID}}<input type="hidden" name="return_to" value="/settings?trip_id={{.TripID}}">{{end}}
                 <input type="hidden" name="app_title" value="{{.Settings.AppTitle}}">
@@ -187,8 +223,18 @@
                 <input type="hidden" name="enable_location_lookup" value="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}">
                 <input type="hidden" name="site_registration_enabled" value="{{if .Settings.RegistrationEnabled}}1{{else}}0{{end}}">
                 <input type="hidden" name="theme_preference" value="{{.Settings.ThemePreference}}">
-                <input type="hidden" name="dashboard_hero_background_mode" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}custom_url{{else}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <input type="hidden" name="default_distance_unit" value="{{.Settings.DefaultDistanceUnit}}">
+                <input type="hidden" name="dashboard_hero_background_mode" value="{{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}custom_upload{{else if hasPrefix .Settings.DashboardHeroBackground "https://"}}custom_url{{else}}{{.Settings.DashboardHeroBackground}}{{end}}">
                 <input type="hidden" name="dashboard_hero_background_url" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <input type="hidden" name="dashboard_hero_existing_path" value="{{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}{{.Settings.DashboardHeroBackground}}{{end}}">
+                <label class="full">Your distance unit <span class="muted">(personal)</span>
+                  <select name="user_distance_unit" aria-describedby="hint-user-dist">
+                    <option value="" {{if eq .Settings.UserDistanceUnit ""}}selected{{end}}>Use instance default</option>
+                    <option value="km" {{if eq .Settings.UserDistanceUnit "km"}}selected{{end}}>Kilometres</option>
+                    <option value="mi" {{if eq .Settings.UserDistanceUnit "mi"}}selected{{end}}>Miles</option>
+                  </select>
+                </label>
+                <p id="hint-user-dist" class="settings-field-hint muted full">Applies to dashboard stats and anywhere a trip does not set its own unit.</p>
                 <label class="full">Trip layout
                   <select name="dashboard_trip_layout" aria-describedby="hint-layout">
                     <option value="grid" {{if eq .Settings.DashboardTripLayout "grid"}}selected{{end}}>Grid</option>

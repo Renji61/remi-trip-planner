@@ -10,13 +10,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=88">
+  <link rel="stylesheet" href="/static/app.css?v=143">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js?v=88"></script>
+  <script defer src="/static/app.js?v=124"></script>
 </head>
-<body>
-  <main class="app-shell" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}">
+<body class="page-home">
+  <main class="app-shell" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{.HomeDistanceUnit}}">
     <aside class="sidebar">
       {{template "dashboardShellSidebar" .}}
     </aside>
@@ -33,9 +33,7 @@
             <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
               <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
             </button>
-            <button type="button" class="icon-btn" data-mobile-profile-open data-mobile-profile-target="#app-mobile-profile-sheet" aria-label="Open account menu" title="Account menu">
-              <span class="material-symbols-outlined" aria-hidden="true">person</span>
-            </button>
+            {{template "desktopDashboardProfileMenu" .}}
           </div>
         </div>
       </header>
@@ -199,8 +197,8 @@
                   <span class="travel-stats-label">Days traveled</span>
                 </div>
                 <div class="travel-stats-metric">
-                  <span class="travel-stats-value">{{.TravelStats.MilesDisplay}}</span>
-                  <span class="travel-stats-label">Miles logged</span>
+                  <span class="travel-stats-value">{{.TravelDistanceDisplay}}</span>
+                  <span class="travel-stats-label">Distance logged</span>
                 </div>
               </div>
               <span class="travel-stats-globe material-symbols-outlined" aria-hidden="true">public</span>
@@ -214,7 +212,7 @@
 
 {{define "dashboardTripCard"}}
               {{if .DashboardListLayout}}
-              <article class="trip-card trip-card--list-row" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{range .Party}}{{.PublicDisplayName}} {{.Username}} {{end}} {{formatTripDateRange .StartDate .EndDate}} {{.StatusLabel}} {{.TripSubtitle}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}">
+              <article class="trip-card trip-card--list-row" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{range .Party}}{{.PublicDisplayName}} {{.Username}} {{end}} {{formatTripDateRange . .StartDate .EndDate}} {{.StatusLabel}} {{.TripSubtitle}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}">
                 <div class="trip-list-row-desktop">
                 <div class="trip-list-col trip-list-col--dest">
                   <a class="trip-list-dest-link" href="/trips/{{.ID}}" aria-label="View details for {{.Name}}">
@@ -233,7 +231,7 @@
                 </div>
                 <div class="trip-list-col trip-list-col--schedule">
                   {{if .HasValidSchedule}}
-                  <span class="trip-list-schedule-dates">{{formatTripDateRange .StartDate .EndDate}}</span>
+                  <span class="trip-list-schedule-dates">{{formatTripDateRange . .StartDate .EndDate}}</span>
                   <span class="trip-list-schedule-meta">{{.ScheduleDurationLabel}}</span>
                   {{else}}
                   <span class="trip-list-schedule-dates">Not set</span>
@@ -280,7 +278,7 @@
                     <div class="trip-list-mobile-body">
                       <div class="trip-list-mobile-top">
                         <span class="trip-status-badge trip-status-badge--{{.StatusSlug}} trip-status-badge--mobile-list">{{if eq .StatusSlug "draft"}}Planning{{else}}{{.StatusLabel}}{{end}}</span>
-                        <span class="trip-list-mobile-dates muted">{{if .HasValidSchedule}}{{formatTripDateShort .StartDate .EndDate}}{{else}}—{{end}}</span>
+                        <span class="trip-list-mobile-dates muted">{{if .HasValidSchedule}}{{formatTripDateShort . .StartDate .EndDate}}{{else}}—{{end}}</span>
                       </div>
                       <h3 class="trip-list-mobile-title">{{.Name}}</h3>
                       <p class="trip-list-mobile-sub muted">{{.TripSubtitle}}</p>
@@ -296,7 +294,7 @@
                 </div>
               </article>
               {{else}}
-              <article class="trip-card" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{range .Party}}{{.PublicDisplayName}} {{.Username}} {{end}} {{formatTripDateRange .StartDate .EndDate}} {{.StatusLabel}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}" aria-labelledby="trip-card-title-{{.ID}} trip-card-status-{{.ID}}">
+              <article class="trip-card" role="listitem" data-trip-search="{{.Name}} {{.Description}} {{range .Party}}{{.PublicDisplayName}} {{.Username}} {{end}} {{formatTripDateRange . .StartDate .EndDate}} {{.StatusLabel}} {{.CurrencyName}} {{.CurrencySymbol}} {{formatTripMoney .BudgetTotal}}" aria-labelledby="trip-card-title-{{.ID}} trip-card-status-{{.ID}}">
                 <a class="trip-card-cover-link trip-card-cover-wrap" href="/trips/{{.ID}}" aria-label="View details for {{.Name}}">
                   <span id="trip-card-status-{{.ID}}" class="trip-status-badge trip-status-badge--{{.StatusSlug}}">{{.StatusLabel}}</span>
                   {{if .CoverImage}}
@@ -309,7 +307,7 @@
                 </a>
                 <div class="trip-card-body">
                   <div class="trip-head trip-head--dashboard">
-                    <h3 id="trip-card-title-{{.ID}}">{{.Name}}{{if .HasSharedIcon}}<span class="trip-shared-pill" title="Others are on this trip"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">group</span> Shared</span>{{end}}</h3>
+                    <h3 id="trip-card-title-{{.ID}}">{{.Name}}{{if .HasSharedIcon}}<span class="trip-shared-pill" title="Others are on this trip"><span class="material-symbols-outlined trip-shared-pill-icon">group</span> Shared</span>{{end}}</h3>
                     <div class="trip-budget-block">
                       <span class="trip-budget-label">Budget</span>
                       <span class="trip-budget-value">{{.CurrencySymbol}}{{formatTripMoney .BudgetTotal}}</span>
@@ -317,7 +315,7 @@
                   </div>
                   <div class="trip-date-row">
                     <span class="material-symbols-outlined trip-date-icon" aria-hidden="true">calendar_today</span>
-                    <span class="trip-date-text">{{formatTripDateRange .StartDate .EndDate}}</span>
+                    <span class="trip-date-text">{{formatTripDateRange . .StartDate .EndDate}}</span>
                   </div>
                   {{if .Description}}
                   <p class="muted trip-card-desc">{{.Description}}</p>
@@ -335,6 +333,5 @@
               </article>
               {{end}}
 {{end}}
-  {{template "appMobileProfileSheet" .}}
 </body>
 </html>

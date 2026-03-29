@@ -1,0 +1,78 @@
+{{define "tab_settlement_lis"}}
+{{range .TabSettlementRows}}
+{{$srow := .}}
+                <li class="tab-settlement-block" tabindex="-1">
+                  <div class="tab-settlement-row">
+                    <span class="tab-settlement-icon {{.IconClass}}" aria-hidden="true"><span class="material-symbols-outlined">payments</span></span>
+                    <div class="tab-settlement-body">
+                      <span class="tab-settlement-primary">{{.PrimaryLine}}</span>
+                      <span class="tab-settlement-secondary">{{.SecondaryLine}}</span>
+                    </div>
+                    <div class="tab-settlement-trailing">
+                    <span class="tab-settlement-amt {{.AmountClass}}">{{.AmountDisplay}}</span>
+                    {{if .CanManage}}
+                    <details class="trip-inline-actions-dropdown tab-settlement-inline-actions tab-settlement-row-actions">
+                      <summary class="trip-inline-actions-summary">
+                        <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
+                        <span class="trip-inline-actions-summary-label">Settlement actions</span>
+                      </summary>
+                      <div class="trip-inline-actions-buttons">
+                        <button type="button" class="item-action-btn" data-inline-edit-open="tab-settlement-edit-{{.SettlementID}}">Edit</button>
+                        <form method="post" action="/trips/{{$.Trip.ID}}/group-expenses/settlements/{{.SettlementID}}/delete" data-app-confirm data-confirm-title="Delete this settlement?" data-confirm-body="This removes the recorded payment from the group expenses ledger." data-confirm-ok="Delete" data-confirm-icon="payments" data-confirm-variant="danger" data-ajax-submit data-toast-message="Settlement removed.">
+                          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                          <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/group-expenses">
+                          <button type="submit" class="item-action-btn danger">Delete</button>
+                        </form>
+                      </div>
+                    </details>
+                    {{end}}
+                    </div>
+                  </div>
+                  {{if .CanManage}}
+                  <form id="tab-settlement-edit-{{.SettlementID}}" method="post" action="/trips/{{$.Trip.ID}}/group-expenses/settlements/{{.SettlementID}}/update" class="form-grid tab-settlement-edit-form hidden full" data-ajax-submit data-toast-message="Settlement updated.">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/group-expenses">
+                    <div class="full tab-settlement-edit-form-head">
+                      <h3>Edit settlement</h3>
+                      <p class="trip-resource-form-subtitle">Adjust who paid whom; the ledger updates after you save.</p>
+                    </div>
+                    <label>Payer
+                      <select name="payer_user_id" required>
+                        {{range $.Party}}<option value="user:{{.ID}}" {{if eq (tabSettlementParticipantKey $srow.PayerUserID) (printf "user:%s" .ID)}}selected{{end}}>{{.PublicDisplayName}}</option>{{end}}
+                        {{range $.TripGuests}}<option value="guest:{{.ID}}" {{if eq (tabSettlementParticipantKey $srow.PayerUserID) (printf "guest:%s" .ID)}}selected{{end}}>{{.DisplayName}} (guest)</option>{{end}}
+                        {{range $.TabDepartedParticipants}}<option value="{{.ParticipantKey}}" {{if eq (tabSettlementParticipantKey $srow.PayerUserID) .ParticipantKey}}selected{{end}}>{{.RowLabel}}{{if .IsGuestKey}} (guest){{end}} (Left trip)</option>{{end}}
+                      </select>
+                    </label>
+                    <label>Payee
+                      <select name="payee_user_id" required>
+                        {{range $.Party}}<option value="user:{{.ID}}" {{if eq (tabSettlementParticipantKey $srow.PayeeUserID) (printf "user:%s" .ID)}}selected{{end}}>{{.PublicDisplayName}}</option>{{end}}
+                        {{range $.TripGuests}}<option value="guest:{{.ID}}" {{if eq (tabSettlementParticipantKey $srow.PayeeUserID) (printf "guest:%s" .ID)}}selected{{end}}>{{.DisplayName}} (guest)</option>{{end}}
+                        {{range $.TabDepartedParticipants}}<option value="{{.ParticipantKey}}" {{if eq (tabSettlementParticipantKey $srow.PayeeUserID) .ParticipantKey}}selected{{end}}>{{.RowLabel}}{{if .IsGuestKey}} (guest){{end}} (Left trip)</option>{{end}}
+                      </select>
+                    </label>
+                    <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" $srow.Amount}}" required></label>
+                    <label>Method
+                      <select name="method">
+                        <option value="Cash" {{if or (eq $srow.Method "") (eq $srow.Method "Cash")}}selected{{end}}>Cash</option>
+                        <option value="Bank Transfer" {{if eq $srow.Method "Bank Transfer"}}selected{{end}}>Bank Transfer</option>
+                        <option value="Venmo" {{if eq $srow.Method "Venmo"}}selected{{end}}>Venmo</option>
+                        <option value="Other" {{if eq $srow.Method "Other"}}selected{{end}}>Other</option>
+                      </select>
+                    </label>
+                    <label>Date<input type="date" name="settled_on" value="{{$srow.SettledOn}}"></label>
+                    <label class="full">Notes<input type="text" name="notes" value="{{$srow.Notes}}" placeholder="Optional"></label>
+                    <div class="full expense-edit-actions">
+                      <button type="submit">Save</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="tab-settlement-edit-{{$srow.SettlementID}}">Cancel</button>
+                    </div>
+                  </form>
+                  {{end}}
+                </li>
+{{end}}
+{{end}}
+
+{{define "tab_settlements_load_more"}}
+<ul class="tab-settlement-list tab-load-more-settlements-src" role="list" aria-hidden="true">
+{{template "tab_settlement_lis" .}}
+</ul>
+{{end}}

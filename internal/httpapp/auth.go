@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -193,14 +194,41 @@ func absoluteOrigin(r *http.Request) string {
 	if p := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); p == "https" || p == "http" {
 		scheme = p
 	}
-	host := strings.TrimSpace(r.Host)
-	if xh := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); xh != "" {
+	host := sanitizeExternalHost(strings.TrimSpace(r.Host))
+	if xh := sanitizeExternalHost(strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))); xh != "" {
 		host = xh
 	}
 	if host == "" {
 		host = "localhost"
 	}
 	return scheme + "://" + host
+}
+
+// sanitizeExternalHost normalizes a possibly forwarded host and rejects unsafe values.
+func sanitizeExternalHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	// Proxies can append multiple values; use the first hop only.
+	if i := strings.Index(raw, ","); i >= 0 {
+		raw = strings.TrimSpace(raw[:i])
+	}
+	// Disallow host values that can break URL semantics or be abused in links.
+	if strings.ContainsAny(raw, "/\\@?&# \t\r\n") {
+		return ""
+	}
+	// Validate as host[:port] (or bracketed IPv6 host[:port]).
+	if h, p, err := net.SplitHostPort(raw); err == nil {
+		if h == "" || strings.ContainsAny(h, "/\\@?&# \t\r\n") || p == "" {
+			return ""
+		}
+		return raw
+	}
+	if strings.Contains(raw, ":") && !strings.HasPrefix(raw, "[") {
+		return ""
+	}
+	return raw
 }
 
 func (a *app) tripIDAccessMiddleware(next http.Handler) http.Handler {

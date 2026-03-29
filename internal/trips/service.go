@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +31,8 @@ type Trip struct {
 	OwnerUserID      string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	// BudgetCap: trip spending cap for Budget Limit UI; when > 0 it overrides legacy computed allocation.
+	BudgetCap float64
 	// Per-trip UI: section visibility on trip page and nav (default all enabled).
 	UIShowStay      bool
 	UIShowVehicle   bool
@@ -36,16 +40,22 @@ type Trip struct {
 	UIShowSpends    bool
 	UIShowItinerary bool
 	UIShowChecklist bool
+	UIShowTheTab    bool
 	// UIItineraryExpand: first | all | none — default expanded state for itinerary day groups.
 	UIItineraryExpand string
 	// UISpendsExpand: first | all | none — for spends-by-day on trip page.
 	UISpendsExpand string
+	// UITabExpand: legacy DB column (no longer used in UI; Group Expenses sections are always expanded).
+	UITabExpand string
 	// UITimeFormat: 12h | 24h for displayed datetimes and clock times.
-	UITimeFormat   string
-	UILabelStay    string
-	UILabelVehicle string
-	UILabelFlights string
-	UILabelSpends  string
+	UITimeFormat string
+	// UIDateFormat: mdy (MM-DD-YYYY) | dmy (DD-MM-YYYY) for displayed calendar dates.
+	UIDateFormat         string
+	UILabelStay          string
+	UILabelVehicle       string
+	UILabelFlights       string
+	UILabelSpends        string
+	UILabelGroupExpenses string
 	// Comma-separated section keys (map,itinerary,...); empty means default order.
 	UIMainSectionOrder string
 	// Comma-separated sidebar widget keys (add_stop,budget,...); empty means default.
@@ -57,6 +67,11 @@ type Trip struct {
 	UIShowCustomLinks bool
 	// UICustomSidebarLinks: JSON array [{label,url},...], max 3, http/https only.
 	UICustomSidebarLinks string
+	// TabDefaultSplitMode / TabDefaultSplitJSON: last-used Tab split on this trip (standard split).
+	TabDefaultSplitMode string
+	TabDefaultSplitJSON string
+	// DistanceUnit: per-trip override for labels (km | mi). Empty uses user then app default.
+	DistanceUnit string
 }
 
 type ItineraryItem struct {
@@ -84,7 +99,16 @@ type Expense struct {
 	SpentOn       string
 	PaymentMethod string
 	LodgingID     string
+	FromTab       bool
+	ReceiptPath   string // web path e.g. /static/uploads/expenses/{tripID}/file.ext
 	CreatedAt     time.Time
+	// Tab-only: short label for the spend (e.g. "Sunset dinner").
+	Title string
+	// Participant key user:{id} or guest:{id} who paid (Tab).
+	PaidBy string
+	// TabSplit* — split among participants (see TabSplitPayload JSON).
+	SplitMode string
+	SplitJSON string
 }
 
 // ExpenseCategoryAccommodation is used for accommodation-synced expenses and matches the Accommodation quick-expense option.
@@ -203,6 +227,7 @@ type VehicleRental struct {
 	ID                  string
 	TripID              string
 	PickUpLocation      string
+	DropOffLocation     string // empty = same as pick-up for display and drop-off itinerary location
 	VehicleDetail       string
 	PickUpAt            string
 	DropOffAt           string
@@ -263,6 +288,12 @@ type AppSettings struct {
 	DashboardTripLayout     string // grid, list
 	DashboardTripSort       string // name, start_date, updated, status
 	DashboardHeroBackground string // default, pattern:*, or https image URL
+	// GoogleMapsAPIKey: optional Places/Geocoding/Maps JS (stored server-side; browser key may be exposed only when needed for maps).
+	GoogleMapsAPIKey string
+	// DefaultDistanceUnit: km | mi for the whole instance when user/trip do not override.
+	DefaultDistanceUnit string
+	// UserDistanceUnit: merged from user_settings (per-user override); not a DB column on app_settings.
+	UserDistanceUnit string
 }
 
 type TripDetails struct {
@@ -281,6 +312,8 @@ type TravelStats struct {
 	DaysTraveled     int
 	MilesLogged      float64
 	MilesDisplay     string
+	// KmLogged is total great-circle distance between consecutive itinerary points with coords.
+	KmLogged float64
 }
 
 type Repository interface {
@@ -367,6 +400,21 @@ type Repository interface {
 	RevokeTripInviteForTrip(ctx context.Context, tripID, inviteID string) error
 	CreateTripInviteLink(ctx context.Context, tripID, invitedByUserID, tokenRaw string, expiresAt time.Time) error
 	RevokeAllTripInviteLinksForTrip(ctx context.Context, tripID string) error
+
+	ListTripGuests(ctx context.Context, tripID string) ([]TripGuest, error)
+	GetTripGuest(ctx context.Context, tripID, guestID string) (TripGuest, error)
+	AddTripGuest(ctx context.Context, g TripGuest) error
+	DeleteTripGuest(ctx context.Context, tripID, guestID string) error
+	ListDepartedTabParticipants(ctx context.Context, tripID string) ([]DepartedTabParticipant, error)
+	UpsertDepartedTabParticipant(ctx context.Context, tripID, participantKey, displayName string) error
+	ClearDepartedTabParticipant(ctx context.Context, tripID, participantKey string) error
+	ListActiveTripMemberUserIDs(ctx context.Context, tripID string) ([]string, error)
+	ListTabSettlements(ctx context.Context, tripID string) ([]TabSettlement, error)
+	AddTabSettlement(ctx context.Context, s TabSettlement) error
+	UpdateTabSettlement(ctx context.Context, s TabSettlement) error
+	DeleteTabSettlement(ctx context.Context, tripID, settlementID string) error
+	SearchTabExpenseIDs(ctx context.Context, tripID, query string) ([]string, error)
+	UpdateTripTabDefaults(ctx context.Context, tripID, mode, splitJSON string) error
 }
 
 type Service struct {
@@ -467,6 +515,7 @@ func buildTravelStats(tripsList []Trip, items []ItineraryItem) TravelStats {
 			kmTotal += km
 		}
 	}
+	out.KmLogged = kmTotal
 	out.MilesLogged = kmTotal * kmToMiles
 	out.MilesDisplay = formatMilesShort(out.MilesLogged)
 	return out
@@ -550,6 +599,72 @@ func formatMilesShort(miles float64) string {
 	return fmt.Sprintf("%.0fk", math.Round(k))
 }
 
+// NormalizeDistanceUnit returns "km" or "mi".
+func NormalizeDistanceUnit(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "mi", "mile", "miles":
+		return "mi"
+	default:
+		return "km"
+	}
+}
+
+// EffectiveDistanceUnit resolves trip override, then user, then app default.
+func EffectiveDistanceUnit(t *Trip, app AppSettings) string {
+	if t != nil && strings.TrimSpace(t.DistanceUnit) != "" {
+		return NormalizeDistanceUnit(t.DistanceUnit)
+	}
+	if strings.TrimSpace(app.UserDistanceUnit) != "" {
+		return NormalizeDistanceUnit(app.UserDistanceUnit)
+	}
+	return NormalizeDistanceUnit(app.DefaultDistanceUnit)
+}
+
+// FormatDistanceStat formats a great-circle total (km) for dashboard copy.
+func FormatDistanceStat(kmTotal float64, unit string) string {
+	unit = NormalizeDistanceUnit(unit)
+	if kmTotal <= 0 || math.IsNaN(kmTotal) || math.IsInf(kmTotal, 0) {
+		if unit == "mi" {
+			return "0 mi"
+		}
+		return "0 km"
+	}
+	if unit == "mi" {
+		mi := kmTotal * 0.621371
+		if mi < 0.05 {
+			return "0 mi"
+		}
+		if mi < 10 {
+			return fmt.Sprintf("%.1f mi", mi)
+		}
+		return formatMilesShort(mi) + " mi"
+	}
+	if kmTotal < 1 {
+		return fmt.Sprintf("%.0f m", math.Round(kmTotal*1000))
+	}
+	if kmTotal < 100 {
+		return fmt.Sprintf("%.1f km", kmTotal)
+	}
+	return fmt.Sprintf("%.0f km", math.Round(kmTotal))
+}
+
+// VehicleRentalDisplayTitle matches itinerary titles used for vehicle pick-up/drop-off lines.
+func VehicleRentalDisplayTitle(vehicleDetail, location string) string {
+	v := strings.TrimSpace(vehicleDetail)
+	if v != "" {
+		return v
+	}
+	return strings.TrimSpace(location)
+}
+
+// EffectiveVehicleDropOffLocation returns the drop-off address or pick-up when unset.
+func EffectiveVehicleDropOffLocation(v VehicleRental) string {
+	if strings.TrimSpace(v.DropOffLocation) != "" {
+		return strings.TrimSpace(v.DropOffLocation)
+	}
+	return strings.TrimSpace(v.PickUpLocation)
+}
+
 func (s *Service) GetTrip(ctx context.Context, tripID string) (Trip, error) {
 	if tripID == "" {
 		return Trip{}, errors.New("trip id is required")
@@ -630,7 +745,24 @@ func (s *Service) DeleteTrip(ctx context.Context, tripID string) error {
 	if tripID == "" {
 		return errors.New("trip id is required")
 	}
+	if safeExpenseUploadTripIDSegment(tripID) {
+		_ = os.RemoveAll(filepath.Join("web", "static", "uploads", "expenses", tripID))
+	}
 	return s.repo.DeleteTrip(ctx, tripID)
+}
+
+// safeExpenseUploadTripIDSegment allows only UUID-like folder names under uploads/expenses/.
+func safeExpenseUploadTripIDSegment(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (s *Service) AddItineraryItem(ctx context.Context, item ItineraryItem) error {
@@ -828,6 +960,10 @@ func findLodgingItineraryPairFromItems(items []ItineraryItem, tripID, lodgingNam
 	return checkInID, checkOutID
 }
 
+func (s *Service) GetExpense(ctx context.Context, tripID, expenseID string) (Expense, error) {
+	return s.repo.GetExpense(ctx, tripID, expenseID)
+}
+
 func (s *Service) AddExpense(ctx context.Context, expense Expense) error {
 	if expense.TripID == "" || expense.Amount < 0 {
 		return errors.New("invalid expense")
@@ -839,7 +975,13 @@ func (s *Service) AddExpense(ctx context.Context, expense Expense) error {
 	if trip.IsArchived {
 		return errors.New("archived trips are read-only")
 	}
-	return s.repo.AddExpense(ctx, expense)
+	if err := s.repo.AddExpense(ctx, expense); err != nil {
+		return err
+	}
+	if expense.FromTab && strings.TrimSpace(expense.SplitMode) != "" {
+		_ = s.repo.UpdateTripTabDefaults(ctx, expense.TripID, expense.SplitMode, expense.SplitJSON)
+	}
+	return nil
 }
 
 func (s *Service) UpdateItineraryItem(ctx context.Context, item ItineraryItem) error {
@@ -943,7 +1085,14 @@ func (s *Service) UpdateExpense(ctx context.Context, expense Expense) error {
 		return errors.New("archived trips are read-only")
 	}
 	expense.LodgingID = prev.LodgingID
-	return s.repo.UpdateExpense(ctx, expense)
+	expense.FromTab = prev.FromTab
+	if err := s.repo.UpdateExpense(ctx, expense); err != nil {
+		return err
+	}
+	if expense.FromTab && strings.TrimSpace(expense.SplitMode) != "" {
+		_ = s.repo.UpdateTripTabDefaults(ctx, expense.TripID, expense.SplitMode, expense.SplitJSON)
+	}
+	return nil
 }
 
 func (s *Service) DeleteExpense(ctx context.Context, tripID, expenseID string) error {
@@ -955,7 +1104,7 @@ func (s *Service) DeleteExpense(ctx context.Context, tripID, expenseID string) e
 		return err
 	}
 	if prev.LodgingID != "" {
-		return errors.New("remove the stay under Accommodation to delete this expense")
+		return errors.New("remove the booking under Accommodation to delete this expense")
 	}
 	vehicles, err := s.repo.ListVehicleRentals(ctx, tripID)
 	if err != nil {
@@ -1126,8 +1275,10 @@ func (s *Service) SyncExpenseForLodging(ctx context.Context, l Lodging) error {
 }
 
 const (
-	itineraryVehiclePickUpPrefix  = "Vehicle pick-up: "
-	itineraryVehicleDropOffPrefix = "Vehicle drop-off: "
+	itineraryVehiclePickUpPrefix        = "Vehicle rental pick-up: "
+	itineraryVehiclePickUpPrefixLegacy  = "Vehicle pick-up: "
+	itineraryVehicleDropOffPrefix       = "Vehicle rental drop-off: "
+	itineraryVehicleDropOffPrefixLegacy = "Vehicle drop-off: "
 )
 
 func VehicleRentalItineraryPickUpTitle(location string) string {
@@ -1142,8 +1293,12 @@ func vehicleLocationFromItineraryTitle(title string) (location string, ok bool) 
 	switch {
 	case strings.HasPrefix(title, itineraryVehiclePickUpPrefix):
 		return strings.TrimPrefix(title, itineraryVehiclePickUpPrefix), true
+	case strings.HasPrefix(title, itineraryVehiclePickUpPrefixLegacy):
+		return strings.TrimPrefix(title, itineraryVehiclePickUpPrefixLegacy), true
 	case strings.HasPrefix(title, itineraryVehicleDropOffPrefix):
 		return strings.TrimPrefix(title, itineraryVehicleDropOffPrefix), true
+	case strings.HasPrefix(title, itineraryVehicleDropOffPrefixLegacy):
+		return strings.TrimPrefix(title, itineraryVehicleDropOffPrefixLegacy), true
 	default:
 		return "", false
 	}
@@ -1420,10 +1575,20 @@ func (s *Service) SyncExpenseForVehicleRental(ctx context.Context, v VehicleRent
 	return s.repo.UpdateVehicleRental(ctx, v)
 }
 
+// spendNotesPlaceLabel shortens "Name, street, city…" to the segment before the first comma so
+// spend descriptions match compact trip UI labels and omit trailing address text.
+func spendNotesPlaceLabel(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, ","); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
 func vehicleExpenseNotes(v VehicleRental, kind string) string {
-	parts := []string{"Vehicle Rental", kind, v.PickUpLocation}
+	parts := []string{"Vehicle Rental", kind}
 	if v.VehicleDetail != "" {
-		parts = append(parts, "Vehicle: "+v.VehicleDetail)
+		parts = append(parts, "Vehicle rental: "+v.VehicleDetail)
 	}
 	if v.BookingConfirmation != "" {
 		parts = append(parts, "Booking: "+v.BookingConfirmation)
@@ -1436,7 +1601,7 @@ func vehicleExpenseNotes(v VehicleRental, kind string) string {
 
 func vehicleExpenseSpentOn(v VehicleRental) string {
 	target := v.PickUpAt
-	if v.PayAtPickUp {
+	if target == "" {
 		target = v.DropOffAt
 	}
 	if target == "" {
@@ -1468,7 +1633,9 @@ func VehicleRentalByItineraryItemID(vehicles []VehicleRental, items []ItineraryI
 			continue
 		}
 		for _, v := range vehicles {
-			if v.PickUpLocation == titleValue || v.VehicleDetail == titleValue {
+			pickT := VehicleRentalDisplayTitle(v.VehicleDetail, v.PickUpLocation)
+			dropT := VehicleRentalDisplayTitle(v.VehicleDetail, EffectiveVehicleDropOffLocation(v))
+			if titleValue == pickT || titleValue == dropT || v.PickUpLocation == titleValue || EffectiveVehicleDropOffLocation(v) == titleValue || v.VehicleDetail == titleValue {
 				out[it.ID] = v
 				break
 			}
@@ -1529,7 +1696,10 @@ func FlightByExpenseID(flights []Flight) map[string]Flight {
 }
 
 func lodgingExpenseNotes(l Lodging) string {
-	parts := []string{l.Name}
+	parts := []string{}
+	if n := strings.TrimSpace(l.Name); n != "" {
+		parts = append(parts, spendNotesPlaceLabel(n))
+	}
 	if l.BookingConfirmation != "" {
 		parts = append(parts, "Booking: "+l.BookingConfirmation)
 	}
@@ -1555,12 +1725,6 @@ func flightExpenseNotes(f Flight) string {
 	label := flightLabelValue(f.FlightName, f.FlightNumber)
 	if label != "" {
 		parts = append(parts, label)
-	}
-	if f.DepartAirport != "" {
-		parts = append(parts, "From: "+f.DepartAirport)
-	}
-	if f.ArriveAirport != "" {
-		parts = append(parts, "To: "+f.ArriveAirport)
 	}
 	if f.BookingConfirmation != "" {
 		parts = append(parts, "Booking: "+f.BookingConfirmation)

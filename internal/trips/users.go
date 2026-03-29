@@ -69,7 +69,9 @@ type UserSettings struct {
 	TripDashboardHeading    string
 	DefaultCurrencyName     string
 	DefaultCurrencySymbol   string
-	UpdatedAt               time.Time
+	// DistanceUnit: km | mi per user; empty uses app default_distance_unit.
+	DistanceUnit string
+	UpdatedAt    time.Time
 }
 
 // TripInvite is a pending collaboration invite.

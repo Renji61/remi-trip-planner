@@ -1,0 +1,165 @@
+{{define "tabSplitBreakdownShell"}}
+{{- $paidKey := index . "PaidByKey" -}}
+{{- $sym := index . "CurrencySymbol" -}}
+{{- $cur := index . "CurrentUserID" -}}
+{{- $trip := index . "Trip" -}}
+{{- $party := index . "Party" -}}
+{{- $guests := index . "TripGuests" -}}
+{{- $departedList := index . "TabDepartedParticipants" -}}
+              <div class="tab-split-breakdown-shell">
+                <div class="tab-split-breakdown-box">
+                  <div class="tab-split-participants tab-split-breakdown-list" data-tab-split-participants>
+                    {{range $pi, $p := $party}}
+                    {{$pkey := printf "user:%s" $p.ID}}
+                    {{$pIsPayer := eq $pkey $paidKey}}
+                    <label class="tab-split-breakdown-row{{if eq $p.ID $cur}} tab-split-breakdown-row--you{{end}}{{if $pIsPayer}} tab-split-breakdown-row--payer{{end}}" data-tab-split-row-key="{{$pkey}}" data-tab-split-is-owner="{{if eq $p.ID $trip.OwnerUserID}}1{{else}}0{{end}}" data-tab-split-is-you="{{if eq $p.ID $cur}}1{{else}}0{{end}}" data-tab-split-is-guest="0">
+                      <input type="checkbox" name="tab_split_participant" value="user:{{$p.ID}}" checked data-tab-participant-cb class="tab-split-bd-cb visually-hidden">
+                      <span class="tab-split-bd-avatar tab-split-bd-avatar--tone-{{mod $pi 3}}" aria-hidden="true">
+                        {{if ne (tabAvatarURL $p.AvatarPath) ""}}<img src="{{tabAvatarURL $p.AvatarPath}}" alt="">{{else}}<span class="tab-split-bd-initial">{{$p.InitialForAvatar}}</span>{{end}}
+                      </span>
+                      <span class="tab-split-bd-name-col">
+                        <span class="tab-split-bd-name">{{$p.PublicDisplayName}}</span>
+                        <span class="tab-split-bd-role-line muted{{if and (eq $p.ID $trip.OwnerUserID) $pIsPayer}} tab-split-bd-role-line--owner-payer{{end}}" data-tab-bd-role-line>{{if eq $p.ID $trip.OwnerUserID}}{{if $pIsPayer}}Owner • Payer{{else}}Owner{{end}}{{else if eq $p.ID $cur}}{{if $pIsPayer}}Participant (You) • Payer{{else}}Participant (You){{end}}{{else}}{{if $pIsPayer}}Participant • Payer{{else}}Participant{{end}}{{end}}</span>
+                      </span>
+                      <span class="tab-split-bd-trailing">
+                        <span class="tab-split-exact-field hidden" data-tab-exact-field aria-hidden="true">
+                          <span class="tab-exact-input-shell">
+                            <span class="tab-exact-currency" aria-hidden="true">{{$sym}}</span>
+                            <input type="number" step="0.01" min="0" class="tab-exact-input" placeholder="0.00" inputmode="decimal" data-tab-weight-key="user:{{$p.ID}}" data-tab-exact-input autocomplete="off">
+                          </span>
+                        </span>
+                        <span class="tab-split-bd-readonly-trailing" data-tab-bd-readonly-trailing>
+                          <span class="tab-split-bd-share-tag hidden" data-tab-bd-share-tag="user:{{$p.ID}}"></span>
+                          <span class="tab-share-stepper-wrap hidden" data-tab-shares-field aria-hidden="true">
+                            <span class="tab-share-stepper">
+                              <button type="button" class="tab-share-step-btn" data-tab-share-dec aria-label="Decrease shares">−</button>
+                              <input type="number" step="1" min="1" class="tab-share-count-input" value="1" inputmode="numeric" data-tab-weight-key="user:{{$p.ID}}" data-tab-shares-input autocomplete="off">
+                              <button type="button" class="tab-share-step-btn" data-tab-share-inc aria-label="Increase shares">+</button>
+                            </span>
+                          </span>
+                          <span class="tab-split-bd-amt-block">
+                            <span class="tab-split-bd-amt" data-tab-bd-amt="user:{{$p.ID}}">{{$sym}}0.00</span>
+                            <span class="tab-split-amt-caption tab-split-amt-caption--share">Share</span>
+                            <span class="tab-split-amt-caption tab-split-amt-caption--total">Total</span>
+                          </span>
+                          <span class="tab-percent-field hidden" data-tab-percent-field aria-hidden="true">
+                            <span class="tab-percent-input-shell">
+                              <input type="number" step="0.01" min="0" max="100" class="tab-percent-input" placeholder="0" inputmode="decimal" data-tab-weight-key="user:{{$p.ID}}" data-tab-percent-input autocomplete="off">
+                              <span class="tab-percent-suffix">%</span>
+                            </span>
+                          </span>
+                        </span>
+                      </span>
+                    </label>
+                    {{end}}
+                    {{range $gi, $g := $guests}}
+                    {{$gkey := printf "guest:%s" $g.ID}}
+                    {{$gIsPayer := eq $gkey $paidKey}}
+                    <label class="tab-split-breakdown-row{{if $gIsPayer}} tab-split-breakdown-row--payer{{end}}" data-tab-split-row-key="{{$gkey}}" data-tab-split-is-owner="0" data-tab-split-is-you="0" data-tab-split-is-guest="1">
+                      <input type="checkbox" name="tab_split_participant" value="guest:{{$g.ID}}" checked data-tab-participant-cb class="tab-split-bd-cb visually-hidden">
+                      <span class="tab-split-bd-avatar tab-split-bd-avatar--guest tab-split-bd-avatar--tone-{{mod (add $gi 1) 3}}" aria-hidden="true"><span class="tab-split-bd-initial">{{guestInitial $g.DisplayName}}</span></span>
+                      <span class="tab-split-bd-name-col">
+                        <span class="tab-split-bd-name">{{$g.DisplayName}} <span class="muted">(guest)</span></span>
+                        <span class="tab-split-bd-role-line muted" data-tab-bd-role-line>{{if $gIsPayer}}Guest • Payer{{else}}Guest{{end}}</span>
+                      </span>
+                      <span class="tab-split-bd-trailing">
+                        <span class="tab-split-exact-field hidden" data-tab-exact-field aria-hidden="true">
+                          <span class="tab-exact-input-shell">
+                            <span class="tab-exact-currency" aria-hidden="true">{{$sym}}</span>
+                            <input type="number" step="0.01" min="0" class="tab-exact-input" placeholder="0.00" inputmode="decimal" data-tab-weight-key="guest:{{$g.ID}}" data-tab-exact-input autocomplete="off">
+                          </span>
+                        </span>
+                        <span class="tab-split-bd-readonly-trailing" data-tab-bd-readonly-trailing>
+                          <span class="tab-split-bd-share-tag hidden" data-tab-bd-share-tag="guest:{{$g.ID}}"></span>
+                          <span class="tab-share-stepper-wrap hidden" data-tab-shares-field aria-hidden="true">
+                            <span class="tab-share-stepper">
+                              <button type="button" class="tab-share-step-btn" data-tab-share-dec aria-label="Decrease shares">−</button>
+                              <input type="number" step="1" min="1" class="tab-share-count-input" value="1" inputmode="numeric" data-tab-weight-key="guest:{{$g.ID}}" data-tab-shares-input autocomplete="off">
+                              <button type="button" class="tab-share-step-btn" data-tab-share-inc aria-label="Increase shares">+</button>
+                            </span>
+                          </span>
+                          <span class="tab-split-bd-amt-block">
+                            <span class="tab-split-bd-amt" data-tab-bd-amt="guest:{{$g.ID}}">{{$sym}}0.00</span>
+                            <span class="tab-split-amt-caption tab-split-amt-caption--share">Share</span>
+                            <span class="tab-split-amt-caption tab-split-amt-caption--total">Total</span>
+                          </span>
+                          <span class="tab-percent-field hidden" data-tab-percent-field aria-hidden="true">
+                            <span class="tab-percent-input-shell">
+                              <input type="number" step="0.01" min="0" max="100" class="tab-percent-input" placeholder="0" inputmode="decimal" data-tab-weight-key="guest:{{$g.ID}}" data-tab-percent-input autocomplete="off">
+                              <span class="tab-percent-suffix">%</span>
+                            </span>
+                          </span>
+                        </span>
+                      </span>
+                    </label>
+                    {{end}}
+                    {{if $departedList}}{{range $di, $d := $departedList}}
+                    {{$dkey := $d.ParticipantKey}}
+                    {{$dIsPayer := eq $dkey $paidKey}}
+                    <label class="tab-split-breakdown-row tab-split-breakdown-row--departed{{if $dIsPayer}} tab-split-breakdown-row--payer{{end}}" data-tab-split-row-key="{{$dkey}}" data-tab-split-is-owner="0" data-tab-split-is-you="0" data-tab-split-is-guest="{{if $d.IsGuestKey}}1{{else}}0{{end}}">
+                      <input type="checkbox" name="tab_split_participant" value="{{$dkey}}" data-tab-participant-cb class="tab-split-bd-cb visually-hidden">
+                      <span class="tab-split-bd-avatar tab-split-bd-avatar--guest tab-split-bd-avatar--tone-{{mod (add $di 5) 3}}" aria-hidden="true"><span class="tab-split-bd-initial">{{guestInitial $d.RowLabel}}</span></span>
+                      <span class="tab-split-bd-name-col">
+                        <span class="tab-split-bd-name">{{$d.RowLabel}}{{if $d.IsGuestKey}} <span class="muted">(guest)</span>{{end}} <span class="muted">(Left trip)</span></span>
+                        <span class="tab-split-bd-role-line muted" data-tab-bd-role-line>{{if $dIsPayer}}Left trip • Payer{{else}}Left trip{{end}}</span>
+                      </span>
+                      <span class="tab-split-bd-trailing">
+                        <span class="tab-split-exact-field hidden" data-tab-exact-field aria-hidden="true">
+                          <span class="tab-exact-input-shell">
+                            <span class="tab-exact-currency" aria-hidden="true">{{$sym}}</span>
+                            <input type="number" step="0.01" min="0" class="tab-exact-input" placeholder="0.00" inputmode="decimal" data-tab-weight-key="{{$dkey}}" data-tab-exact-input autocomplete="off">
+                          </span>
+                        </span>
+                        <span class="tab-split-bd-readonly-trailing" data-tab-bd-readonly-trailing>
+                          <span class="tab-split-bd-share-tag hidden" data-tab-bd-share-tag="{{$dkey}}"></span>
+                          <span class="tab-share-stepper-wrap hidden" data-tab-shares-field aria-hidden="true">
+                            <span class="tab-share-stepper">
+                              <button type="button" class="tab-share-step-btn" data-tab-share-dec aria-label="Decrease shares">−</button>
+                              <input type="number" step="1" min="1" class="tab-share-count-input" value="1" inputmode="numeric" data-tab-weight-key="{{$dkey}}" data-tab-shares-input autocomplete="off">
+                              <button type="button" class="tab-share-step-btn" data-tab-share-inc aria-label="Increase shares">+</button>
+                            </span>
+                          </span>
+                          <span class="tab-split-bd-amt-block">
+                            <span class="tab-split-bd-amt" data-tab-bd-amt="{{$dkey}}">{{$sym}}0.00</span>
+                            <span class="tab-split-amt-caption tab-split-amt-caption--share">Share</span>
+                            <span class="tab-split-amt-caption tab-split-amt-caption--total">Total</span>
+                          </span>
+                          <span class="tab-percent-field hidden" data-tab-percent-field aria-hidden="true">
+                            <span class="tab-percent-input-shell">
+                              <input type="number" step="0.01" min="0" max="100" class="tab-percent-input" placeholder="0" inputmode="decimal" data-tab-weight-key="{{$dkey}}" data-tab-percent-input autocomplete="off">
+                              <span class="tab-percent-suffix">%</span>
+                            </span>
+                          </span>
+                        </span>
+                      </span>
+                    </label>
+                    {{end}}{{end}}
+                  </div>
+                  <div class="tab-split-weights hidden" data-tab-split-weights></div>
+                </div>
+                <div class="tab-exact-footer hidden" data-tab-exact-footer aria-live="polite">
+                  <div class="tab-exact-footer-inner">
+                    <div class="tab-exact-footer-status hidden" data-tab-exact-match>
+                      <span class="material-symbols-outlined tab-exact-match-icon" aria-hidden="true">check_circle</span>
+                      <span>Sum matches total expense</span>
+                    </div>
+                    <div class="tab-exact-footer-remaining">
+                      <span class="tab-exact-remaining-label">Remaining</span>
+                      <span class="tab-exact-remaining-amt" data-tab-exact-remaining>—</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="tab-percent-footer hidden" data-tab-percent-footer aria-live="polite">
+                  <div class="tab-percent-footer-inner">
+                    <div class="tab-percent-footer-status hidden" data-tab-percent-match>
+                      <span class="material-symbols-outlined tab-percent-match-icon" aria-hidden="true">check_circle</span>
+                      <span>Total 100%</span>
+                    </div>
+                    <div class="tab-percent-footer-remaining">
+                      <span class="tab-percent-remaining-label">% remaining</span>
+                      <span class="tab-percent-remaining-val" data-tab-percent-remaining>—</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+{{end}}

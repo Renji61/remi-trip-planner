@@ -91,7 +91,8 @@ func main() {
 	chdirToModuleRoot()
 
 	dbPath := envOrDefault("SQLITE_PATH", "./data/trips.db")
-	addr := envOrDefault("APP_ADDR", ":4122")
+	// Default loopback-only so the app is not reachable from the LAN. Set APP_ADDR=:4122 to listen on all interfaces.
+	addr := envOrDefault("APP_ADDR", "127.0.0.1:4122")
 
 	db, err := sqlite.OpenAndMigrate(dbPath, "migrations/001_init.sql")
 	if err != nil {

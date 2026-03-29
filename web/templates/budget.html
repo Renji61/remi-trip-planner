@@ -10,10 +10,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=86">
+  <link rel="stylesheet" href="/static/app.css?v=140">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js?v=83"></script>
+  <script defer src="/static/app.js?v=121"></script>
 </head>
 <body>
   <main class="app-shell budget-page" aria-label="{{.Trip.SpendsSectionTitle}}" data-long-press-sheet-root>
@@ -38,18 +38,16 @@
     </aside>
 
     <section class="main">
-      <header class="budget-mobile-header">
+      <header class="trip-mobile-header">
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
           <span class="material-symbols-outlined" aria-hidden="true">home</span>
         </a>
-        <h2>{{.Trip.SpendsSectionTitle}}</h2>
+        <h2 class="trip-mobile-header-title">{{.Trip.SpendsSectionTitle}}</h2>
         <div class="budget-mobile-header-actions">
           <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
-          <button type="button" class="budget-mobile-header-btn" data-trip-mobile-profile-open aria-label="Open account menu">
-            <span class="material-symbols-outlined" aria-hidden="true">person</span>
-          </button>
+          {{template "tripMobileHeaderProfileBtn" .}}
         </div>
       </header>
       <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
@@ -57,26 +55,18 @@
       <header class="topbar budget-topbar">
         <div class="title-group">
           <h2>{{.Trip.SpendsSectionTitle}}</h2>
-          <p>{{formatUIDate .Trip.StartDate}} – {{formatUIDate .Trip.EndDate}}</p>
+          <p>{{formatTripUIDate .Trip .Trip.StartDate}} – {{formatTripUIDate .Trip .Trip.EndDate}}</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           <div class="trip-actions-links">
-            <form method="get" action="/trips/{{.Trip.ID}}/budget/export" class="budget-export-form">
+            <form method="get" action="/trips/{{.Trip.ID}}/expenses/export" class="budget-export-form">
               <input type="hidden" name="format" value="csv">
-              <button type="submit" class="secondary-btn" title="Download spends report as CSV" aria-label="Export spends report as CSV">Export Report</button>
+              <button type="submit" class="secondary-btn" title="Download expenses report as CSV" aria-label="Export expenses report as CSV">Export Report</button>
             </form>
             <a class="btn" href="#add-expense" title="Go to add {{.Trip.SpendsSectionTitle}} form">Add {{.Trip.SpendsSectionTitle}}</a>
+            {{if tripSectionEnabled "the_tab" .Trip}}<a class="secondary-btn" href="/trips/{{.Trip.ID}}/group-expenses">{{.Trip.GroupExpensesSectionTitle}}</a>{{end}}
           </div>
-          <div class="avatar-row">
-            <a href="/" class="icon-btn" aria-label="Go to dashboard">
-              <span class="material-symbols-outlined" aria-hidden="true">home</span>
-            </a>
-            <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
-              <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
-            </button>
-            <span class="avatar-dot"></span>
-            <span class="avatar">A</span>
-          </div>
+          {{template "tripDesktopHeaderTools" .}}
         </div>
       </header>
 
@@ -89,14 +79,14 @@
               {{if .TotalBudget}}{{abbrevMoney .CurrencySymbol .TotalBudget}}{{else}}{{abbrevMoney .CurrencySymbol .TotalSpent}}{{end}}
             </p>
           </div>
-          <a class="budget-mobile-export" href="/trips/{{.Trip.ID}}/budget/export?format=csv" aria-label="Export spends report as CSV" title="Download spends report as CSV">
+          <a class="budget-mobile-export" href="/trips/{{.Trip.ID}}/expenses/export?format=csv" aria-label="Export expenses report as CSV" title="Download expenses report as CSV">
             <span class="material-symbols-outlined" aria-hidden="true">download</span>
           </a>
         </div>
         <div class="budget-mobile-snapshot">
           <div>
             <small>Spent</small>
-            <strong title="{{.CurrencySymbol}}{{formatTripMoney .TotalSpent}}">{{abbrevMoney .CurrencySymbol .TotalSpent}}</strong>
+            <strong class="{{if .BudgetExceeded}}budget-mobile-spent--over{{end}}" title="{{if .BudgetExceeded}}Over budget: {{end}}{{.CurrencySymbol}}{{formatTripMoney .TotalSpent}}" tabindex="{{if .BudgetExceeded}}0{{else}}-1{{end}}">{{abbrevMoney .CurrencySymbol .TotalSpent}}</strong>
           </div>
           <div>
             <small>Remaining</small>
@@ -183,7 +173,7 @@
                 <div class="trip-inline-actions-buttons">
                   <button type="button" class="item-action-btn" data-inline-edit-open="expense-edit-budget-{{.ExpenseID}}">Edit</button>
                   <form method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ExpenseID}}/delete" data-app-confirm data-confirm-title="Delete this spend?" data-confirm-body="This expense will be removed from your trip." data-confirm-ok="Delete spend" data-confirm-icon="receipt_long" data-confirm-variant="danger" data-ajax-submit data-toast-message="Spend deleted.">
-                    <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/budget">
+                    <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/expenses">
                     <button type="submit" class="item-action-btn danger">Delete</button>
                   </form>
                 </div>
@@ -203,24 +193,19 @@
           <span class="material-symbols-outlined" aria-hidden="true">add</span>
         </button>
         <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
-          {{if .Trip.UIShowItinerary}}<a class="mobile-fab-option" href="/trips/{{.Trip.ID}}?open=stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>Add Stop</a>{{end}}
-          {{if .Trip.UIShowSpends}}<a class="mobile-fab-option" href="/trips/{{.Trip.ID}}/budget#add-expense"><span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>Add {{.Trip.SpendsSectionTitle}}</a>{{end}}
-          {{if .Trip.UIShowStay}}<a class="mobile-fab-option" href="/trips/{{.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add {{.Trip.StaySectionTitle}}</a>{{end}}
-          {{if .Trip.UIShowVehicle}}<a class="mobile-fab-option" href="/trips/{{.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add {{.Trip.VehicleSectionTitle}}</a>{{end}}
-          {{if .Trip.UIShowFlights}}<a class="mobile-fab-option" href="/trips/{{.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>Add {{.Trip.FlightsSectionTitle}}</a>{{end}}
-          {{if sidebarWidgetVisible "checklist" .Trip}}<a class="mobile-fab-option" href="/trips/{{.Trip.ID}}?open=checklist"><span class="material-symbols-outlined" aria-hidden="true">playlist_add</span>Add to Checklist</a>{{end}}
+          {{template "tripMobileFabLinks" (dict "Trip" .Trip)}}
         </div>
       </div>
 
       <div class="budget-summary-grid budget-desktop-block">
-        <section class="budget-metric-card">
+        <section class="budget-metric-card{{if .BudgetExceeded}} budget-metric-card--over{{end}}" {{if .BudgetExceeded}}title="Total spent exceeds your trip budget cap." tabindex="0"{{end}}>
           <div class="budget-metric-head">
             <span class="budget-metric-title">Total Spent</span>
             <span class="budget-metric-icon budget-metric-icon--primary" aria-hidden="true">
               <span class="material-symbols-outlined">account_balance_wallet</span>
             </span>
           </div>
-          <div class="budget-metric-value" title="{{.CurrencySymbol}}{{formatTripMoney .TotalSpent}}">{{abbrevMoney .CurrencySymbol .TotalSpent}}</div>
+          <div class="budget-metric-value budget-metric-value--spent{{if .BudgetExceeded}} budget-metric-value--over{{end}}" title="{{if .BudgetExceeded}}Over budget: {{end}}{{.CurrencySymbol}}{{formatTripMoney .TotalSpent}}">{{abbrevMoney .CurrencySymbol .TotalSpent}}</div>
           <div class="budget-metric-sub">{{printf "%.0f" .BudgetProgress}}% of budget used</div>
         </section>
 
@@ -342,7 +327,7 @@
             id="budget-view-all-btn"
             title="Load the rest of your transactions into this table"
             aria-label="Load all transactions into the table"
-            hx-get="/trips/{{.Trip.ID}}/budget/transactions?offset={{.BudgetInitialLimit}}&limit=9999"
+            hx-get="/trips/{{.Trip.ID}}/expenses/transactions?offset={{.BudgetInitialLimit}}&limit=9999"
             hx-target="#budget-transactions-tbody"
             hx-swap="beforeend"
             hx-trigger="click once"
@@ -356,14 +341,21 @@
         </div>
       </section>
 
-      <section id="add-expense" class="card budget-add-expense-card" aria-labelledby="budget-add-spend-title">
-        <h3 id="budget-add-spend-title">Add {{.Trip.SpendsSectionTitle}}</h3>
+      <section id="add-expense" class="card budget-add-expense-card remi-widget-panel" aria-labelledby="budget-add-spend-title">
+        <div class="remi-widget-head">
+          <span class="remi-widget-accent" aria-hidden="true"></span>
+          <div class="remi-widget-head-text">
+            <h3 id="budget-add-spend-title">Add {{.Trip.SpendsSectionTitle}}</h3>
+            <p class="trip-resource-form-subtitle">Entries appear in this trip's {{.Trip.SpendsSectionTitle}} and exports.</p>
+          </div>
+        </div>
         {{if .Trip.IsArchived}}
         <p class="muted">Trip is archived. New expenses are disabled.</p>
         {{else}}
-        <form method="post" action="/trips/{{.Trip.ID}}/expenses" class="form-grid">
-          <input type="hidden" name="return_to" value="/trips/{{.Trip.ID}}/budget">
-          <label class="full">Category
+        <form method="post" action="/trips/{{.Trip.ID}}/expenses" class="form-grid remi-widget-form-grid">
+          <input type="hidden" name="return_to" value="/trips/{{.Trip.ID}}/expenses">
+          <label>Title (optional)<input type="text" name="title" maxlength="200" autocomplete="off" placeholder="Shown as description in {{.Trip.SpendsSectionTitle}}"></label>
+          <label>Category
             <select name="category" required>
               <option value="" disabled selected>Select category</option>
               {{range .ExpenseCategories}}
@@ -371,8 +363,6 @@
               {{end}}
             </select>
           </label>
-          <label>Amount<input type="number" step="0.01" name="amount" placeholder="0.00" required></label>
-          <label>Date<input type="date" name="spent_on"></label>
           <label>Payment Method
             <select name="payment_method" required>
               <option value="" disabled selected>Select payment method</option>
@@ -384,8 +374,10 @@
               <option value="Mobile Payment">Mobile Payment</option>
             </select>
           </label>
-          <label class="full">Notes<input type="text" name="notes" placeholder="Optional notes"></label>
-          <button class="full" type="submit">Add {{.Trip.SpendsSectionTitle}}</button>
+          <label>Amount<input type="number" step="0.01" name="amount" placeholder="0.00" required></label>
+          <label>Date<input type="date" name="spent_on"></label>
+          <label>Notes<input type="text" name="notes" placeholder="Optional notes"></label>
+          <button class="full btn remi-widget-submit" type="submit">Add {{.Trip.SpendsSectionTitle}}</button>
         </form>
         {{end}}
       </section>
@@ -404,13 +396,7 @@
     </div>
   </dialog>
 
-  <nav class="bottom-nav" aria-label="Trip sections">
-    <a href="/trips/{{.Trip.ID}}"><span class="material-symbols-outlined" aria-hidden="true">map</span><span>My Trip</span></a>
-    {{if .Trip.UIShowStay}}<a href="/trips/{{.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span><span>{{.Trip.StaySectionTitle}}</span></a>{{end}}
-    {{if .Trip.UIShowVehicle}}<a href="/trips/{{.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span><span>{{.Trip.VehicleSectionTitle}}</span></a>{{end}}
-    {{if .Trip.UIShowFlights}}<a href="/trips/{{.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span><span>{{.Trip.FlightsSectionTitle}}</span></a>{{end}}
-    {{if .Trip.UIShowSpends}}<a class="active" href="/trips/{{.Trip.ID}}/budget"><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>{{.Trip.SpendsSectionTitle}}</span></a>{{end}}
-  </nav>
+  {{template "tripBottomNavCore" (dict "Trip" .Trip "Active" "expenses")}}
   {{template "tripLongPressSheet"}}
   {{template "tripMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}

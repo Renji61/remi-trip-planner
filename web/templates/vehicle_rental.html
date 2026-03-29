@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=86">
+  <link rel="stylesheet" href="/static/app.css?v=143">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=83"></script>
+  <script defer src="/static/app.js?v=124"></script>
 </head>
 <body>
-  <main class="app-shell" aria-label="{{.Details.Trip.VehicleSectionTitle}}" data-long-press-sheet-root>
+  <main class="app-shell" aria-label="{{.Details.Trip.VehicleSectionTitle}}" data-long-press-sheet-root data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -41,14 +41,12 @@
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
           <span class="material-symbols-outlined" aria-hidden="true">home</span>
         </a>
-        <h2>{{.Details.Trip.VehicleSectionTitle}}</h2>
+        <h2 class="trip-mobile-header-title">{{.Details.Trip.VehicleSectionTitle}}</h2>
         <div class="budget-mobile-header-actions">
           <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
             <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
           </button>
-          <button type="button" class="budget-mobile-header-btn" data-trip-mobile-profile-open aria-label="Open account menu">
-            <span class="material-symbols-outlined" aria-hidden="true">person</span>
-          </button>
+          {{template "tripMobileHeaderProfileBtn" .}}
         </div>
       </header>
       <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
@@ -59,12 +57,7 @@
           <p>Manage your {{.Details.Trip.VehicleSectionTitle}} bookings.</p>
         </div>
         <div class="topbar-right topbar-right--tools">
-          <a href="/" class="icon-btn" aria-label="Go to dashboard">
-            <span class="material-symbols-outlined" aria-hidden="true">home</span>
-          </a>
-          <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
-            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
-          </button>
+          {{template "tripDesktopHeaderTools" .}}
         </div>
       </header>
 
@@ -72,22 +65,32 @@
         <section class="vehicle-form-panel" aria-labelledby="vehicle-form-title">
           <div class="vehicle-section-head">
             <div class="vehicle-section-icon" aria-hidden="true"><span class="material-symbols-outlined">add_road</span></div>
-            <h3 id="vehicle-form-title">New {{.Details.Trip.VehicleSectionTitle}} booking</h3>
+            <div class="vehicle-section-head-text">
+              <h3 id="vehicle-form-title">New {{.Details.Trip.VehicleSectionTitle}} booking</h3>
+              <p class="trip-resource-form-subtitle">Details sync to your itinerary and expenses.</p>
+            </div>
           </div>
           {{if .Details.Trip.IsArchived}}
           <p class="muted">Trip is archived. Vehicle rental entries are disabled.</p>
           {{else}}
-          <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid vehicle-form-grid" enctype="multipart/form-data">
-            <label class="full">Vehicle Name & Type<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
-            <label>Pick-up Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+          <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form>
+            <label>Vehicle rental name<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
             <label>Booking Confirmation #<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
+            <label>Pick-up Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
             <label>Pick-up Date & Time<input type="datetime-local" name="pick_up_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
+            <fieldset class="vehicle-dropoff-fieldset">
+              <legend class="vehicle-dropoff-legend">Drop-off location</legend>
+              <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pick-up">
+                <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" checked data-vehicle-dropoff-same> Same as pick-up</label>
+                <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="different" data-vehicle-dropoff-diff> Different drop-off</label>
+              </div>
+              <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field hidden>Drop-off location<input type="text" name="drop_off_location" value="" placeholder="Return location" autocomplete="off" data-location-autocomplete disabled></label>
+            </fieldset>
             <label>Drop-off Date & Time<input type="datetime-local" name="drop_off_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
             <label>Rental Cost<input type="number" step="0.01" name="cost" placeholder="0.00"></label>
             <label>Insurance Cost<input type="number" step="0.01" name="insurance_cost" placeholder="0.00"></label>
-            <label class="checkbox-inline full"><input type="checkbox" name="pay_at_pick_up" value="true">Pay at Pick Up</label>
-            <label class="full">Attach Vehicle Image<input type="file" name="vehicle_image" accept="image/*"></label>
-            <label class="full">Additional Notes<input type="text" name="notes" placeholder="Notes about insurance coverage, keys, etc."></label>
+            <label>Booking Attachment<input type="file" name="vehicle_image" accept="image/*"></label>
+            <label>Notes<input type="text" name="notes" placeholder="Notes about insurance coverage, keys, etc."></label>
             <button class="full vehicle-submit-btn" type="submit">Save {{.Details.Trip.VehicleSectionTitle}} booking</button>
           </form>
           {{end}}
@@ -108,7 +111,7 @@
               <details class="item-actions vehicle-card-actions trip-inline-actions-dropdown">
                 <summary class="trip-inline-actions-summary">
                   <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
-                  <span class="trip-inline-actions-summary-label">Vehicle actions</span>
+                  <span class="trip-inline-actions-summary-label">Vehicle rental actions</span>
                 </summary>
                 <div class="trip-inline-actions-buttons">
                   <button type="button" class="item-action-btn" data-inline-edit-open="vehicle-rental-edit-{{.ID}}" aria-label="Edit vehicle rental: {{if .VehicleDetail}}{{.VehicleDetail}}{{else}}booking{{end}}" title="Edit this rental">Edit</button>
@@ -134,8 +137,9 @@
                   <div class="vehicle-main">
                     <div class="vehicle-main-top">
                       <div>
-                        <h4>{{if .VehicleDetail}}{{.VehicleDetail}}{{else}}Vehicle{{end}}</h4>
-                        <p>{{if .PickUpLocation}}{{.PickUpLocation}}{{else}}—{{end}}{{with googleMapsSearchURL 0 0 .PickUpLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open pick-up location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</p>
+                        <h4>{{if .VehicleDetail}}{{.VehicleDetail}}{{else}}Vehicle rental{{end}}</h4>
+                        <p class="vehicle-pickup-line">{{if .PickUpLocation}}{{locationLineBeforeComma .PickUpLocation}}{{else}}—{{end}}{{with googleMapsSearchURL 0 0 .PickUpLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open pick-up location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</p>
+                        {{if ne .DropOffLocation ""}}<p class="vehicle-dropoff-line muted">Drop-off: {{locationLineBeforeComma .DropOffLocation}}{{with googleMapsSearchURL 0 0 .DropOffLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open drop-off location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</p>{{end}}
                       </div>
                       <div class="vehicle-cost-block">
                         <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}}</strong>
@@ -153,38 +157,48 @@
                 </div>
               </div>
               {{if not $.Details.Trip.IsArchived}}
-              <form id="vehicle-rental-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/update" class="form-grid item-edit hidden full vehicle-edit-form" enctype="multipart/form-data">
-                <div class="full vehicle-edit-head">
-                  <h5>Edit {{$.Details.Trip.VehicleSectionTitle}}</h5>
-                  <p>Update details here and it will sync to itinerary and expenses.</p>
+              <form id="vehicle-rental-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/update" class="form-grid item-edit hidden full vehicle-edit-form vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form>
+                <div class="full vehicle-section-head vehicle-edit-form-head">
+                  <div class="vehicle-section-icon" aria-hidden="true"><span class="material-symbols-outlined">edit_square</span></div>
+                  <div class="vehicle-section-head-text">
+                    <h3>Edit {{$.Details.Trip.VehicleSectionTitle}}</h3>
+                    <p class="vehicle-edit-subtitle muted">Update details here and it will sync to itinerary and expenses.</p>
+                  </div>
                 </div>
-                <label class="full">Vehicle Name & Type<input type="text" name="vehicle_detail" value="{{.VehicleDetail}}"></label>
-                <label class="full">Pick-up Location<input type="text" name="pick_up_location" value="{{.PickUpLocation}}" required data-location-autocomplete></label>
-                <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}"></label>
+                <label>Vehicle rental name<input type="text" name="vehicle_detail" value="{{.VehicleDetail}}" placeholder="e.g. Range Rover Velar"></label>
+                <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="#REMI-9921"></label>
+                <label>Pick-up Location<input type="text" name="pick_up_location" value="{{.PickUpLocation}}" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
                 <label>Pick-up Date & Time<input type="datetime-local" name="pick_up_at" value="{{.PickUpAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
+                <fieldset class="vehicle-dropoff-fieldset">
+                  <legend class="vehicle-dropoff-legend">Drop-off location</legend>
+                  <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pick-up">
+                    <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" {{if eq .DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-same> Same as pick-up</label>
+                    <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="different" {{if ne .DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-diff> Different drop-off</label>
+                  </div>
+                  <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field {{if eq .DropOffLocation ""}}hidden{{end}}>Drop-off location<input type="text" name="drop_off_location" value="{{.DropOffLocation}}" placeholder="Return location" autocomplete="off" data-location-autocomplete {{if eq .DropOffLocation ""}}disabled{{end}}></label>
+                </fieldset>
                 <label>Drop-off Date & Time<input type="datetime-local" name="drop_off_at" value="{{.DropOffAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
-                <label>Rental Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Cost}}"></label>
-                <label>Insurance Cost<input type="number" step="0.01" name="insurance_cost" value="{{printf "%.2f" .InsuranceCost}}"></label>
-                <label class="checkbox-inline full"><input type="checkbox" name="pay_at_pick_up" value="true" {{if .PayAtPickUp}}checked{{end}}>Pay at Pick Up</label>
+                <label>Rental Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
+                <label>Insurance Cost<input type="number" step="0.01" name="insurance_cost" value="{{printf "%.2f" .InsuranceCost}}" placeholder="0.00"></label>
                 <input type="hidden" name="current_vehicle_image_path" value="{{.VehicleImagePath}}">
                 {{if .VehicleImagePath}}
                 <label class="full vehicle-thumb-form-row">
-                  <span>Current Vehicle Image</span>
-                  <a href="{{.VehicleImagePath}}" target="_blank" rel="noreferrer" title="Open current vehicle image in a new tab">
-                    <img class="vehicle-thumb" src="{{.VehicleImagePath}}" alt="Current vehicle image for this rental">
+                  <span>Current vehicle rental image</span>
+                  <a href="{{.VehicleImagePath}}" target="_blank" rel="noreferrer" title="Open current vehicle rental image in a new tab">
+                    <img class="vehicle-thumb" src="{{.VehicleImagePath}}" alt="Current vehicle rental image">
                   </a>
                 </label>
                 {{end}}
-                <label class="full">Replace Vehicle Image<input type="file" name="vehicle_image" accept="image/*"></label>
-                <label class="full">Image Action
+                <label>Booking Attachment<input type="file" name="vehicle_image" accept="image/*"></label>
+                <label class="full">Image action
                   <select name="remove_vehicle_image">
                     <option value="false" selected>Keep existing image</option>
                     <option value="true">Delete existing image</option>
                   </select>
                 </label>
-                <label class="full">Additional Notes<input type="text" name="notes" value="{{.Notes}}"></label>
+                <label>Notes<input type="text" name="notes" value="{{.Notes}}" placeholder="Notes about insurance coverage, keys, etc."></label>
                 <div class="full vehicle-edit-actions">
-                  <button type="submit">Save Changes</button>
+                  <button type="submit" class="vehicle-submit-btn">Save Changes</button>
                   <button type="button" class="secondary-btn" data-inline-edit-cancel="vehicle-rental-edit-{{.ID}}">Cancel</button>
                 </div>
               </form>
@@ -211,21 +225,10 @@
       <span class="material-symbols-outlined" aria-hidden="true">add</span>
     </button>
     <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
-      {{if .Details.Trip.UIShowItinerary}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}?open=stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>Add Stop</a>{{end}}
-      {{if .Details.Trip.UIShowSpends}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/budget#add-expense"><span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>Add {{.Details.Trip.SpendsSectionTitle}}</a>{{end}}
-      {{if .Details.Trip.UIShowStay}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add {{.Details.Trip.StaySectionTitle}}</a>{{end}}
-      {{if .Details.Trip.UIShowVehicle}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add {{.Details.Trip.VehicleSectionTitle}}</a>{{end}}
-      {{if .Details.Trip.UIShowFlights}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>Add {{.Details.Trip.FlightsSectionTitle}}</a>{{end}}
-      {{if sidebarWidgetVisible "checklist" .Details.Trip}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}?open=checklist"><span class="material-symbols-outlined" aria-hidden="true">playlist_add</span>Add to Checklist</a>{{end}}
+      {{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}
     </div>
   </div>
-  <nav class="bottom-nav" aria-label="Trip sections">
-    <a href="/trips/{{.Details.Trip.ID}}"><span class="material-symbols-outlined" aria-hidden="true">map</span><span>My Trip</span></a>
-    {{if .Details.Trip.UIShowStay}}<a href="/trips/{{.Details.Trip.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span><span>{{.Details.Trip.StaySectionTitle}}</span></a>{{end}}
-    {{if .Details.Trip.UIShowVehicle}}<a class="active" href="/trips/{{.Details.Trip.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span><span>{{.Details.Trip.VehicleSectionTitle}}</span></a>{{end}}
-    {{if .Details.Trip.UIShowFlights}}<a href="/trips/{{.Details.Trip.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span><span>{{.Details.Trip.FlightsSectionTitle}}</span></a>{{end}}
-    {{if .Details.Trip.UIShowSpends}}<a href="/trips/{{.Details.Trip.ID}}/budget"><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>{{.Details.Trip.SpendsSectionTitle}}</span></a>{{end}}
-  </nav>
+  {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "vehicle")}}
   {{template "tripLongPressSheet"}}
   {{template "tripMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}

@@ -90,6 +90,16 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 		}
 	}
 	for _, stmt := range []string{
+		`ALTER TABLE app_settings ADD COLUMN google_maps_api_key TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_settings ADD COLUMN default_distance_unit TEXT NOT NULL DEFAULT 'km'`,
+		`ALTER TABLE trips ADD COLUMN distance_unit TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vehicle_rentals ADD COLUMN drop_off_location TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+	}
+	for _, stmt := range []string{
 		`ALTER TABLE trips ADD COLUMN ui_show_stay INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE trips ADD COLUMN ui_show_vehicle INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE trips ADD COLUMN ui_show_flights INTEGER NOT NULL DEFAULT 1`,
@@ -98,11 +108,13 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 		`ALTER TABLE trips ADD COLUMN ui_show_checklist INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE trips ADD COLUMN ui_itinerary_expand TEXT NOT NULL DEFAULT 'first'`,
 		`ALTER TABLE trips ADD COLUMN ui_spends_expand TEXT NOT NULL DEFAULT 'first'`,
+		`ALTER TABLE trips ADD COLUMN ui_tab_expand TEXT NOT NULL DEFAULT 'first'`,
 		`ALTER TABLE trips ADD COLUMN ui_time_format TEXT NOT NULL DEFAULT '12h'`,
 		`ALTER TABLE trips ADD COLUMN ui_label_stay TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trips ADD COLUMN ui_label_vehicle TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trips ADD COLUMN ui_label_flights TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trips ADD COLUMN ui_label_spends TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trips ADD COLUMN ui_label_group_expenses TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trips ADD COLUMN ui_main_section_order TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trips ADD COLUMN ui_sidebar_widget_order TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trips ADD COLUMN ui_show_custom_links INTEGER NOT NULL DEFAULT 1`,
@@ -117,6 +129,9 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	if err := migrateAuthAndSharing(db); err != nil {
 		return nil, err
 	}
+	if _, err = db.Exec(`ALTER TABLE user_settings ADD COLUMN distance_unit TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
 	for _, stmt := range []string{
 		`ALTER TABLE trips ADD COLUMN home_map_latitude REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE trips ADD COLUMN home_map_longitude REAL NOT NULL DEFAULT 0`,
@@ -126,6 +141,88 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 		}
 	}
 	if _, err = db.Exec(`ALTER TABLE app_settings ADD COLUMN map_default_place_label TEXT NOT NULL DEFAULT 'Tokyo'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN budget_cap REAL NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN ui_show_the_tab INTEGER NOT NULL DEFAULT 1`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE expenses ADD COLUMN from_tab INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE expenses ADD COLUMN receipt_path TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE vehicle_rentals SET pay_at_pick_up = 0`); err != nil {
+		return nil, err
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE trips ADD COLUMN tab_default_split_mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trips ADD COLUMN tab_default_split_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE expenses ADD COLUMN title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE expenses ADD COLUMN paid_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE expenses ADD COLUMN split_mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE expenses ADD COLUMN split_json TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS trip_guests (
+			id TEXT PRIMARY KEY,
+			trip_id TEXT NOT NULL,
+			display_name TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_trip_guests_trip ON trip_guests(trip_id)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS tab_settlements (
+			id TEXT PRIMARY KEY,
+			trip_id TEXT NOT NULL,
+			payer_user_id TEXT NOT NULL,
+			payee_user_id TEXT NOT NULL,
+			amount REAL NOT NULL,
+			method TEXT NOT NULL DEFAULT 'Cash',
+			settled_on TEXT NOT NULL DEFAULT '',
+			notes TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_tab_settlements_trip ON tab_settlements(trip_id)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS trip_departed_tab_participants (
+			trip_id TEXT NOT NULL,
+			participant_key TEXT NOT NULL,
+			display_name TEXT NOT NULL,
+			left_at DATETIME NOT NULL,
+			PRIMARY KEY (trip_id, participant_key),
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_departed_tab_trip ON trip_departed_tab_participants(trip_id)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS tab_expense_search USING fts5(
+			trip_id UNINDEXED,
+			expense_id UNINDEXED,
+			body
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN ui_date_format TEXT NOT NULL DEFAULT 'dmy'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}
 	return db, nil
@@ -172,6 +269,7 @@ func migrateAuthAndSharing(db *sql.DB) error {
 			trip_dashboard_heading TEXT NOT NULL DEFAULT 'Trip Dashboard',
 			default_currency_name TEXT NOT NULL DEFAULT 'USD',
 			default_currency_symbol TEXT NOT NULL DEFAULT '$',
+			distance_unit TEXT NOT NULL DEFAULT '',
 			updated_at DATETIME NOT NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,

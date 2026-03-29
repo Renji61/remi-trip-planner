@@ -1,4 +1,4 @@
-# Watch REMI Trip Planner sources and rebuild + restart the server on :4122.
+# Watch REMI Trip Planner sources and rebuild + restart the server on 127.0.0.1:4122.
 # Run from repo root:  .\scripts\dev-watch.ps1
 # Ctrl+C stops the watcher and the server on this port.
 
@@ -35,7 +35,7 @@ function Build-And-Start {
         return
     }
     Stop-ServerOnPort
-    $env:APP_ADDR = ":$Port"
+    $env:APP_ADDR = "127.0.0.1:$Port"
     Start-Process -FilePath ".\bin\remi-server.exe" -WorkingDirectory $Root -WindowStyle Hidden
     Write-Host "[dev-watch] Server started on http://localhost:$Port/" -ForegroundColor Green
 }
