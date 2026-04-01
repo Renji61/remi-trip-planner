@@ -27,7 +27,7 @@
         {{else if .SidebarTripID}}
         <a class="btn" href="/trips/{{.SidebarTripID}}">Back to My Trip</a>
         {{else}}
-        <a class="btn" href="/">Plan New Trip</a>
+        <a class="btn" href="/#dashboard-new-trip-name">Plan New Trip</a>
         {{end}}
         <a class="support-link sidebar-icon-link{{if eq .SidebarNavActive "about"}} support-link--active{{end}}" href="/about"{{if eq .SidebarNavActive "about"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">info</span>About</a>
         <a class="support-link sidebar-icon-link{{if eq .SidebarNavActive "profile"}} support-link--active{{end}}" href="/profile"{{if eq .SidebarNavActive "profile"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">person</span>Profile</a>

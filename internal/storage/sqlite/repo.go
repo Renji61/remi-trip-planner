@@ -30,7 +30,7 @@ func sqliteBool(b bool) int {
 	return 0
 }
 
-const tripSelectCols = `id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, home_map_latitude, home_map_longitude, is_archived, owner_user_id,
+const tripSelectCols = `id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, home_map_latitude, home_map_longitude, home_map_place_label, is_archived, owner_user_id,
 		ui_show_stay, ui_show_vehicle, ui_show_flights, ui_show_spends, ui_show_itinerary, ui_show_checklist,
 		ui_itinerary_expand, ui_spends_expand, ui_tab_expand, ui_time_format, ui_date_format,
 		ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends, ui_label_group_expenses,
@@ -44,7 +44,7 @@ func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
 	var t trips.Trip
 	var ss, sv, sf, sp, sit, sck, scl, stt int
 	err := scan(
-		&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.HomeMapLatitude, &t.HomeMapLongitude, &t.IsArchived, &t.OwnerUserID,
+		&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.HomeMapLatitude, &t.HomeMapLongitude, &t.HomeMapPlaceLabel, &t.IsArchived, &t.OwnerUserID,
 		&ss, &sv, &sf, &sp, &sit, &sck,
 		&t.UIItineraryExpand, &t.UISpendsExpand, &t.UITabExpand, &t.UITimeFormat, &t.UIDateFormat,
 		&t.UILabelStay, &t.UILabelVehicle, &t.UILabelFlights, &t.UILabelSpends, &t.UILabelGroupExpenses,
@@ -67,7 +67,7 @@ func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
 	t.UIShowChecklist = sck != 0
 	t.UIShowCustomLinks = scl != 0
 	t.UIShowTheTab = stt != 0
-	t.UIDateFormat = trips.NormalizeUIDateFormat(t.UIDateFormat)
+	t.UIDateFormat = trips.NormalizeTripUIDateStorage(t.UIDateFormat)
 	return t, nil
 }
 
@@ -78,7 +78,7 @@ func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) (string, erro
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO trips (
-			id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, home_map_latitude, home_map_longitude, is_archived, owner_user_id,
+			id, name, description, start_date, end_date, cover_image_url, currency_name, currency_symbol, home_map_latitude, home_map_longitude, home_map_place_label, is_archived, owner_user_id,
 			ui_show_stay, ui_show_vehicle, ui_show_flights, ui_show_spends, ui_show_itinerary, ui_show_checklist,
 			ui_itinerary_expand, ui_spends_expand, ui_tab_expand, ui_time_format, ui_date_format,
 			ui_label_stay, ui_label_vehicle, ui_label_flights, ui_label_spends, ui_label_group_expenses,
@@ -87,9 +87,9 @@ func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) (string, erro
 			ui_show_custom_links, ui_custom_sidebar_links,
 			budget_cap, ui_show_the_tab, tab_default_split_mode, tab_default_split_json, distance_unit,
 			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 'first', 'first', 'first', '12h', ?, '', '', '', '', '', '', '', '', '', 1, '', ?, 1, '', '', ?, ?, ?)`,
-		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude, t.IsArchived, t.OwnerUserID,
-		trips.NormalizeUIDateFormat(t.UIDateFormat),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 'first', 'first', 'first', '12h', ?, '', '', '', '', '', '', '', '', '', 1, '', ?, 1, '', '', ?, ?, ?)`,
+		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude, t.HomeMapPlaceLabel, t.IsArchived, t.OwnerUserID,
+		trips.NormalizeTripUIDateStorage(t.UIDateFormat),
 		t.BudgetCap, t.DistanceUnit, now, now,
 	)
 	if err == nil {
@@ -121,12 +121,12 @@ func (r *Repository) GetTrip(ctx context.Context, tripID string) (trips.Trip, er
 }
 
 func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
-	t.UIDateFormat = trips.NormalizeUIDateFormat(t.UIDateFormat)
+	t.UIDateFormat = trips.NormalizeTripUIDateStorage(t.UIDateFormat)
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE trips
 		SET name = ?, description = ?, start_date = ?, end_date = ?, cover_image_url = ?, currency_name = ?, currency_symbol = ?,
-		    home_map_latitude = ?, home_map_longitude = ?,
+		    home_map_latitude = ?, home_map_longitude = ?, home_map_place_label = ?,
 		    budget_cap = ?,
 		    ui_show_stay = ?, ui_show_vehicle = ?, ui_show_flights = ?, ui_show_spends = ?, ui_show_itinerary = ?, ui_show_checklist = ?,
 		    ui_show_the_tab = ?,
@@ -139,7 +139,7 @@ func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
 		    distance_unit = ?,
 		    updated_at = ?
 		WHERE id = ?`,
-		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude,
+		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude, t.HomeMapPlaceLabel,
 		t.BudgetCap,
 		sqliteBool(t.UIShowStay), sqliteBool(t.UIShowVehicle), sqliteBool(t.UIShowFlights), sqliteBool(t.UIShowSpends),
 		sqliteBool(t.UIShowItinerary), sqliteBool(t.UIShowChecklist),
@@ -188,9 +188,9 @@ func (r *Repository) AddItineraryItem(ctx context.Context, item trips.ItineraryI
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO itinerary_items
-		(id, trip_id, day_number, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.DayNumber, item.Title, item.Notes, item.Location, item.Latitude, item.Longitude, item.EstCost, item.StartTime, item.EndTime, now, now,
+		(id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.StartTime, item.EndTime, now, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, item.TripID, "itinerary_item", item.ID, "create", map[string]any{
@@ -204,9 +204,9 @@ func (r *Repository) UpdateItineraryItem(ctx context.Context, item trips.Itinera
 	now := time.Now().UTC()
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE itinerary_items
-		SET day_number = ?, title = ?, notes = ?, location = ?, latitude = ?, longitude = ?, est_cost = ?, start_time = ?, end_time = ?, updated_at = ?
+		SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, start_time = ?, end_time = ?, updated_at = ?
 		WHERE id = ? AND trip_id = ?`,
-		item.DayNumber, item.Title, item.Notes, item.Location, item.Latitude, item.Longitude, item.EstCost, item.StartTime, item.EndTime, now,
+		item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.StartTime, item.EndTime, now,
 		item.ID, item.TripID,
 	)
 	if err != nil {
@@ -234,7 +234,7 @@ func (r *Repository) DeleteItineraryItem(ctx context.Context, tripID, itemID str
 
 func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]trips.ItineraryItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, day_number, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at
+		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at
 		FROM itinerary_items WHERE trip_id = ?
 		ORDER BY day_number ASC, created_at ASC`, tripID)
 	if err != nil {
@@ -244,7 +244,7 @@ func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]t
 	out := []trips.ItineraryItem{}
 	for rows.Next() {
 		var i trips.ItineraryItem
-		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.Latitude, &i.Longitude, &i.EstCost, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCost, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -254,7 +254,7 @@ func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]t
 
 func (r *Repository) ListAllItineraryItems(ctx context.Context) ([]trips.ItineraryItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, day_number, title, notes, location, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at
+		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost, start_time, end_time, created_at, updated_at
 		FROM itinerary_items
 		ORDER BY trip_id, day_number ASC, start_time ASC, created_at ASC, id ASC`)
 	if err != nil {
@@ -264,7 +264,7 @@ func (r *Repository) ListAllItineraryItems(ctx context.Context) ([]trips.Itinera
 	out := []trips.ItineraryItem{}
 	for rows.Next() {
 		var i trips.ItineraryItem
-		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.Latitude, &i.Longitude, &i.EstCost, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCost, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -497,9 +497,9 @@ func (r *Repository) AddLodging(ctx context.Context, item trips.Lodging) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO lodging_entries
-		(id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, check_in_itinerary_id, check_out_itinerary_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.Name, item.Address, item.CheckInAt, item.CheckOutAt, item.BookingConfirmation, item.Cost, item.Notes, item.AttachmentPath,
+		(id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, image_path, check_in_itinerary_id, check_out_itinerary_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.Name, item.Address, item.CheckInAt, item.CheckOutAt, item.BookingConfirmation, item.Cost, item.Notes, item.AttachmentPath, item.ImagePath,
 		item.CheckInItineraryID, item.CheckOutItineraryID, now,
 	)
 	return err
@@ -508,10 +508,10 @@ func (r *Repository) AddLodging(ctx context.Context, item trips.Lodging) error {
 func (r *Repository) GetLodging(ctx context.Context, tripID, lodgingID string) (trips.Lodging, error) {
 	var l trips.Lodging
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, check_in_itinerary_id, check_out_itinerary_id, created_at
+		SELECT id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, image_path, check_in_itinerary_id, check_out_itinerary_id, created_at
 		FROM lodging_entries WHERE id = ? AND trip_id = ?`,
 		lodgingID, tripID,
-	).Scan(&l.ID, &l.TripID, &l.Name, &l.Address, &l.CheckInAt, &l.CheckOutAt, &l.BookingConfirmation, &l.Cost, &l.Notes, &l.AttachmentPath,
+	).Scan(&l.ID, &l.TripID, &l.Name, &l.Address, &l.CheckInAt, &l.CheckOutAt, &l.BookingConfirmation, &l.Cost, &l.Notes, &l.AttachmentPath, &l.ImagePath,
 		&l.CheckInItineraryID, &l.CheckOutItineraryID, &l.CreatedAt)
 	return l, err
 }
@@ -519,9 +519,9 @@ func (r *Repository) GetLodging(ctx context.Context, tripID, lodgingID string) (
 func (r *Repository) UpdateLodging(ctx context.Context, item trips.Lodging) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE lodging_entries
-		SET name = ?, address = ?, check_in_at = ?, check_out_at = ?, booking_confirmation = ?, cost = ?, notes = ?, attachment_path = ?, check_in_itinerary_id = ?, check_out_itinerary_id = ?
+		SET name = ?, address = ?, check_in_at = ?, check_out_at = ?, booking_confirmation = ?, cost = ?, notes = ?, attachment_path = ?, image_path = ?, check_in_itinerary_id = ?, check_out_itinerary_id = ?
 		WHERE id = ? AND trip_id = ?`,
-		item.Name, item.Address, item.CheckInAt, item.CheckOutAt, item.BookingConfirmation, item.Cost, item.Notes, item.AttachmentPath,
+		item.Name, item.Address, item.CheckInAt, item.CheckOutAt, item.BookingConfirmation, item.Cost, item.Notes, item.AttachmentPath, item.ImagePath,
 		item.CheckInItineraryID, item.CheckOutItineraryID,
 		item.ID, item.TripID,
 	)
@@ -535,7 +535,7 @@ func (r *Repository) DeleteLodging(ctx context.Context, tripID, lodgingID string
 
 func (r *Repository) ListLodgings(ctx context.Context, tripID string) ([]trips.Lodging, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, check_in_itinerary_id, check_out_itinerary_id, created_at
+		SELECT id, trip_id, name, address, check_in_at, check_out_at, booking_confirmation, cost, notes, attachment_path, image_path, check_in_itinerary_id, check_out_itinerary_id, created_at
 		FROM lodging_entries
 		WHERE trip_id = ?
 		ORDER BY check_in_at ASC, created_at ASC`, tripID)
@@ -546,7 +546,7 @@ func (r *Repository) ListLodgings(ctx context.Context, tripID string) ([]trips.L
 	out := []trips.Lodging{}
 	for rows.Next() {
 		var l trips.Lodging
-		if err := rows.Scan(&l.ID, &l.TripID, &l.Name, &l.Address, &l.CheckInAt, &l.CheckOutAt, &l.BookingConfirmation, &l.Cost, &l.Notes, &l.AttachmentPath,
+		if err := rows.Scan(&l.ID, &l.TripID, &l.Name, &l.Address, &l.CheckInAt, &l.CheckOutAt, &l.BookingConfirmation, &l.Cost, &l.Notes, &l.AttachmentPath, &l.ImagePath,
 			&l.CheckInItineraryID, &l.CheckOutItineraryID, &l.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -562,9 +562,9 @@ func (r *Repository) AddVehicleRental(ctx context.Context, item trips.VehicleRen
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO vehicle_rentals
-		(id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.PickUpLocation, item.DropOffLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
+		(id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, attachment_path, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.PickUpLocation, item.DropOffLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.AttachmentPath, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
 		item.PickUpItineraryID, item.DropOffItineraryID, item.RentalExpenseID, item.InsuranceExpenseID, now,
 	)
 	return err
@@ -573,10 +573,10 @@ func (r *Repository) AddVehicleRental(ctx context.Context, item trips.VehicleRen
 func (r *Repository) GetVehicleRental(ctx context.Context, tripID, rentalID string) (trips.VehicleRental, error) {
 	var v trips.VehicleRental
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
+		SELECT id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, attachment_path, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
 		FROM vehicle_rentals WHERE id = ? AND trip_id = ?`,
 		rentalID, tripID,
-	).Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.DropOffLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
+	).Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.DropOffLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.AttachmentPath, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
 		&v.PickUpItineraryID, &v.DropOffItineraryID, &v.RentalExpenseID, &v.InsuranceExpenseID, &v.CreatedAt)
 	return v, err
 }
@@ -584,9 +584,9 @@ func (r *Repository) GetVehicleRental(ctx context.Context, tripID, rentalID stri
 func (r *Repository) UpdateVehicleRental(ctx context.Context, item trips.VehicleRental) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE vehicle_rentals
-		SET pick_up_location = ?, drop_off_location = ?, vehicle_detail = ?, pick_up_at = ?, drop_off_at = ?, booking_confirmation = ?, notes = ?, vehicle_image_path = ?, cost = ?, insurance_cost = ?, pay_at_pick_up = ?, pick_up_itinerary_id = ?, drop_off_itinerary_id = ?, rental_expense_id = ?, insurance_expense_id = ?
+		SET pick_up_location = ?, drop_off_location = ?, vehicle_detail = ?, pick_up_at = ?, drop_off_at = ?, booking_confirmation = ?, notes = ?, attachment_path = ?, vehicle_image_path = ?, cost = ?, insurance_cost = ?, pay_at_pick_up = ?, pick_up_itinerary_id = ?, drop_off_itinerary_id = ?, rental_expense_id = ?, insurance_expense_id = ?
 		WHERE id = ? AND trip_id = ?`,
-		item.PickUpLocation, item.DropOffLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
+		item.PickUpLocation, item.DropOffLocation, item.VehicleDetail, item.PickUpAt, item.DropOffAt, item.BookingConfirmation, item.Notes, item.AttachmentPath, item.VehicleImagePath, item.Cost, item.InsuranceCost, item.PayAtPickUp,
 		item.PickUpItineraryID, item.DropOffItineraryID, item.RentalExpenseID, item.InsuranceExpenseID,
 		item.ID, item.TripID,
 	)
@@ -600,7 +600,7 @@ func (r *Repository) DeleteVehicleRental(ctx context.Context, tripID, rentalID s
 
 func (r *Repository) ListVehicleRentals(ctx context.Context, tripID string) ([]trips.VehicleRental, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
+		SELECT id, trip_id, pick_up_location, drop_off_location, vehicle_detail, pick_up_at, drop_off_at, booking_confirmation, notes, attachment_path, vehicle_image_path, cost, insurance_cost, pay_at_pick_up, pick_up_itinerary_id, drop_off_itinerary_id, rental_expense_id, insurance_expense_id, created_at
 		FROM vehicle_rentals
 		WHERE trip_id = ?
 		ORDER BY pick_up_at ASC, created_at ASC`, tripID)
@@ -611,7 +611,7 @@ func (r *Repository) ListVehicleRentals(ctx context.Context, tripID string) ([]t
 	out := []trips.VehicleRental{}
 	for rows.Next() {
 		var v trips.VehicleRental
-		if err := rows.Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.DropOffLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
+		if err := rows.Scan(&v.ID, &v.TripID, &v.PickUpLocation, &v.DropOffLocation, &v.VehicleDetail, &v.PickUpAt, &v.DropOffAt, &v.BookingConfirmation, &v.Notes, &v.AttachmentPath, &v.VehicleImagePath, &v.Cost, &v.InsuranceCost, &v.PayAtPickUp,
 			&v.PickUpItineraryID, &v.DropOffItineraryID, &v.RentalExpenseID, &v.InsuranceExpenseID, &v.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -627,9 +627,9 @@ func (r *Repository) AddFlight(ctx context.Context, item trips.Flight) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO flight_entries
-		(id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.FlightName, item.FlightNumber, item.DepartAirport, item.ArriveAirport, item.DepartAt, item.ArriveAt, item.BookingConfirmation, item.Notes, item.DocumentPath, item.Cost, item.DepartItineraryID, item.ArriveItineraryID, item.ExpenseID, now,
+		(id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, image_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.FlightName, item.FlightNumber, item.DepartAirport, item.ArriveAirport, item.DepartAt, item.ArriveAt, item.BookingConfirmation, item.Notes, item.DocumentPath, item.ImagePath, item.Cost, item.DepartItineraryID, item.ArriveItineraryID, item.ExpenseID, now,
 	)
 	return err
 }
@@ -637,11 +637,11 @@ func (r *Repository) AddFlight(ctx context.Context, item trips.Flight) error {
 func (r *Repository) GetFlight(ctx context.Context, tripID, flightID string) (trips.Flight, error) {
 	var f trips.Flight
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at
+		SELECT id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, image_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at
 		FROM flight_entries WHERE id = ? AND trip_id = ?`,
 		flightID, tripID,
 	).Scan(
-		&f.ID, &f.TripID, &f.FlightName, &f.FlightNumber, &f.DepartAirport, &f.ArriveAirport, &f.DepartAt, &f.ArriveAt, &f.BookingConfirmation, &f.Notes, &f.DocumentPath, &f.Cost, &f.DepartItineraryID, &f.ArriveItineraryID, &f.ExpenseID, &f.CreatedAt,
+		&f.ID, &f.TripID, &f.FlightName, &f.FlightNumber, &f.DepartAirport, &f.ArriveAirport, &f.DepartAt, &f.ArriveAt, &f.BookingConfirmation, &f.Notes, &f.DocumentPath, &f.ImagePath, &f.Cost, &f.DepartItineraryID, &f.ArriveItineraryID, &f.ExpenseID, &f.CreatedAt,
 	)
 	return f, err
 }
@@ -649,9 +649,9 @@ func (r *Repository) GetFlight(ctx context.Context, tripID, flightID string) (tr
 func (r *Repository) UpdateFlight(ctx context.Context, item trips.Flight) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE flight_entries
-		SET flight_name = ?, flight_number = ?, depart_airport = ?, arrive_airport = ?, depart_at = ?, arrive_at = ?, booking_confirmation = ?, notes = ?, document_path = ?, cost = ?, depart_itinerary_id = ?, arrive_itinerary_id = ?, expense_id = ?
+		SET flight_name = ?, flight_number = ?, depart_airport = ?, arrive_airport = ?, depart_at = ?, arrive_at = ?, booking_confirmation = ?, notes = ?, document_path = ?, image_path = ?, cost = ?, depart_itinerary_id = ?, arrive_itinerary_id = ?, expense_id = ?
 		WHERE id = ? AND trip_id = ?`,
-		item.FlightName, item.FlightNumber, item.DepartAirport, item.ArriveAirport, item.DepartAt, item.ArriveAt, item.BookingConfirmation, item.Notes, item.DocumentPath, item.Cost, item.DepartItineraryID, item.ArriveItineraryID, item.ExpenseID,
+		item.FlightName, item.FlightNumber, item.DepartAirport, item.ArriveAirport, item.DepartAt, item.ArriveAt, item.BookingConfirmation, item.Notes, item.DocumentPath, item.ImagePath, item.Cost, item.DepartItineraryID, item.ArriveItineraryID, item.ExpenseID,
 		item.ID, item.TripID,
 	)
 	return err
@@ -664,7 +664,7 @@ func (r *Repository) DeleteFlight(ctx context.Context, tripID, flightID string) 
 
 func (r *Repository) ListFlights(ctx context.Context, tripID string) ([]trips.Flight, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at
+		SELECT id, trip_id, flight_name, flight_number, depart_airport, arrive_airport, depart_at, arrive_at, booking_confirmation, notes, document_path, image_path, cost, depart_itinerary_id, arrive_itinerary_id, expense_id, created_at
 		FROM flight_entries
 		WHERE trip_id = ?
 		ORDER BY depart_at ASC, created_at ASC`, tripID)
@@ -676,13 +676,72 @@ func (r *Repository) ListFlights(ctx context.Context, tripID string) ([]trips.Fl
 	for rows.Next() {
 		var f trips.Flight
 		if err := rows.Scan(
-			&f.ID, &f.TripID, &f.FlightName, &f.FlightNumber, &f.DepartAirport, &f.ArriveAirport, &f.DepartAt, &f.ArriveAt, &f.BookingConfirmation, &f.Notes, &f.DocumentPath, &f.Cost, &f.DepartItineraryID, &f.ArriveItineraryID, &f.ExpenseID, &f.CreatedAt,
+			&f.ID, &f.TripID, &f.FlightName, &f.FlightNumber, &f.DepartAirport, &f.ArriveAirport, &f.DepartAt, &f.ArriveAt, &f.BookingConfirmation, &f.Notes, &f.DocumentPath, &f.ImagePath, &f.Cost, &f.DepartItineraryID, &f.ArriveItineraryID, &f.ExpenseID, &f.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+func (r *Repository) ListTripDocuments(ctx context.Context, tripID string) ([]trips.TripDocument, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, trip_id, section, category, item_name, file_name, display_name, file_path, file_size, uploaded_at
+		FROM trip_documents
+		WHERE trip_id = ?
+		ORDER BY uploaded_at DESC, id DESC`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []trips.TripDocument{}
+	for rows.Next() {
+		var d trips.TripDocument
+		if err := rows.Scan(&d.ID, &d.TripID, &d.Section, &d.Category, &d.ItemName, &d.FileName, &d.DisplayName, &d.FilePath, &d.FileSize, &d.UploadedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) AddTripDocument(ctx context.Context, d trips.TripDocument) error {
+	if d.ID == "" {
+		d.ID = uuid.NewString()
+	}
+	if d.UploadedAt.IsZero() {
+		d.UploadedAt = time.Now().UTC()
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO trip_documents
+		(id, trip_id, section, category, item_name, file_name, display_name, file_path, file_size, uploaded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.TripID, d.Section, d.Category, d.ItemName, d.FileName, d.DisplayName, d.FilePath, d.FileSize, d.UploadedAt,
+	)
+	return err
+}
+
+func (r *Repository) UpdateTripDocumentDisplayName(ctx context.Context, tripID, documentID, displayName string) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE trip_documents SET display_name = ? WHERE id = ? AND trip_id = ? AND section = 'general'`,
+		displayName, documentID, tripID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (r *Repository) DeleteTripDocument(ctx context.Context, tripID, documentID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM trip_documents WHERE id = ? AND trip_id = ?`, documentID, tripID)
+	return err
 }
 
 func (r *Repository) ListChanges(ctx context.Context, tripID, since string) ([]trips.Change, error) {
@@ -732,7 +791,9 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 		       COALESCE(theme_preference, 'system'), COALESCE(dashboard_trip_layout, 'grid'), COALESCE(dashboard_trip_sort, 'name'), COALESCE(dashboard_hero_background, 'default'),
 		       COALESCE(NULLIF(TRIM(trip_dashboard_heading), ''), 'Trip Dashboard'),
 		       COALESCE(TRIM(google_maps_api_key), ''),
-		       COALESCE(NULLIF(TRIM(default_distance_unit), ''), 'km')
+		       COALESCE(NULLIF(TRIM(default_distance_unit), ''), 'km'),
+		       COALESCE(max_upload_file_size_mb, 5),
+		       COALESCE(NULLIF(TRIM(default_ui_date_format), ''), 'dmy')
 		FROM app_settings
 		WHERE id = 1`).
 		Scan(
@@ -752,7 +813,12 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 			&settings.TripDashboardHeading,
 			&settings.GoogleMapsAPIKey,
 			&settings.DefaultDistanceUnit,
+			&settings.MaxUploadFileSizeMB,
+			&settings.DefaultUIDateFormat,
 		)
+	if settings.DefaultUIDateFormat != "" {
+		settings.DefaultUIDateFormat = trips.NormalizeUIDateFormat(settings.DefaultUIDateFormat)
+	}
 	return settings, err
 }
 
@@ -764,9 +830,9 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO app_settings
 			(id, app_title, default_currency_name, default_currency_symbol, map_default_place_label, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
-			 registration_enabled, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background, trip_dashboard_heading, google_maps_api_key, default_distance_unit, updated_at)
+			 registration_enabled, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background, trip_dashboard_heading, google_maps_api_key, default_distance_unit, max_upload_file_size_mb, default_ui_date_format, updated_at)
 		VALUES
-			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			app_title = excluded.app_title,
 			default_currency_name = excluded.default_currency_name,
@@ -784,6 +850,8 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 			trip_dashboard_heading = excluded.trip_dashboard_heading,
 			google_maps_api_key = excluded.google_maps_api_key,
 			default_distance_unit = excluded.default_distance_unit,
+			max_upload_file_size_mb = excluded.max_upload_file_size_mb,
+			default_ui_date_format = excluded.default_ui_date_format,
 			updated_at = excluded.updated_at
 	`,
 		settings.AppTitle,
@@ -802,6 +870,8 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 		settings.TripDashboardHeading,
 		settings.GoogleMapsAPIKey,
 		settings.DefaultDistanceUnit,
+		settings.MaxUploadFileSizeMB,
+		trips.NormalizeUIDateFormat(settings.DefaultUIDateFormat),
 		time.Now().UTC(),
 	)
 	return err

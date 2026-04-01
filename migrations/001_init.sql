@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS trips (
   currency_symbol TEXT NOT NULL DEFAULT '$',
   home_map_latitude REAL NOT NULL DEFAULT 0,
   home_map_longitude REAL NOT NULL DEFAULT 0,
+  home_map_place_label TEXT NOT NULL DEFAULT '',
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL

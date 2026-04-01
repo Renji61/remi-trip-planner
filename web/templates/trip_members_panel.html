@@ -3,7 +3,9 @@
   <div class="trip-collab-strip sidebar-trip-members{{if le (len .Party) 1}} trip-collab-strip--solo-mobile{{end}}" aria-label="Trip members">
     <span class="sidebar-trip-members-label muted">Trip Members</span>
     <div class="trip-party-stack sidebar-trip-members-avatars">
-      {{range .Party}}
+      {{$memberTotal := add (len .Party) (len .TripGuests)}}{{if .TripAccess.IsOwner}}{{$memberTotal = add $memberTotal (len .PendingInvites)}}{{end}}
+      {{$shown := 0}}
+      {{range .Party}}{{if lt $shown 5}}
         {{if and $.TripAccess.IsOwner (ne .ID $.Details.Trip.OwnerUserID)}}
         <form method="post" action="/trips/{{$.Details.Trip.ID}}/members/remove" class="trip-member-remove-form" data-app-confirm data-confirm-title="Remove this member?" data-confirm-body="They will lose access to this trip immediately." data-confirm-ok="Remove" data-confirm-icon="person_remove" data-confirm-variant="danger">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
@@ -13,8 +15,9 @@
         {{else}}
           {{if .AvatarPath}}<span class="trip-party-avatar trip-party-avatar--img" style="background-image:url('{{.AvatarPath}}')" title="{{.PublicDisplayName}}"></span>{{else}}<span class="trip-party-avatar" title="{{.PublicDisplayName}}">{{.InitialForAvatar}}</span>{{end}}
         {{end}}
-      {{end}}
-      {{if $.TripAccess.IsOwner}}{{range $.PendingInvites}}
+        {{$shown = add $shown 1}}
+      {{end}}{{end}}
+      {{if $.TripAccess.IsOwner}}{{range $.PendingInvites}}{{if lt $shown 5}}
         <form method="post" action="/trips/{{$.Details.Trip.ID}}/invites/revoke" class="trip-member-remove-form" data-app-confirm data-confirm-title="Cancel this invite?" data-confirm-body="They will not be able to join using this pending invitation." data-confirm-ok="Cancel invite" data-confirm-icon="event_busy" data-confirm-variant="danger">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="invite_id" value="{{.ID}}">
@@ -22,10 +25,13 @@
             <span class="material-symbols-outlined trip-party-avatar-pending-icon" aria-hidden="true">schedule</span>
           </button>
         </form>
-      {{end}}{{end}}
-      {{range $.TripGuests}}
+        {{$shown = add $shown 1}}
+      {{end}}{{end}}{{end}}
+      {{range $.TripGuests}}{{if lt $shown 5}}
         <span class="trip-party-avatar trip-party-avatar--guest-chip" title="{{.DisplayName}} (guest)" aria-label="{{.DisplayName}} guest on trip">{{guestInitial .DisplayName}}</span>
-      {{end}}
+        {{$shown = add $shown 1}}
+      {{end}}{{end}}
+      {{if gt $memberTotal 5}}<span class="trip-party-avatar trip-party-avatar--more" aria-label="{{sub $memberTotal 5}} more people on this trip">+{{sub $memberTotal 5}}</span>{{end}}
     </div>
   </div>
   {{if .TripAccess.IsOwner}}

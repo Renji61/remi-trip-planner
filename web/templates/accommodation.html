@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=147">
+  <link rel="stylesheet" href="/static/app.css?v=174">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=130"></script>
+  <script defer src="/static/app.js?v=172"></script>
 </head>
 <body>
-  <main class="app-shell" aria-label="{{.Details.Trip.StaySectionTitle}}" data-long-press-sheet-root>
+  <main class="app-shell" aria-label="{{.Details.Trip.StaySectionTitle}}" data-long-press-sheet-root data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -73,16 +73,17 @@
           {{if .Details.Trip.IsArchived}}
           <p class="muted">Trip is archived. New accommodation entries are disabled.</p>
           {{else}}
-          <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form>
+          <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form data-ajax-submit data-ajax-reload-on-success data-toast-message="{{.Details.Trip.StaySectionTitle}} booking saved.">
             <label class="full">Hotel or Residence Name<input type="text" name="name" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
             <label class="full">Address<input type="text" name="address" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
             <p class="full location-hint" data-accommodation-status>We will try to auto-fill address from the name you enter.</p>
-            <label>Check-in Date/Time<input type="datetime-local" name="check_in_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
-            <label>Check-out Date/Time<input type="datetime-local" name="check_out_at" min="{{.Details.Trip.StartDate}}T00:00" max="{{.Details.Trip.EndDate}}T23:59" required></label>
-            <label>Cost<input type="number" step="0.01" name="cost" placeholder="0.00"></label>
-            <label>Booking Confirmation #<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
-            <label>Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
-            <label>Notes<input type="text" name="notes" placeholder="Breakfast included, high floor requested..."></label>
+            <label>Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
+            <label>Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
+            <label>Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+            <label>Booking Confirmation<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
+            <label>Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+            <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+            <label class="full">Notes<input type="text" name="notes" placeholder="Breakfast included, high floor requested..."></label>
             <button class="full accommodation-save-btn" type="submit">Save {{.Details.Trip.StaySectionTitle}} booking</button>
           </form>
           {{end}}
@@ -93,10 +94,7 @@
             <h3 id="stay-saved-title">Saved {{.Details.Trip.StaySectionTitle}}</h3>
           </div>
           {{if .Details.Lodgings}}
-            <div class="mobile-entry-carousel" data-mobile-entry-carousel>
-              <button type="button" class="mobile-entry-carousel__hint mobile-entry-carousel__hint--prev" aria-label="Previous accommodation"><span class="material-symbols-outlined" aria-hidden="true">chevron_left</span></button>
-              <div class="mobile-entry-carousel__viewport">
-            <ul class="list accommodation-card-list accommodation-stays-list mobile-entry-carousel__track">
+            <ul class="list accommodation-card-list accommodation-stays-list">
               {{range .Details.Lodgings}}
               <li class="accommodation-card-wrap">
                   {{if not $.Details.Trip.IsArchived}}
@@ -116,14 +114,14 @@
                   <div id="accommodation-view-{{.ID}}" class="item-view">
                     <div class="vehicle-card-content">
                       <div class="vehicle-media">
-                        {{if isImageWebPath .AttachmentPath}}
-                        <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open booking attachment in a new tab: {{.Name}}">
-                          <img class="vehicle-card-image" src="{{.AttachmentPath}}" alt="Booking attachment image for {{.Name}}">
+                        {{if .ImagePath}}
+                        <a href="{{.ImagePath}}" target="_blank" rel="noreferrer" title="Open image in a new tab: {{.Name}}">
+                          <img class="vehicle-card-image" src="{{.ImagePath}}" alt="Booking image for {{.Name}}">
                         </a>
                         {{else if .AttachmentPath}}
                         <a href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" class="vehicle-card-image vehicle-card-image--doc" title="Open booking attachment in a new tab: {{.Name}}">
                           <span class="material-symbols-outlined" aria-hidden="true">description</span>
-                          <strong>Document attached</strong>
+                          <strong>View Attachment</strong>
                         </a>
                         {{else}}
                         <div class="vehicle-card-image vehicle-card-image--placeholder" role="img" aria-label="No booking image">
@@ -139,16 +137,22 @@
                           </div>
                           <div class="vehicle-cost-block">
                             <strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}}</strong>
-                            <small>Total accommodation</small>
+                            <small>Accommodation cost</small>
                           </div>
                         </div>
                         <div class="vehicle-meta-grid">
-                          <div><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><div><strong>{{formatTripDateTime $.Details.Trip .CheckInAt}}</strong><small>Check-in</small></div></div>
-                          <div><span class="material-symbols-outlined" aria-hidden="true">event</span><div><strong>{{formatTripDateTime $.Details.Trip .CheckOutAt}}</strong><small>Check-out</small></div></div>
-                          <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{if .BookingConfirmation}}{{.BookingConfirmation}}{{else}}—{{end}}</strong><small>Confirmation</small></div></div>
-                          <div><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><strong>{{if .AttachmentPath}}<a class="trip-stay-meta-attachment-link" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">Open</a>{{else}}—{{end}}</strong><small>Attachment</small></div></div>
+                          <div><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><div><strong>{{formatTripDateTime $.Details.Trip $.Settings .CheckInAt}}</strong><small>Check-in Date &amp; Time</small></div></div>
+                          <div><span class="material-symbols-outlined" aria-hidden="true">event</span><div><strong>{{formatTripDateTime $.Details.Trip $.Settings .CheckOutAt}}</strong><small>Check-out Date &amp; Time</small></div></div>
+                          {{if .BookingConfirmation}}
+                          <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Confirmation</small></div></div>
+                          {{end}}
+                          {{if .AttachmentPath}}
+                          <div><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><a class="flight-doc-link" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">Open Attachment</a><small>Booking Document</small></div></div>
+                          {{end}}
+                        {{if .Notes}}
+                        <div class="vehicle-meta-grid--notes"><span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span><div class="vehicle-meta-notes-col"><strong class="vehicle-meta-notes-text">{{.Notes}}</strong><small>Notes</small></div></div>
+                        {{end}}
                         </div>
-                        {{if .Notes}}<p class="vehicle-note">{{.Notes}}</p>{{end}}
                       </div>
                     </div>
                   </div>
@@ -165,19 +169,20 @@
                     <label class="full">Hotel or Residence Name<input type="text" name="name" value="{{.Name}}" required data-accommodation-name></label>
                     <label class="full">Address<input type="text" name="address" value="{{.Address}}" required data-accommodation-address data-location-autocomplete></label>
                     <p class="full location-hint" data-accommodation-status>We will try to auto-fill address from the name you enter.</p>
-                    <label>Check-in Date/Time<input type="datetime-local" name="check_in_at" value="{{.CheckInAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
-                    <label>Check-out Date/Time<input type="datetime-local" name="check_out_at" value="{{.CheckOutAt}}" min="{{$.Details.Trip.StartDate}}T00:00" max="{{$.Details.Trip.EndDate}}T23:59" required></label>
-                    <label>Cost<input type="number" step="0.01" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
-                    <label>Booking Confirmation #<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
+                    <label>Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" .CheckInAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
+                    <label>Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" .CheckOutAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
+                    <label>Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
+                    <label>Booking Confirmation<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
                     <input type="hidden" name="current_attachment_path" value="{{.AttachmentPath}}">
-                    <label>Booking Attachment<input type="file" name="booking_attachment" accept=".pdf,image/*"></label>
-                    <label>Notes<input type="text" name="notes" value="{{.Notes}}" placeholder="Breakfast included, high floor requested..."></label>
-                    <label class="full">Attachment action
-                      <select name="remove_attachment">
-                        <option value="false" selected>Keep existing attachment</option>
-                        <option value="true">Delete existing attachment</option>
-                      </select>
-                    </label>
+                    <input type="hidden" name="current_image_path" value="{{.ImagePath}}">
+                    {{if .AttachmentPath}}
+                    <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open current booking attachment in a new tab">Open existing attachment</a></p>
+                    {{end}}
+                    <label>Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+                    <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+                    {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
+                    {{template "remiRemoveAttachmentSelect" "remove_image"}}
+                    <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}" placeholder="Breakfast included, high floor requested..."></label>
                     <div class="full accommodation-edit-actions">
                       <button type="submit" class="accommodation-save-btn">Save Changes</button>
                       <button type="button" class="secondary-btn" data-inline-edit-cancel="accommodation-edit-{{.ID}}">Cancel</button>
@@ -187,9 +192,6 @@
               </li>
               {{end}}
             </ul>
-              </div>
-              <button type="button" class="mobile-entry-carousel__hint mobile-entry-carousel__hint--next" aria-label="Next accommodation"><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></button>
-            </div>
           {{else}}
           <div class="accommodation-empty">
             <div aria-hidden="true"><span class="material-symbols-outlined">hotel</span></div>

@@ -235,11 +235,13 @@ func (s *Service) MergedSettingsForUI(ctx context.Context, userID string) (AppSe
 		return app, err
 	}
 	if userID == "" {
+		app.DashboardHeroBackground = CanonicalDashboardHeroBackground(app.DashboardHeroBackground)
 		return app, nil
 	}
 	us, err := s.repo.GetUserSettings(ctx, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			app.DashboardHeroBackground = CanonicalDashboardHeroBackground(app.DashboardHeroBackground)
 			return app, nil
 		}
 		return app, err
@@ -247,7 +249,7 @@ func (s *Service) MergedSettingsForUI(ctx context.Context, userID string) (AppSe
 	app.ThemePreference = us.ThemePreference
 	app.DashboardTripLayout = us.DashboardTripLayout
 	app.DashboardTripSort = us.DashboardTripSort
-	app.DashboardHeroBackground = us.DashboardHeroBackground
+	app.DashboardHeroBackground = CanonicalDashboardHeroBackground(us.DashboardHeroBackground)
 	app.TripDashboardHeading = us.TripDashboardHeading
 	app.DefaultCurrencyName = us.DefaultCurrencyName
 	app.DefaultCurrencySymbol = us.DefaultCurrencySymbol

@@ -397,3 +397,55 @@ func TestTabLedger_tenMixed_equalSplit_conservesCents(t *testing.T) {
 		t.Fatalf("ledger should sum to 0 cents, got %d net=%+v", tabNetSumCents(net), net)
 	}
 }
+
+func TestQuickAddEqualAllParticipants_updatesSharesAndDebtTotals(t *testing.T) {
+	party := []string{"owner", "u2"}
+	guests := []string{"g1"}
+	keys := []string{
+		ParticipantKeyUser("owner"),
+		ParticipantKeyUser("u2"),
+		ParticipantKeyGuest("g1"),
+	}
+	payload := TabSplitPayload{Participants: keys}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := Expense{
+		FromTab:   true,
+		Amount:    120,
+		PaidBy:    ParticipantKeyUser("owner"),
+		SplitMode: TabSplitEqual,
+		SplitJSON: string(raw),
+	}
+	sh, err := SharesForExpense(e, party, guests, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "Your share" per participant should be equal across owner + collaborators + guests.
+	if math.Abs(sh[ParticipantKeyUser("owner")]-40) > 0.02 ||
+		math.Abs(sh[ParticipantKeyUser("u2")]-40) > 0.02 ||
+		math.Abs(sh[ParticipantKeyGuest("g1")]-40) > 0.02 {
+		t.Fatalf("unexpected equal shares: %+v", sh)
+	}
+
+	net, err := TabLedger([]Expense{e}, party, guests, nil, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Owner paid full amount then owes one equal share => +80 net.
+	if math.Abs(net[ParticipantKeyUser("owner")]-80) > 0.02 {
+		t.Fatalf("owner net got %v want ~80", net[ParticipantKeyUser("owner")])
+	}
+	if math.Abs(net[ParticipantKeyUser("u2")]+40) > 0.02 {
+		t.Fatalf("u2 net got %v want ~-40", net[ParticipantKeyUser("u2")])
+	}
+	if math.Abs(net[ParticipantKeyGuest("g1")]+40) > 0.02 {
+		t.Fatalf("g1 net got %v want ~-40", net[ParticipantKeyGuest("g1")])
+	}
+
+	owedOut, owedIn := TabDebtTotals(net)
+	if math.Abs(owedOut-80) > 0.02 || math.Abs(owedIn-80) > 0.02 {
+		t.Fatalf("debt totals mismatch out=%v in=%v net=%+v", owedOut, owedIn, net)
+	}
+}

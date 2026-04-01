@@ -23,11 +23,978 @@ if ("serviceWorker" in navigator) {
   }
 })();
 
+(function remiUploadFilenameGuard() {
+  const BLOCKED = new Set([
+    "exe",
+    "sh",
+    "bat",
+    "msi",
+    "js",
+    "py",
+    "php",
+    "cmd",
+    "ps1",
+    "com",
+    "scr",
+    "vbs",
+    "jar",
+    "dll",
+    "app",
+    "deb",
+    "rpm",
+    "dmg",
+    "wsf",
+    "hta",
+    "lnk"
+  ]);
+  window.remiIsBlockedUploadFilename = (name) => {
+    const raw = String(name || "").trim();
+    if (!raw) return true;
+    const base = raw.replace(/^[\\/]+/, "").split(/[/\\]/).pop() || "";
+    if (!base || base === "." || base.includes("..")) return true;
+    const parts = base.toLowerCase().split(".");
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i].trim();
+      if (part && BLOCKED.has(part)) return true;
+    }
+    return false;
+  };
+  window.remiBlockedUploadFilenameMessage =
+    "This file type is not allowed — executables and scripts cannot be uploaded.";
+})();
+
+(function remiDateFields() {
+  const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const ISO_DT_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+  const MOBILE_BP = 900;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ];
+
+  function isoToDisplay(iso, mdy) {
+    const m = String(iso || "").trim().match(ISO_RE);
+    if (!m) return "";
+    const [, y, mo, d] = m;
+    return mdy ? `${mo}-${d}-${y}` : `${d}-${mo}-${y}`;
+  }
+
+  function normalizeTimeHM(raw) {
+    const src = String(raw || "").trim();
+    if (!src) return "";
+    const m12 = src.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+    if (m12) {
+      let h = parseInt(m12[1], 10);
+      const mm = parseInt(m12[2], 10);
+      const ap = m12[3].toLowerCase();
+      if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 1 || h > 12 || mm < 0 || mm > 59) return "";
+      if (ap === "am") h = h === 12 ? 0 : h;
+      else h = h === 12 ? 12 : h + 12;
+      return `${pad2(h)}:${pad2(mm)}`;
+    }
+    const p = src.split(":");
+    if (p.length < 2) return "";
+    const h = parseInt(p[0], 10);
+    const mm = parseInt(p[1], 10);
+    if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 0 || h > 23 || mm < 0 || mm > 59) return "";
+    return `${pad2(h)}:${pad2(mm)}`;
+  }
+
+  function timeHMToDisplay(raw) {
+    const t = normalizeTimeHM(raw);
+    if (!t) return "";
+    let h = parseInt(t.slice(0, 2), 10);
+    const m = t.slice(3, 5);
+    const isPm = h >= 12;
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${pad2(h)}:${m} ${isPm ? "PM" : "AM"}`;
+  }
+
+  function splitIsoLocalDateTime(dt) {
+    const m = String(dt || "").trim().match(ISO_DT_RE);
+    if (!m) return { dateIso: "", time: "" };
+    return { dateIso: `${m[1]}-${m[2]}-${m[3]}`, time: `${m[4]}:${m[5]}` };
+  }
+
+  function clampIso(iso, min, max) {
+    if (!iso) return iso;
+    if (min && iso < min) return min;
+    if (max && iso > max) return max;
+    return iso;
+  }
+
+  function clampDateTimeLocal(isoDt, min, max) {
+    if (!isoDt) return isoDt;
+    let v = isoDt;
+    if (min && v < min) v = min;
+    if (max && v > max) v = max;
+    return v;
+  }
+
+  function parseISODate(iso) {
+    const m = String(iso || "").trim().match(ISO_RE);
+    if (!m) return null;
+    return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+  }
+
+  function toISODate(d) {
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+
+  function startOfMonth(d) {
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
+  function isMobileLayout() {
+    return window.matchMedia(`(max-width: ${MOBILE_BP}px)`).matches;
+  }
+
+  const picker = (() => {
+    let host = null;
+    let panel = null;
+    let title = null;
+    let body = null;
+    let state = null;
+    let escHandler = null;
+    let outsideHandler = null;
+    let repositionHandler = null;
+
+    const ensure = () => {
+      if (host) return;
+      host = document.createElement("div");
+      host.className = "remi-picker-host hidden";
+      host.innerHTML = [
+        '<div class="remi-picker-backdrop" data-remi-picker-close></div>',
+        '<section class="remi-picker-panel" role="dialog" aria-modal="true">',
+        '  <header class="remi-picker-header">',
+        '    <h3 class="remi-picker-title"></h3>',
+        '    <button type="button" class="remi-picker-close" data-remi-picker-close aria-label="Close picker">',
+        '      <span class="material-symbols-outlined">close</span>',
+        "    </button>",
+        "  </header>",
+        '  <div class="remi-picker-body"></div>',
+        "</section>"
+      ].join("");
+      document.body.appendChild(host);
+      panel = host.querySelector(".remi-picker-panel");
+      title = host.querySelector(".remi-picker-title");
+      body = host.querySelector(".remi-picker-body");
+      host.querySelectorAll("[data-remi-picker-close]").forEach((btn) => {
+        btn.addEventListener("click", () => close("cancel"));
+      });
+    };
+
+    const positionDesktop = () => {
+      if (!state || !state.anchor || !(state.anchor instanceof HTMLElement) || !panel) return;
+      if (!state.anchor.isConnected) {
+        close("anchor-detached");
+        return;
+      }
+      const r = state.anchor.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) {
+        close("anchor-out-of-view");
+        return;
+      }
+      const panelWidth = Math.max(280, Math.round(r.width));
+      const maxLeft = Math.max(12, window.innerWidth - panelWidth - 12);
+      const left = Math.min(maxLeft, Math.max(12, Math.round(r.left)));
+      panel.style.left = `${left}px`;
+      panel.style.top = `${Math.round(r.bottom + 10)}px`;
+      panel.style.width = `${panelWidth}px`;
+    };
+
+    const close = (reason) => {
+      if (!host || !state) return;
+      if (escHandler) document.removeEventListener("keydown", escHandler, true);
+      if (outsideHandler) document.removeEventListener("pointerdown", outsideHandler, true);
+      if (repositionHandler) {
+        window.removeEventListener("resize", repositionHandler);
+        window.removeEventListener("scroll", repositionHandler, true);
+      }
+      escHandler = null;
+      outsideHandler = null;
+      repositionHandler = null;
+      host.classList.add("hidden");
+      host.classList.remove("mobile", "desktop");
+      body.innerHTML = "";
+      panel.removeAttribute("style");
+      const done = state && state.onClose;
+      const s = state;
+      state = null;
+      if (typeof done === "function") done(reason, s && s.value);
+    };
+
+    const open = (opts) => {
+      ensure();
+      if (state) close("replace");
+      state = Object.assign({}, opts || {});
+      const mobile = isMobileLayout();
+      state.mobile = mobile;
+      title.textContent = state.title || "";
+      host.classList.remove("hidden");
+      host.classList.add(mobile ? "mobile" : "desktop");
+      body.innerHTML = "";
+      if (typeof state.render === "function") {
+        state.render(body, close, state);
+      }
+      escHandler = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          close("cancel");
+        }
+      };
+      outsideHandler = (e) => {
+        if (!panel.contains(e.target)) close("cancel");
+      };
+      document.addEventListener("keydown", escHandler, true);
+      document.addEventListener("pointerdown", outsideHandler, true);
+      if (!mobile) {
+        repositionHandler = () => positionDesktop();
+        window.addEventListener("resize", repositionHandler);
+        window.addEventListener("scroll", repositionHandler, true);
+        positionDesktop();
+      }
+    };
+
+    return { open, close };
+  })();
+
+  function renderDatePicker(root, close, opts) {
+    const min = opts.min || "";
+    const max = opts.max || "";
+    let selectedIso = opts.value || "";
+    let viewMonth = startOfMonth(parseISODate(selectedIso) || parseISODate(min) || new Date());
+    const weekdays = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+
+    const wrap = document.createElement("div");
+    wrap.className = "remi-date-picker";
+    wrap.innerHTML = [
+      '<div class="remi-date-picker-head-row">',
+      '  <button type="button" class="remi-cal-nav" data-cal-nav="-1" aria-label="Previous month">',
+      '    <span class="material-symbols-outlined">chevron_left</span>',
+      "  </button>",
+      '  <button type="button" class="remi-cal-month-pill" data-cal-label></button>',
+      '  <button type="button" class="remi-cal-nav" data-cal-nav="1" aria-label="Next month">',
+      '    <span class="material-symbols-outlined">chevron_right</span>',
+      "  </button>",
+      "</div>",
+      '<div class="remi-cal-weekdays"></div>',
+      '<div class="remi-cal-grid"></div>',
+      '<div class="remi-picker-actions">',
+      '  <button type="button" class="secondary-btn" data-cal-cancel>Cancel</button>',
+      '  <button type="button" class="primary-btn" data-cal-confirm>Confirm Date</button>',
+      "</div>"
+    ].join("");
+    root.appendChild(wrap);
+    const weekRow = wrap.querySelector(".remi-cal-weekdays");
+    const grid = wrap.querySelector(".remi-cal-grid");
+    const label = wrap.querySelector("[data-cal-label]");
+    weekdays.forEach((d) => {
+      const el = document.createElement("span");
+      el.textContent = d;
+      weekRow.appendChild(el);
+    });
+
+    const draw = () => {
+      label.textContent = `${monthNames[viewMonth.getMonth()]} ${viewMonth.getFullYear()}`;
+      grid.innerHTML = "";
+      const first = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1);
+      const daysInMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
+      const offset = (first.getDay() + 6) % 7;
+      for (let i = 0; i < offset; i += 1) {
+        const blank = document.createElement("span");
+        blank.className = "muted";
+        blank.textContent = "";
+        grid.appendChild(blank);
+      }
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const d = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
+        const iso = toISODate(d);
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "remi-cal-day";
+        b.textContent = String(day);
+        if ((min && iso < min) || (max && iso > max)) b.disabled = true;
+        if (iso === selectedIso) b.classList.add("is-selected");
+        b.addEventListener("click", () => {
+          selectedIso = iso;
+          draw();
+          if (!opts.mobile) {
+            opts.onConfirm(clampIso(selectedIso, min, max));
+            close("confirm");
+          }
+        });
+        grid.appendChild(b);
+      }
+      wrap.querySelector("[data-cal-confirm]").disabled = !selectedIso;
+    };
+
+    draw();
+    wrap.querySelectorAll("[data-cal-nav]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const delta = parseInt(btn.getAttribute("data-cal-nav") || "0", 10);
+        viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + delta, 1);
+        draw();
+      });
+    });
+    wrap.querySelector("[data-cal-cancel]").addEventListener("click", () => close("cancel"));
+    wrap.querySelector("[data-cal-confirm]").addEventListener("click", () => {
+      opts.onConfirm(clampIso(selectedIso, min, max));
+      close("confirm");
+    });
+  }
+
+  function renderTimePicker(root, close, opts) {
+    const initial = normalizeTimeHM(opts.value) || "08:30";
+    let hour24 = parseInt(initial.slice(0, 2), 10);
+    let minute = parseInt(initial.slice(3, 5), 10);
+    let period = hour24 >= 12 ? "pm" : "am";
+    let hour12 = hour24 % 12;
+    if (hour12 === 0) hour12 = 12;
+    const wrap = document.createElement("div");
+    wrap.className = "remi-time-picker";
+    wrap.innerHTML = [
+      '<div class="remi-time-selected" data-time-head></div>',
+      '<div class="remi-time-grid">',
+      '  <div class="remi-time-column">',
+      '    <div class="remi-time-label">HOUR</div>',
+      '    <div class="remi-time-list" data-hours></div>',
+      "  </div>",
+      '  <div class="remi-time-column">',
+      '    <div class="remi-time-label">MIN</div>',
+      '    <div class="remi-time-list" data-minutes></div>',
+      "  </div>",
+      '  <div class="remi-time-meridian">',
+      '    <button type="button" data-ap="am">AM</button>',
+      '    <button type="button" data-ap="pm">PM</button>',
+      "  </div>",
+      "</div>",
+      '<div class="remi-picker-actions">',
+      '  <button type="button" class="secondary-btn" data-time-cancel>Cancel</button>',
+      '  <button type="button" class="primary-btn" data-time-confirm>Confirm Time</button>',
+      "</div>"
+    ].join("");
+    root.appendChild(wrap);
+    const hourList = wrap.querySelector("[data-hours]");
+    const minuteList = wrap.querySelector("[data-minutes]");
+    const head = wrap.querySelector("[data-time-head]");
+
+    const compute = () => {
+      let h = hour12 % 12;
+      if (period === "pm") h += 12;
+      return `${pad2(h)}:${pad2(minute)}`;
+    };
+
+    const draw = () => {
+      head.textContent = `Selected Time ${timeHMToDisplay(compute())}`;
+      hourList.innerHTML = "";
+      for (let h = 1; h <= 12; h += 1) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "remi-time-opt";
+        if (h === hour12) b.classList.add("is-selected");
+        b.textContent = pad2(h);
+        b.addEventListener("click", () => {
+          hour12 = h;
+          draw();
+        });
+        hourList.appendChild(b);
+      }
+      minuteList.innerHTML = "";
+      for (let m = 0; m < 60; m += 5) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "remi-time-opt";
+        if (m === minute) b.classList.add("is-selected");
+        b.textContent = pad2(m);
+        b.addEventListener("click", () => {
+          minute = m;
+          draw();
+        });
+        minuteList.appendChild(b);
+      }
+      wrap.querySelectorAll("[data-ap]").forEach((b) => {
+        b.classList.toggle("is-selected", b.getAttribute("data-ap") === period);
+      });
+    };
+
+    draw();
+    wrap.querySelectorAll("[data-ap]").forEach((b) => {
+      b.addEventListener("click", () => {
+        period = b.getAttribute("data-ap") || "am";
+        draw();
+      });
+    });
+    wrap.querySelector("[data-time-cancel]").addEventListener("click", () => close("cancel"));
+    wrap.querySelector("[data-time-confirm]").addEventListener("click", () => {
+      opts.onConfirm(compute());
+      close("confirm");
+    });
+  }
+
+  function openDatePicker(anchor, options) {
+    picker.open({
+      anchor,
+      title: "Select Date",
+      value: options.value || "",
+      min: options.min || "",
+      max: options.max || "",
+      onConfirm: options.onConfirm,
+      onClose: options.onClose,
+      render: renderDatePicker
+    });
+  }
+
+  function openTimePicker(anchor, options) {
+    picker.open({
+      anchor,
+      title: options.title || "Set Time",
+      value: options.value || "",
+      onConfirm: options.onConfirm,
+      onClose: options.onClose,
+      render: renderTimePicker
+    });
+  }
+
+  function inferPickerTitle(input, fallback) {
+    const label = input?.closest?.("label");
+    if (!(label instanceof HTMLElement)) return fallback;
+    const text = (label.textContent || "").replace(/\s+/g, " ").trim();
+    if (!text) return fallback;
+    if (/arriv/i.test(text)) return "Set Arrival Time";
+    if (/depart/i.test(text)) return "Set Departure Time";
+    if (/start/i.test(text)) return "Set Start Time";
+    if (/end/i.test(text)) return "Set End Time";
+    if (/check-?in/i.test(text)) return "Set Check-in Time";
+    if (/check-?out/i.test(text)) return "Set Check-out Time";
+    if (/pick-?up/i.test(text)) return "Set Pick-up Time";
+    if (/drop-?off/i.test(text)) return "Set Drop-off Time";
+    return fallback;
+  }
+
+  function makeFieldOpenable(input, onOpen) {
+    input.readOnly = true;
+    input.addEventListener("click", (e) => {
+      e.preventDefault();
+      onOpen();
+    });
+    input.addEventListener("focus", () => {
+      onOpen();
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onOpen();
+      }
+    });
+  }
+
+  function wireDateWrap(wrap) {
+    if (!(wrap instanceof HTMLElement) || wrap.dataset.remiDateWired === "1") return;
+    wrap.dataset.remiDateWired = "1";
+    const mdy = wrap.getAttribute("data-mdy") === "1";
+    const min = wrap.getAttribute("data-min") || "";
+    const max = wrap.getAttribute("data-max") || "";
+    const hidden = wrap.querySelector(".remi-date-iso");
+    const vis = wrap.querySelector(".remi-date-visible");
+    if (!(hidden instanceof HTMLInputElement) || !(vis instanceof HTMLInputElement)) return;
+    const required = vis.required;
+    const sync = () => {
+      vis.value = isoToDisplay(hidden.value, mdy);
+      vis.setCustomValidity("");
+    };
+    const validate = () => {
+      vis.setCustomValidity("");
+      if (required && !(hidden.value || "").trim()) {
+        vis.setCustomValidity("Select a date");
+        return false;
+      }
+      return true;
+    };
+    sync();
+    makeFieldOpenable(vis, () => {
+      openDatePicker(vis, {
+        value: hidden.value || "",
+        min,
+        max,
+        onConfirm: (iso) => {
+          hidden.value = clampIso(iso, min, max);
+          sync();
+          hidden.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+    });
+    const form = wrap.closest("form");
+    if (form) {
+      form.addEventListener("submit", (e) => {
+        if (!validate()) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          vis.reportValidity();
+          return;
+        }
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      }, true);
+    }
+  }
+
+  function wireTimeWrap(wrap) {
+    if (!(wrap instanceof HTMLElement) || wrap.dataset.remiTimeWired === "1") return;
+    wrap.dataset.remiTimeWired = "1";
+    const hidden = wrap.querySelector(".remi-time-iso");
+    const vis = wrap.querySelector(".remi-time-visible");
+    if (!(hidden instanceof HTMLInputElement) || !(vis instanceof HTMLInputElement)) return;
+    const required = vis.required;
+    const sync = () => {
+      const normalized = normalizeTimeHM(hidden.value);
+      hidden.value = normalized;
+      vis.value = timeHMToDisplay(normalized);
+      vis.setCustomValidity("");
+    };
+    const validate = () => {
+      vis.setCustomValidity("");
+      if (required && !(hidden.value || "").trim()) {
+        vis.setCustomValidity("Select a time");
+        return false;
+      }
+      return true;
+    };
+    sync();
+    makeFieldOpenable(vis, () => {
+      openTimePicker(vis, {
+        title: inferPickerTitle(vis, "Set Time"),
+        value: hidden.value || "08:30",
+        onConfirm: (hm) => {
+          hidden.value = normalizeTimeHM(hm);
+          sync();
+          hidden.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+    });
+    const form = wrap.closest("form");
+    if (form) {
+      form.addEventListener("submit", (e) => {
+        if (!validate()) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          vis.reportValidity();
+          return;
+        }
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      }, true);
+    }
+  }
+
+  function wireDateTimeWrap(wrap) {
+    if (!(wrap instanceof HTMLElement) || wrap.dataset.remiDatetimeWired === "1") return;
+    wrap.dataset.remiDatetimeWired = "1";
+    const mdy = wrap.getAttribute("data-mdy") === "1";
+    const min = wrap.getAttribute("data-min") || "";
+    const max = wrap.getAttribute("data-max") || "";
+    const hidden = wrap.querySelector(".remi-datetime-iso");
+    const dateVis = wrap.querySelector(".remi-datetime-date-part");
+    const timeVis = wrap.querySelector(".remi-datetime-time-part");
+    if (!(hidden instanceof HTMLInputElement) || !(dateVis instanceof HTMLInputElement) || !(timeVis instanceof HTMLInputElement)) return;
+    const required = dateVis.required || timeVis.required;
+    const sync = () => {
+      const sp = splitIsoLocalDateTime(hidden.value);
+      dateVis.value = sp.dateIso ? isoToDisplay(sp.dateIso, mdy) : "";
+      timeVis.value = timeHMToDisplay(sp.time);
+      dateVis.setCustomValidity("");
+      timeVis.setCustomValidity("");
+    };
+    if (!(hidden.value || "").trim()) {
+      const now = new Date();
+      const todayLocal = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+      let value = `${todayLocal}T${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+      if (min && value < min) value = min;
+      if (max && value > max) value = max;
+      hidden.value = value;
+    }
+    const updateDate = (dateIso) => {
+      const sp = splitIsoLocalDateTime(hidden.value);
+      const t = normalizeTimeHM(sp.time || "08:30");
+      const next = dateIso ? `${dateIso}T${t}` : "";
+      hidden.value = clampDateTimeLocal(next, min, max);
+      sync();
+      hidden.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const updateTime = (hm) => {
+      const sp = splitIsoLocalDateTime(hidden.value);
+      if (!sp.dateIso) {
+        const now = new Date();
+        sp.dateIso = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+      }
+      const next = `${sp.dateIso}T${normalizeTimeHM(hm)}`;
+      hidden.value = clampDateTimeLocal(next, min, max);
+      sync();
+      hidden.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const validate = () => {
+      dateVis.setCustomValidity("");
+      timeVis.setCustomValidity("");
+      if (!required) return true;
+      const sp = splitIsoLocalDateTime(hidden.value);
+      if (!sp.dateIso) dateVis.setCustomValidity("Select a date");
+      if (!sp.time) timeVis.setCustomValidity("Select a time");
+      return !!(sp.dateIso && sp.time);
+    };
+    sync();
+    makeFieldOpenable(dateVis, () => {
+      const sp = splitIsoLocalDateTime(hidden.value);
+      openDatePicker(dateVis, {
+        value: sp.dateIso,
+        min: min ? min.slice(0, 10) : "",
+        max: max ? max.slice(0, 10) : "",
+        onConfirm: (iso) => updateDate(iso)
+      });
+    });
+    makeFieldOpenable(timeVis, () => {
+      const sp = splitIsoLocalDateTime(hidden.value);
+      openTimePicker(timeVis, {
+        value: sp.time || "08:30",
+        title: inferPickerTitle(timeVis, "Set Time"),
+        onConfirm: (hm) => updateTime(hm)
+      });
+    });
+    const form = wrap.closest("form");
+    if (form) {
+      form.addEventListener("submit", (e) => {
+        if (!validate()) {
+          e.preventDefault();
+          dateVis.reportValidity();
+          timeVis.reportValidity();
+          return;
+        }
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      }, true);
+    }
+  }
+
+  window.remiWireDateFieldsIn = (root) => {
+    const scope = root && typeof root.querySelectorAll === "function" ? root : document;
+    scope.querySelectorAll("[data-remi-date]").forEach((el) => {
+      if (el instanceof HTMLElement) wireDateWrap(el);
+    });
+  };
+  window.remiWireDateTimeFieldsIn = (root) => {
+    const scope = root && typeof root.querySelectorAll === "function" ? root : document;
+    scope.querySelectorAll("[data-remi-datetime]").forEach((el) => {
+      if (el instanceof HTMLElement) wireDateTimeWrap(el);
+    });
+  };
+  window.remiWireTimeFieldsIn = (root) => {
+    const scope = root && typeof root.querySelectorAll === "function" ? root : document;
+    scope.querySelectorAll("[data-remi-time]").forEach((el) => {
+      if (el instanceof HTMLElement) wireTimeWrap(el);
+    });
+  };
+
+  const boot = () => {
+    window.remiWireDateFieldsIn(document);
+    window.remiWireDateTimeFieldsIn(document);
+    window.remiWireTimeFieldsIn(document);
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else {
+    boot();
+  }
+})();
+
+(function remiToastBootstrap() {
+  if (typeof window.remiShowToast === "function") return;
+  window.remiShowToast = (message) => {
+    if (!message) return;
+    const toast = document.createElement("div");
+    toast.className = "app-toast";
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    window.setTimeout(() => {
+      toast.classList.add("visible");
+    }, 10);
+    window.setTimeout(() => {
+      toast.classList.remove("visible");
+      window.setTimeout(() => {
+        toast.remove();
+      }, 220);
+    }, 2600);
+  };
+})();
+
+const GMAPS_BROWSER_KEY_RE = /^AIza[0-9A-Za-z_-]{20,}$/;
+
+const maskGoogleMapsKeyForDisplay = (key) => {
+  const k = String(key || "").trim();
+  if (!k) return "••••••••";
+  if (k.length <= 8) return "•".repeat(k.length);
+  const head = k.slice(0, 4);
+  const tail = k.slice(-4);
+  const midLen = Math.min(28, Math.max(8, k.length - 8));
+  return `${head}${"•".repeat(midLen)}${tail}`;
+};
+
+const copyTextToClipboard = async (text) => {
+  const t = String(text || "");
+  if (!t) return false;
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(t);
+      return true;
+    }
+  } catch (e) {
+    /* fall through */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = t;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch (e2) {
+    return false;
+  }
+};
+
+const initSiteSettingsGoogleMapsKeySection = (mapForm) => {
+  const section = mapForm.querySelector("[data-gmaps-key-section]");
+  if (!(section instanceof HTMLElement)) return;
+
+  const editWrap = section.querySelector("[data-gmaps-key-edit]");
+  const savedCard = section.querySelector("[data-gmaps-key-saved]");
+  const textInput = section.querySelector("[data-gmaps-key-input]");
+  const submitHidden = section.querySelector("[data-gmaps-key-submit]");
+  const clearCheckbox = section.querySelector("[data-gmaps-clear-checkbox]");
+  const maskEl = section.querySelector("[data-gmaps-key-mask]");
+  const validationEl = section.querySelector("[data-gmaps-key-validation]");
+  const hasSavedCardEl = savedCard instanceof HTMLElement;
+
+  if (
+    !editWrap ||
+    !(textInput instanceof HTMLInputElement) ||
+    !(submitHidden instanceof HTMLInputElement) ||
+    !(clearCheckbox instanceof HTMLInputElement)
+  ) {
+    return;
+  }
+
+  const initialSavedKey = (section.getAttribute("data-saved-key") || "").trim();
+  let savedKeyForCopy = initialSavedKey;
+  let clearOnSave = false;
+  let showingSavedCard = initialSavedKey.length > 0;
+
+  const resetValidation = () => {
+    if (validationEl instanceof HTMLElement) {
+      validationEl.textContent = "";
+      validationEl.hidden = true;
+      validationEl.classList.remove("gmaps-key-validation--ok", "gmaps-key-validation--warn");
+    }
+  };
+
+  const updateValidationHint = () => {
+    if (!(validationEl instanceof HTMLElement)) return;
+    const v = textInput.value.trim();
+    if (!v) {
+      resetValidation();
+      return;
+    }
+    validationEl.hidden = false;
+    if (GMAPS_BROWSER_KEY_RE.test(v)) {
+      validationEl.textContent = "Format looks like a valid browser API key.";
+      validationEl.classList.remove("gmaps-key-validation--warn");
+      validationEl.classList.add("gmaps-key-validation--ok");
+    } else {
+      validationEl.textContent =
+        "Typical browser keys start with AIza and are about 39 characters. Double-check before saving.";
+      validationEl.classList.remove("gmaps-key-validation--ok");
+      validationEl.classList.add("gmaps-key-validation--warn");
+    }
+  };
+
+  const render = () => {
+    clearCheckbox.checked = clearOnSave;
+    const hasStoredKey = Boolean(savedKeyForCopy.trim());
+    const showSavedUi = hasSavedCardEl && hasStoredKey && showingSavedCard && !clearOnSave;
+    if (showSavedUi) {
+      savedCard.hidden = false;
+      editWrap.hidden = true;
+      if (maskEl) {
+        maskEl.textContent = maskGoogleMapsKeyForDisplay(savedKeyForCopy);
+      }
+      submitHidden.value = "";
+      textInput.value = "";
+      textInput.removeAttribute("name");
+      resetValidation();
+    } else {
+      if (hasSavedCardEl) {
+        savedCard.hidden = true;
+      }
+      editWrap.hidden = false;
+      submitHidden.value = textInput.value.trim();
+    }
+  };
+
+  const onUpdateKey = () => {
+    clearOnSave = false;
+    clearCheckbox.checked = false;
+    showingSavedCard = false;
+    textInput.value = "";
+    submitHidden.value = "";
+    resetValidation();
+    render();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          textInput.focus({ preventScroll: false });
+        } catch (e) {
+          textInput.focus();
+        }
+      });
+    });
+  };
+
+  const onDeleteKeyConfirmed = () => {
+    savedKeyForCopy = "";
+    showingSavedCard = false;
+    clearOnSave = true;
+    textInput.value = "";
+    submitHidden.value = "";
+    section.setAttribute("data-saved-key", "");
+    section.setAttribute("data-initial-has-key", "0");
+    resetValidation();
+    render();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          textInput.focus({ preventScroll: false });
+        } catch (e) {
+          textInput.focus();
+        }
+      });
+    });
+  };
+
+  render();
+
+  textInput.addEventListener("input", () => {
+    if (clearOnSave && textInput.value.trim() !== "") {
+      clearOnSave = false;
+      clearCheckbox.checked = false;
+    }
+    submitHidden.value = textInput.value.trim();
+    updateValidationHint();
+  });
+
+  const openDeleteConfirm = () => {
+    const run = window.remiOpenAppConfirm;
+    if (typeof run === "function") {
+      run({
+        title: "Delete Google Maps API key?",
+        body: "Trip maps and address or location suggestions will use OpenStreetMap instead of Google. Save the form to apply this change.",
+        okText: "Delete key",
+        icon: "delete_forever",
+        variant: "danger",
+        onConfirm: onDeleteKeyConfirmed
+      });
+      return;
+    }
+    if (
+      window.confirm(
+        "Delete the Google Maps API key? Trip maps and address or location suggestions will use OpenStreetMap instead of Google. Save the form to apply."
+      )
+    ) {
+      onDeleteKeyConfirmed();
+    }
+  };
+
+  mapForm.addEventListener(
+    "click",
+    (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      const updateBtn = t.closest("[data-gmaps-key-update]");
+      if (updateBtn && section.contains(updateBtn)) {
+        e.preventDefault();
+        onUpdateKey();
+        return;
+      }
+      const deleteBtn = t.closest("[data-gmaps-key-delete]");
+      if (deleteBtn && section.contains(deleteBtn)) {
+        e.preventDefault();
+        openDeleteConfirm();
+        return;
+      }
+      const copyBtn = t.closest("[data-gmaps-key-copy]");
+      if (copyBtn && section.contains(copyBtn)) {
+        e.preventDefault();
+        const toCopy = savedKeyForCopy.trim();
+        if (!toCopy) return;
+        void (async () => {
+          const toast = typeof window.remiShowToast === "function" ? window.remiShowToast : null;
+          const ok = await copyTextToClipboard(toCopy);
+          if (ok) {
+            toast?.("Google Maps API key copied.");
+          } else {
+            toast?.("Could not copy to clipboard.");
+          }
+        })();
+      }
+    },
+    true
+  );
+
+  mapForm.addEventListener(
+    "submit",
+    (e) => {
+      if (clearOnSave) {
+        submitHidden.value = "";
+        clearCheckbox.checked = true;
+        return;
+      }
+      clearCheckbox.checked = false;
+      submitHidden.value = textInput.value.trim();
+      const draft = submitHidden.value;
+      if (draft !== "" && !GMAPS_BROWSER_KEY_RE.test(draft)) {
+        e.preventDefault();
+        if (typeof window.remiShowToast === "function") {
+          window.remiShowToast("That value does not look like a Google browser API key. Fix it or delete the key.");
+        }
+        textInput.focus();
+        updateValidationHint();
+      }
+    },
+    true
+  );
+};
+
 window.addEventListener("load", () => {
-  const csrfMeta = document.querySelector("meta[name='csrf-token']");
-  const csrfToken = csrfMeta && csrfMeta.getAttribute("content") ? csrfMeta.getAttribute("content").trim() : "";
-  if (csrfToken) {
-    document.querySelectorAll("form[method='post'], form[method='POST']").forEach((form) => {
+  /** Document / Element / DocumentFragment — not `instanceof ParentNode` (ParentNode is not a JS global in Firefox and others). */
+  const remiIsDomQueryRoot = (node) => Boolean(node && typeof node.querySelectorAll === "function");
+
+  /** Inject hidden csrf_token into POST forms under `root` when missing (e.g. after HTMX/AJAX DOM swaps). */
+  const remiEnsureCsrfOnPostForms = (root) => {
+    const csrfMeta = document.querySelector("meta[name='csrf-token']");
+    const csrfToken = csrfMeta && csrfMeta.getAttribute("content") ? csrfMeta.getAttribute("content").trim() : "";
+    if (!csrfToken) return;
+    const scope = remiIsDomQueryRoot(root) ? root : document;
+    scope.querySelectorAll("form[method='post'], form[method='POST']").forEach((form) => {
       if (form.querySelector("input[name='csrf_token']")) return;
       const action = (form.getAttribute("action") || "").toLowerCase();
       if (action === "/login" || action === "/setup" || action === "/register" || action.endsWith("/logout")) return;
@@ -37,6 +1004,13 @@ window.addEventListener("load", () => {
       input.value = csrfToken;
       form.appendChild(input);
     });
+  };
+  window.remiEnsureCsrfOnPostForms = remiEnsureCsrfOnPostForms;
+
+  const csrfMeta = document.querySelector("meta[name='csrf-token']");
+  const csrfToken = csrfMeta && csrfMeta.getAttribute("content") ? csrfMeta.getAttribute("content").trim() : "";
+  if (csrfToken) {
+    remiEnsureCsrfOnPostForms(document);
   }
 
   document.querySelectorAll("[data-password-toggle]").forEach((btn) => {
@@ -56,22 +1030,25 @@ window.addEventListener("load", () => {
 
   const TOAST_KEY = "remi-toast-message";
 
-  const showToast = (message) => {
-    if (!message) return;
-    const toast = document.createElement("div");
-    toast.className = "app-toast";
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    window.setTimeout(() => {
-      toast.classList.add("visible");
-    }, 10);
-    window.setTimeout(() => {
-      toast.classList.remove("visible");
-      window.setTimeout(() => {
-        toast.remove();
-      }, 220);
-    }, 2600);
-  };
+  const showToast =
+    typeof window.remiShowToast === "function"
+      ? window.remiShowToast
+      : (message) => {
+          if (!message) return;
+          const toast = document.createElement("div");
+          toast.className = "app-toast";
+          toast.textContent = message;
+          document.body.appendChild(toast);
+          window.setTimeout(() => {
+            toast.classList.add("visible");
+          }, 10);
+          window.setTimeout(() => {
+            toast.classList.remove("visible");
+            window.setTimeout(() => {
+              toast.remove();
+            }, 220);
+          }, 2600);
+        };
   window.remiShowToast = showToast;
 
   try {
@@ -331,26 +1308,14 @@ window.addEventListener("load", () => {
   const pad2 = (n) => String(n).padStart(2, "0");
   const now = new Date();
   const todayLocal = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
-  const nowLocal = `${todayLocal}T${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
-  document.querySelectorAll("input[type='date'], input[type='datetime-local']").forEach((input) => {
+  document.querySelectorAll("input[type='date']").forEach((input) => {
     if ((input.value || "").trim() !== "") return;
-    if (input.type === "date") {
-      let value = todayLocal;
-      const min = (input.min || "").trim();
-      const max = (input.max || "").trim();
-      if (min && value < min) value = min;
-      if (max && value > max) value = max;
-      input.value = value;
-      return;
-    }
-    if (input.type === "datetime-local") {
-      let value = nowLocal;
-      const min = (input.min || "").trim();
-      const max = (input.max || "").trim();
-      if (min && value < min) value = min;
-      if (max && value > max) value = max;
-      input.value = value;
-    }
+    let value = todayLocal;
+    const min = (input.min || "").trim();
+    const max = (input.max || "").trim();
+    if (min && value < min) value = min;
+    if (max && value > max) value = max;
+    input.value = value;
   });
 
   const normalize = (value) => (value || "").trim().toLowerCase();
@@ -361,6 +1326,17 @@ window.addEventListener("load", () => {
     return (u && u.trim()) || "/api/location/suggest";
   };
   const remiGeocodeURL = () => "/api/location/geocode";
+  /** BCP 47 language for geocoder labels: matches <html lang> (en UI → English place names). */
+  const remiPreferredLocationLang = () => {
+    const fromDoc =
+      document.documentElement && document.documentElement.getAttribute("lang");
+    if (fromDoc && String(fromDoc).trim()) {
+      return String(fromDoc).trim();
+    }
+    return (typeof navigator !== "undefined" && navigator.language) || "en";
+  };
+  const remiLocationLangQuery = () =>
+    `&lang=${encodeURIComponent(remiPreferredLocationLang())}`;
   const remiReadDistanceUnit = () => {
     const shell = document.querySelector("main.app-shell");
     const u = shell && shell.getAttribute("data-distance-unit");
@@ -410,57 +1386,85 @@ window.addEventListener("load", () => {
   const GEOCODE_CLIENT_CACHE_MAX = 400;
   const geocodeClientCache = new Map();
   const geocodeClientInflight = new Map();
+  const normalizeGeocodeRetryQuery = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    return raw
+      .replace(/\s+/g, " ")
+      .replace(/\s*,\s*/g, ", ")
+      .replace(/[;|]+/g, ", ")
+      .replace(/,+$/g, "")
+      .trim();
+  };
 
   /** Must be declared before fillMissingCoords / renderItineraryConnectors (avoid TDZ ReferenceError on load). */
   const geocodeLocationUncached = async (q) => {
-    try {
-      const res = await fetch(`${remiGeocodeURL()}?q=${encodeURIComponent(q)}`, {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" }
-      });
-      if (res.ok) {
-        const top = await res.json();
-        const lat = parseFloat(top.lat ?? top.Lat ?? "0");
-        const lng = parseFloat(top.lng ?? top.Lon ?? "0");
-        if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
-          return {
-            lat,
-            lng,
-            displayName: top.displayName || q
-          };
+    const tryLookup = async (query) => {
+      const clean = (query || "").trim();
+      if (!clean) return null;
+      try {
+        const res = await fetch(
+          `${remiGeocodeURL()}?q=${encodeURIComponent(clean)}${remiLocationLangQuery()}`,
+          {
+            credentials: "same-origin",
+            headers: { Accept: "application/json" }
+          }
+        );
+        if (res.ok) {
+          const top = await res.json();
+          const lat = parseFloat(top.lat ?? top.Lat ?? "0");
+          const lng = parseFloat(top.lng ?? top.Lon ?? "0");
+          if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+            return {
+              lat,
+              lng,
+              displayName: top.displayName || clean
+            };
+          }
         }
+      } catch (e) {
+        /* fallback */
       }
-    } catch (e) {
-      /* fallback */
-    }
-    const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.searchParams.set("q", q);
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("limit", "1");
-    const response = await fetch(url.toString(), {
-      headers: {
-        Accept: "application/json"
+      const url = new URL("https://nominatim.openstreetmap.org/search");
+      url.searchParams.set("q", clean);
+      url.searchParams.set("format", "jsonv2");
+      url.searchParams.set("limit", "1");
+      const response = await fetch(url.toString(), {
+        headers: {
+          Accept: "application/json",
+          "Accept-Language": remiPreferredLocationLang()
+        }
+      });
+      if (!response.ok) {
+        return null;
       }
-    });
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    if (!Array.isArray(data) || data.length === 0) {
-      return null;
-    }
-    const top = data[0];
-    return {
-      lat: parseFloat(top.lat || "0"),
-      lng: parseFloat(top.lon || "0"),
-      displayName: top.display_name || q
+      const data = await response.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        return null;
+      }
+      const top = data[0];
+      const lat = parseFloat(top.lat || "0");
+      const lng = parseFloat(top.lon || "0");
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+        return null;
+      }
+      return {
+        lat,
+        lng,
+        displayName: top.display_name || clean
+      };
     };
+    const primary = await tryLookup(q);
+    if (primary) return primary;
+    const retryQuery = normalizeGeocodeRetryQuery(q);
+    if (!retryQuery || retryQuery === (q || "").trim()) return null;
+    return tryLookup(retryQuery);
   };
 
   const geocodeLocation = async (locationQuery) => {
     const q = (locationQuery || "").trim();
     if (!q) return null;
-    const ck = normalize(q);
+    const ck = `${normalize(q)}\0${remiPreferredLocationLang().toLowerCase()}`;
     if (geocodeClientCache.has(ck)) {
       const hit = geocodeClientCache.get(ck);
       return hit ? { lat: hit.lat, lng: hit.lng, displayName: hit.displayName } : null;
@@ -699,7 +1703,7 @@ window.addEventListener("load", () => {
   const searchLocations = async (locationQuery) => {
     const q = (locationQuery || "").trim();
     if (!q) return [];
-    const ck = normalize(q);
+    const ck = `${normalize(q)}\0${remiPreferredLocationLang().toLowerCase()}`;
     if (locationSuggestClientCache.has(ck)) {
       return locationSuggestClientCache.get(ck).map((item) => ({ ...item }));
     }
@@ -708,10 +1712,13 @@ window.addEventListener("load", () => {
       inflight = (async () => {
         try {
           try {
-            const res = await fetch(`${remiSuggestURL()}?q=${encodeURIComponent(q)}`, {
-              credentials: "same-origin",
-              headers: { Accept: "application/json" }
-            });
+            const res = await fetch(
+              `${remiSuggestURL()}?q=${encodeURIComponent(q)}${remiLocationLangQuery()}`,
+              {
+                credentials: "same-origin",
+                headers: { Accept: "application/json" }
+              }
+            );
             if (res.ok) {
               const data = await res.json();
               if (Array.isArray(data) && data.length > 0) {
@@ -722,8 +1729,8 @@ window.addEventListener("load", () => {
                     const displayName = item.displayName || item.display_name || "";
                     const shortName =
                       item.shortName ||
-                      item.name ||
                       (displayName ? displayName.split(",")[0].trim() : "") ||
+                      item.name ||
                       displayName;
                     return { lat, lng, displayName, shortName };
                   })
@@ -742,7 +1749,8 @@ window.addEventListener("load", () => {
           url.searchParams.set("limit", "5");
           const response = await fetch(url.toString(), {
             headers: {
-              Accept: "application/json"
+              Accept: "application/json",
+              "Accept-Language": remiPreferredLocationLang()
             }
           });
           if (!response.ok) {
@@ -758,7 +1766,8 @@ window.addEventListener("load", () => {
               const lng = parseFloat(item.lon || "0");
               const displayName = item.display_name || "";
               const name = item.name && String(item.name).trim() ? String(item.name).trim() : "";
-              const shortName = name || (displayName ? displayName.split(",")[0].trim() : "") || displayName;
+              const shortName =
+                (displayName ? displayName.split(",")[0].trim() : "") || name || displayName;
               return { lat, lng, displayName, shortName };
             })
             .filter(
@@ -796,6 +1805,7 @@ window.addEventListener("load", () => {
     const nameInput = heroForm.querySelector("[data-dashboard-trip-name-input]");
     const latInput = heroForm.querySelector("[data-home-map-lat]");
     const lngInput = heroForm.querySelector("[data-home-map-lng]");
+    const labelField = heroForm.querySelector("[data-home-map-label]");
     if (!nameInput || !latInput || !lngInput) {
       return;
     }
@@ -825,6 +1835,7 @@ window.addEventListener("load", () => {
     const clearCoords = () => {
       latInput.value = "";
       lngInput.value = "";
+      if (labelField) labelField.value = "";
       pickedLabel = null;
     };
 
@@ -837,6 +1848,134 @@ window.addEventListener("load", () => {
       }
       if (timer) clearTimeout(timer);
       const query = nameInput.value.trim();
+      if (query.length < 3) {
+        hide();
+        return;
+      }
+      timer = window.setTimeout(async () => {
+        const current = ++token;
+        const host = ensureHost();
+        const suggestions = await searchLocations(query);
+        if (current !== token) return;
+        host.innerHTML = "";
+        if (!suggestions.length) {
+          hide();
+          return;
+        }
+        suggestions.forEach((s) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "location-suggestion-btn dashboard-trip-place-suggest";
+          const title = document.createElement("span");
+          title.className = "dashboard-trip-place-suggest__title";
+          title.textContent = s.shortName || s.displayName;
+          btn.appendChild(title);
+          if (s.displayName && s.displayName !== title.textContent) {
+            const sub = document.createElement("span");
+            sub.className = "dashboard-trip-place-suggest__detail";
+            sub.textContent = s.displayName;
+            btn.appendChild(sub);
+          }
+          remiPreventLocationSuggestBlur(btn);
+          btn.addEventListener("click", () => {
+            const label = (s.shortName || s.displayName || "").trim();
+            nameInput.value = label;
+            latInput.value = String(s.lat);
+            lngInput.value = String(s.lng);
+            if (labelField) labelField.value = label;
+            pickedLabel = label;
+            hide();
+          });
+          host.appendChild(btn);
+        });
+        host.classList.remove("hidden");
+        nameInput.setAttribute("aria-expanded", "true");
+      }, 300);
+    });
+
+    nameInput.addEventListener("blur", () => {
+      window.setTimeout(hide, REMI_LOCATION_SUGGEST_BLUR_MS);
+    });
+  });
+
+  const DASHBOARD_NEW_TRIP_NAME_HASH = "#dashboard-new-trip-name";
+  const focusDashboardNewTripNameFromHash = () => {
+    if (!document.body.classList.contains("page-home")) return;
+    if (window.location.hash !== DASHBOARD_NEW_TRIP_NAME_HASH) return;
+    const el = document.getElementById("dashboard-new-trip-name");
+    if (!(el instanceof HTMLInputElement)) return;
+    window.requestAnimationFrame(() => {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      window.requestAnimationFrame(() => {
+        try {
+          el.focus({ preventScroll: true });
+        } catch {
+          el.focus();
+        }
+      });
+    });
+  };
+  if (document.body.classList.contains("page-home")) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", focusDashboardNewTripNameFromHash, { once: true });
+    } else {
+      focusDashboardNewTripNameFromHash();
+    }
+    window.addEventListener("hashchange", focusDashboardNewTripNameFromHash);
+  }
+
+  document.querySelectorAll("form[data-site-settings-map-form]").forEach((mapForm) => {
+    const shell = mapForm.closest(".app-shell");
+    const lookupEnabled = shell ? shell.getAttribute("data-location-lookup-enabled") !== "false" : true;
+    const nameInput = mapForm.querySelector("[data-site-settings-map-name]");
+    const latInput = mapForm.querySelector("[data-site-settings-map-lat]");
+    const lngInput = mapForm.querySelector("[data-site-settings-map-lng]");
+    if (!nameInput || !latInput || !lngInput) {
+      return;
+    }
+
+    let timer = null;
+    let token = 0;
+    let suggestionsHost = null;
+    let pickedLabel = (nameInput.value || "").trim() || null;
+
+    const ensureHost = () => {
+      if (suggestionsHost) return suggestionsHost;
+      suggestionsHost = document.createElement("div");
+      suggestionsHost.className = "location-suggestions hidden";
+      suggestionsHost.setAttribute("role", "listbox");
+      const wrap = nameInput.closest(".site-settings-default-place-field") || nameInput.parentElement;
+      if (wrap) wrap.appendChild(suggestionsHost);
+      return suggestionsHost;
+    };
+
+    const hide = () => {
+      const host = ensureHost();
+      host.classList.add("hidden");
+      host.innerHTML = "";
+      nameInput.setAttribute("aria-expanded", "false");
+    };
+
+    const clearCoords = () => {
+      latInput.value = "";
+      lngInput.value = "";
+      pickedLabel = null;
+    };
+
+    nameInput.addEventListener("input", () => {
+      const query = nameInput.value.trim();
+      if (query === "") {
+        clearCoords();
+        hide();
+        return;
+      }
+      if (!lookupEnabled) {
+        return;
+      }
+      if (pickedLabel !== null && query !== pickedLabel) {
+        clearCoords();
+      }
+      if (timer) clearTimeout(timer);
       if (query.length < 3) {
         hide();
         return;
@@ -886,13 +2025,13 @@ window.addEventListener("load", () => {
     });
   });
 
-  document.querySelectorAll("form[data-site-settings-map-form]").forEach((mapForm) => {
-    const shell = mapForm.closest(".app-shell");
+  document.querySelectorAll("[data-trip-settings-map-name]").forEach((nameInput) => {
+    const shell = nameInput.closest("main.app-shell");
     const lookupEnabled = shell ? shell.getAttribute("data-location-lookup-enabled") !== "false" : true;
-    const nameInput = mapForm.querySelector("[data-site-settings-map-name]");
-    const latInput = mapForm.querySelector("[data-site-settings-map-lat]");
-    const lngInput = mapForm.querySelector("[data-site-settings-map-lng]");
-    if (!nameInput || !latInput || !lngInput) {
+    const wrap = nameInput.closest(".site-settings-default-place-field") || nameInput.parentElement;
+    const latInput = wrap?.querySelector("[data-trip-settings-map-lat]");
+    const lngInput = wrap?.querySelector("[data-trip-settings-map-lng]");
+    if (!wrap || !latInput || !lngInput) {
       return;
     }
 
@@ -906,8 +2045,7 @@ window.addEventListener("load", () => {
       suggestionsHost = document.createElement("div");
       suggestionsHost.className = "location-suggestions hidden";
       suggestionsHost.setAttribute("role", "listbox");
-      const wrap = nameInput.closest(".site-settings-default-place-field") || nameInput.parentElement;
-      if (wrap) wrap.appendChild(suggestionsHost);
+      wrap.appendChild(suggestionsHost);
       return suggestionsHost;
     };
 
@@ -1079,6 +2217,10 @@ window.addEventListener("load", () => {
     });
   });
 
+  /** Row that gets `.editing` while an inline edit form is open (must match CSS .editing .item-actions rules). */
+  const INLINE_EDIT_ROW_SELECTOR =
+    ".timeline-item, .expense-item, .accommodation-item, .accommodation-card-wrap, .vehicle-rental-item, .flight-card, .reminder-checklist-item";
+
   const itineraryViewIdForForm = (formId) => {
     if (!formId) return null;
     if (formId.startsWith("accommodation-itinerary-edit-")) {
@@ -1097,76 +2239,96 @@ window.addEventListener("load", () => {
   const mqTabEditMobile = window.matchMedia("(max-width: 920px)");
 
   const closeInlineEdit = (formId) => {
-    const form = document.getElementById(formId);
-    if (!form) {
-      /* Form can be missing after DOM sync; still clear row editing + show view or actions stay hidden (CSS). */
+    try {
+      const form = document.getElementById(formId);
+      if (!form) {
+        /* Form can be missing after DOM sync; still clear row editing + show view or actions stay hidden (CSS). */
+        const viewId = itineraryViewIdForForm(formId);
+        if (viewId && viewId.startsWith("itinerary-view-")) {
+          const view = document.getElementById(viewId);
+          const row = view?.closest(".timeline-item");
+          if (row) row.classList.remove("editing");
+          if (view) view.classList.remove("hidden");
+        } else if (viewId) {
+          const view = document.getElementById(viewId);
+          const row = view?.closest(INLINE_EDIT_ROW_SELECTOR);
+          if (row) row.classList.remove("editing");
+          if (view) view.classList.remove("hidden");
+        }
+        return;
+      }
+      if (form.classList.contains("budget-expense-edit-form")) {
+        const expenseId = form.getAttribute("data-budget-expense-id") || "";
+        const editTr = expenseId
+          ? document.querySelector(`tr.budget-expense-edit-row[data-budget-edit-for="${CSS.escape(expenseId)}"]`)
+          : null;
+        const viewTr = expenseId
+          ? document.querySelector(`tr.budget-tx-view[data-budget-tx-view="${CSS.escape(expenseId)}"]`)
+          : null;
+        const mobileLi = expenseId
+          ? document.querySelector(`li.budget-mobile-tx-item[data-budget-tx-view="${CSS.escape(expenseId)}"]`)
+          : null;
+        const cell = editTr?.querySelector(".budget-expense-edit-cell");
+        if (cell && form.parentElement !== cell) {
+          cell.appendChild(form);
+        }
+        form.classList.add("hidden");
+        editTr?.classList.add("hidden");
+        viewTr?.classList.remove("editing");
+        mobileLi?.classList.remove("editing");
+        const dialog = document.getElementById("budget-mobile-expense-edit");
+        if (dialog?.open) {
+          dialog.close();
+        }
+        return;
+      }
+      if (form.classList.contains("tab-expense-edit-form")) {
+        const expenseId = form.getAttribute("data-tab-expense-id") || "";
+        const editTr = expenseId
+          ? document.querySelector(`tr.tab-expense-edit-row[data-tab-edit-for="${CSS.escape(expenseId)}"]`)
+          : null;
+        const viewTr = expenseId ? document.querySelector(`tr[data-tab-tx-view="${CSS.escape(expenseId)}"]`) : null;
+        const viewCard = expenseId
+          ? document.querySelector(`.tab-exp-grid-card[data-tab-tx-view="${CSS.escape(expenseId)}"]`)
+          : null;
+        const cell = editTr?.querySelector(".tab-expense-edit-cell");
+        if (cell && form.parentElement !== cell) {
+          cell.appendChild(form);
+        }
+        form.classList.add("hidden");
+        editTr?.classList.add("hidden");
+        viewTr?.classList.remove("editing");
+        viewCard?.classList.remove("editing");
+        const dialog = document.getElementById("tab-mobile-expense-edit");
+        if (dialog?.open) {
+          dialog.close();
+        }
+        return;
+      }
+      if (form.classList.contains("tab-settlement-edit-form")) {
+        form.classList.add("hidden");
+        return;
+      }
+      form.classList.add("hidden");
+      let row = form.closest(INLINE_EDIT_ROW_SELECTOR);
+      if (!row) {
+        const vid = itineraryViewIdForForm(formId);
+        const v = vid ? document.getElementById(vid) : null;
+        if (v) row = v.closest(INLINE_EDIT_ROW_SELECTOR);
+      }
+      if (row) row.classList.remove("editing");
       const viewId = itineraryViewIdForForm(formId);
-      if (viewId && viewId.startsWith("itinerary-view-")) {
-        const view = document.getElementById(viewId);
-        const row = view?.closest(".timeline-item");
-        if (row) row.classList.remove("editing");
-        if (view) view.classList.remove("hidden");
-      }
-      return;
+      const view = viewId ? document.getElementById(viewId) : null;
+      if (view) view.classList.remove("hidden");
+    } finally {
+      /*
+       * Opening edit calls removeAttribute("open") on <details.trip-inline-actions-dropdown>.
+       * Summary is display:none; the real UI is in .trip-inline-actions-buttons, which the UA
+       * hides when <details> is closed — so row actions vanish until page reload unless we
+       * re-apply the same open-state sync used on load (desktop: keep details open for CSS hover).
+       */
+      window.remiApplyExpenseActionsDropdownOpen?.();
     }
-    if (form.classList.contains("budget-expense-edit-form")) {
-      const expenseId = form.getAttribute("data-budget-expense-id") || "";
-      const editTr = expenseId
-        ? document.querySelector(`tr.budget-expense-edit-row[data-budget-edit-for="${CSS.escape(expenseId)}"]`)
-        : null;
-      const viewTr = expenseId
-        ? document.querySelector(`tr.budget-tx-view[data-budget-tx-view="${CSS.escape(expenseId)}"]`)
-        : null;
-      const mobileLi = expenseId
-        ? document.querySelector(`li.budget-mobile-tx-item[data-budget-tx-view="${CSS.escape(expenseId)}"]`)
-        : null;
-      const cell = editTr?.querySelector(".budget-expense-edit-cell");
-      if (cell && form.parentElement !== cell) {
-        cell.appendChild(form);
-      }
-      form.classList.add("hidden");
-      editTr?.classList.add("hidden");
-      viewTr?.classList.remove("editing");
-      mobileLi?.classList.remove("editing");
-      const dialog = document.getElementById("budget-mobile-expense-edit");
-      if (dialog?.open) {
-        dialog.close();
-      }
-      return;
-    }
-    if (form.classList.contains("tab-expense-edit-form")) {
-      const expenseId = form.getAttribute("data-tab-expense-id") || "";
-      const editTr = expenseId
-        ? document.querySelector(`tr.tab-expense-edit-row[data-tab-edit-for="${CSS.escape(expenseId)}"]`)
-        : null;
-      const viewTr = expenseId ? document.querySelector(`tr[data-tab-tx-view="${CSS.escape(expenseId)}"]`) : null;
-      const viewCard = expenseId
-        ? document.querySelector(`.tab-exp-grid-card[data-tab-tx-view="${CSS.escape(expenseId)}"]`)
-        : null;
-      const cell = editTr?.querySelector(".tab-expense-edit-cell");
-      if (cell && form.parentElement !== cell) {
-        cell.appendChild(form);
-      }
-      form.classList.add("hidden");
-      editTr?.classList.add("hidden");
-      viewTr?.classList.remove("editing");
-      viewCard?.classList.remove("editing");
-      const dialog = document.getElementById("tab-mobile-expense-edit");
-      if (dialog?.open) {
-        dialog.close();
-      }
-      return;
-    }
-    if (form.classList.contains("tab-settlement-edit-form")) {
-      form.classList.add("hidden");
-      return;
-    }
-    form.classList.add("hidden");
-    const row = form.closest(".timeline-item, .expense-item, .accommodation-item, .accommodation-card-wrap, .vehicle-rental-item, .flight-card, .reminder-checklist-item");
-    if (row) row.classList.remove("editing");
-    const viewId = itineraryViewIdForForm(formId);
-    const view = viewId ? document.getElementById(viewId) : null;
-    if (view) view.classList.remove("hidden");
   };
 
   const wireOneInlineEditOpenBtn = (btn) => {
@@ -1238,20 +2400,22 @@ window.addEventListener("load", () => {
         form.classList.remove("hidden");
         return;
       }
-      const row = form.closest(".timeline-item, .expense-item, .accommodation-item, .accommodation-card-wrap, .vehicle-rental-item, .flight-card, .reminder-checklist-item");
+      const row = form.closest(INLINE_EDIT_ROW_SELECTOR);
       if (row) row.classList.add("editing");
       const viewId = itineraryViewIdForForm(formId);
       const view = viewId ? document.getElementById(viewId) : null;
       if (view) view.classList.add("hidden");
       form.classList.remove("hidden");
       window.remiResyncVehicleDropoffInForm?.(form);
-      const dateInput = form.querySelector("input[name='itinerary_date']");
+      const dateInput =
+        form.querySelector("input.remi-date-iso[name='itinerary_date']") ||
+        form.querySelector("input[name='itinerary_date']");
       if (dateInput) dateInput.dataset.originalValue = dateInput.value;
     });
   };
   document.querySelectorAll("[data-inline-edit-open]").forEach((btn) => wireOneInlineEditOpenBtn(btn));
   window.remiWireInlineEditOpenButtonsIn = (root) => {
-    const scope = root instanceof ParentNode ? root : document;
+    const scope = remiIsDomQueryRoot(root) ? root : document;
     scope.querySelectorAll("[data-inline-edit-open]").forEach((btn) => {
       if (btn instanceof HTMLElement) wireOneInlineEditOpenBtn(btn);
     });
@@ -1302,7 +2466,15 @@ window.addEventListener("load", () => {
     const longitudeInput = itineraryForm.querySelector("[data-longitude-input]");
     const locationStatus = itineraryForm.querySelector("[data-location-status]");
     const suggestionBox = itineraryForm.querySelector("[data-location-suggestions]");
-    const itineraryDateInput = itineraryForm.querySelector("input[name='itinerary_date']");
+    const itineraryDateIso =
+      itineraryForm.querySelector("input.remi-date-iso[name='itinerary_date']") ||
+      itineraryForm.querySelector("input[name='itinerary_date']");
+    const itineraryDateInput = itineraryDateIso;
+    const itineraryDateVisibleEl = () => {
+      const iso = itineraryForm.querySelector("input.remi-date-iso[name='itinerary_date']");
+      const wrap = iso?.closest?.("[data-remi-date]");
+      return wrap?.querySelector?.(".remi-date-visible") || null;
+    };
     const dateStatus = itineraryForm.querySelector("[data-date-status]");
     const tripStart = itineraryForm.getAttribute("data-trip-start") || "";
     const tripEnd = itineraryForm.getAttribute("data-trip-end") || "";
@@ -1313,6 +2485,8 @@ window.addEventListener("load", () => {
     let cachedCoords = null;
     let suggestionTimer = null;
     let latestQueryToken = 0;
+    let geocodeSubmitInProgress = false;
+    let allowResolvedSubmit = false;
 
     const setLocationStatus = (message, state) => {
       if (!locationStatus) return;
@@ -1354,7 +2528,10 @@ window.addEventListener("load", () => {
         setDateStatus(`Date must be between ${tripStartLabel} and ${tripEndLabel}.`, "error");
         return false;
       }
-      setDateStatus("Date is within your trip range.", "success");
+      setDateStatus(
+        `This date is within your trip (${tripStartLabel} – ${tripEndLabel}).`,
+        "success"
+      );
       return true;
     };
 
@@ -1458,7 +2635,10 @@ window.addEventListener("load", () => {
         cachedLocation = "";
         cachedCoords = null;
         fillCoordinates(null);
-        setLocationStatus("Location lookup failed. Try a more specific place name.", "error");
+        setLocationStatus(
+          "Location lookup failed. Try a more specific place name, including city/country.",
+          "error"
+        );
         return false;
       }
 
@@ -1492,20 +2672,31 @@ window.addEventListener("load", () => {
     }
 
     itineraryForm.addEventListener("submit", async (event) => {
+      if (allowResolvedSubmit) {
+        allowResolvedSubmit = false;
+        return;
+      }
+      if (geocodeSubmitInProgress) return;
       if (!validateDateInTripRange()) {
         event.preventDefault();
-        itineraryDateInput?.focus();
+        const vis = itineraryDateVisibleEl();
+        if (vis instanceof HTMLElement) vis.focus();
+        else itineraryDateInput?.focus?.();
         return;
       }
       if (!locationInput) return;
       const query = locationInput.value;
       if (!query || !query.trim()) return;
-
-      const ok = await resolveLocation(query);
-      if (ok) return;
-
       event.preventDefault();
-      locationInput.focus();
+      geocodeSubmitInProgress = true;
+      const ok = await resolveLocation(query);
+      geocodeSubmitInProgress = false;
+      if (!ok) {
+        locationInput.focus();
+        return;
+      }
+      allowResolvedSubmit = true;
+      itineraryForm.requestSubmit();
     });
   };
 
@@ -1690,6 +2881,14 @@ window.addEventListener("load", () => {
         if (fileLabel) fileLabel.hidden = true;
         return;
       }
+      const isPreset = v === "default" || v.startsWith("pattern:");
+      if (isPreset) {
+        revokeTripCoverBlob();
+        if (previewWrap) previewWrap.hidden = true;
+        if (urlLabel) urlLabel.hidden = true;
+        if (fileLabel) fileLabel.hidden = true;
+        return;
+      }
       if (previewWrap) previewWrap.hidden = false;
       if (urlLabel) urlLabel.hidden = v !== "url";
       if (fileLabel) fileLabel.hidden = v !== "upload";
@@ -1762,6 +2961,9 @@ window.addEventListener("load", () => {
     const accommodationStatus = accommodationForm.querySelector("[data-accommodation-status]");
     const mqAccommodationMobile = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 920px)") : null;
     let accommodationLookupTimer = null;
+    let accommodationLookupSeq = 0;
+    let lastAutoFilledAddress = (accommodationAddressInput?.value || "").trim();
+    let addressManualLock = lastAutoFilledAddress !== "";
 
     const setAccommodationStatus = (message, state) => {
       if (!accommodationStatus) return;
@@ -1771,13 +2973,23 @@ window.addEventListener("load", () => {
     };
 
     const lookupAddress = async (query) => {
-      if (!query || !query.trim()) return;
+      const q = (query || "").trim();
+      if (!q) return;
+      const seq = ++accommodationLookupSeq;
       setAccommodationStatus("Looking up address...");
-      const suggestion = await geocodeLocation(query.trim());
+      const suggestion = await geocodeLocation(q);
+      if (seq !== accommodationLookupSeq) return;
       if (suggestion && suggestion.displayName && accommodationAddressInput) {
-        if (!accommodationAddressInput.value.trim()) {
-          accommodationAddressInput.value = suggestion.displayName;
+        if (addressManualLock) {
+          setAccommodationStatus(
+            "Address was edited manually. Auto-fill skipped.",
+            "success"
+          );
+          return;
         }
+        // Keep address synchronized with the latest accommodation lookup result.
+        accommodationAddressInput.value = suggestion.displayName;
+        lastAutoFilledAddress = suggestion.displayName.trim();
         setAccommodationStatus("Address auto-filled. Please review before saving.", "success");
         return;
       }
@@ -1793,6 +3005,18 @@ window.addEventListener("load", () => {
       });
       accommodationNameInput.addEventListener("blur", () => {
         void lookupAddress(accommodationNameInput.value);
+      });
+    }
+    if (accommodationAddressInput) {
+      accommodationAddressInput.addEventListener("input", () => {
+        const current = accommodationAddressInput.value.trim();
+        if (!current) {
+          // Empty means the user is okay with auto-fill taking over again.
+          addressManualLock = false;
+          lastAutoFilledAddress = "";
+          return;
+        }
+        addressManualLock = current !== lastAutoFilledAddress;
       });
     }
 
@@ -2032,6 +3256,322 @@ window.addEventListener("load", () => {
     }
   };
 
+  const FILE_FIELD_META_BY_NAME = {
+    booking_attachment: { removeName: "remove_attachment", currentName: "current_attachment_path", kind: "document" },
+    flight_document: { removeName: "remove_document", currentName: "current_document_path", kind: "document" },
+    tab_attachment: { removeName: "remove_tab_attachment", currentName: "current_tab_attachment_path", kind: "document" },
+    entry_image: { removeName: "remove_image", currentName: "current_image_path", kind: "image" },
+    vehicle_image: { removeName: "remove_vehicle_image", currentName: "current_vehicle_image_path", kind: "image" },
+    stop_image: { removeName: "remove_stop_image", currentName: "current_stop_image_path", kind: "image" }
+  };
+
+  const remiMaxUploadBytes = () => {
+    const host = document.querySelector("main.app-shell");
+    const raw = host?.getAttribute("data-max-upload-file-size-mb") || "5";
+    const mb = parseInt(raw, 10);
+    const safeMB = Number.isFinite(mb) && mb > 0 ? mb : 5;
+    return safeMB * 1024 * 1024;
+  };
+
+  const remiHumanFileSize = (bytes) => {
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n < 0) return "Unknown size";
+    if (n < 1024) return `${Math.round(n)} B`;
+    const kb = n / 1024;
+    if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : mb.toFixed(0)} MB`;
+    const gb = mb / 1024;
+    return `${gb < 10 ? gb.toFixed(1) : gb.toFixed(0)} GB`;
+  };
+
+  const remiFileExt = (name) => {
+    const s = String(name || "").trim();
+    const i = s.lastIndexOf(".");
+    if (i <= 0 || i === s.length - 1) return "";
+    return s.slice(i + 1).toLowerCase();
+  };
+
+  const remiNameFromPath = (path) => {
+    const raw = String(path || "").trim();
+    if (!raw) return "";
+    const clean = raw.split("?")[0].split("#")[0];
+    const slash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+    const part = slash >= 0 ? clean.slice(slash + 1) : clean;
+    try {
+      return decodeURIComponent(part);
+    } catch {
+      return part;
+    }
+  };
+
+  const remiAttachmentIcon = (kind, ext) => {
+    const e = String(ext || "").toLowerCase();
+    if (kind === "image") return "image";
+    if (["pdf"].includes(e)) return "picture_as_pdf";
+    if (["doc", "docx", "txt", "rtf", "md"].includes(e)) return "description";
+    if (["xls", "xlsx", "csv"].includes(e)) return "table";
+    return "attach_file";
+  };
+
+  const remiClearFileInput = (input) => {
+    if (!(input instanceof HTMLInputElement)) return;
+    const dt = new DataTransfer();
+    input.files = dt.files;
+    input.value = "";
+  };
+
+  const remiSetRemoveControl = (control, shouldRemove) => {
+    if (!control) return;
+    if (control instanceof HTMLSelectElement) {
+      control.value = shouldRemove ? "true" : "false";
+      return;
+    }
+    if (control instanceof HTMLInputElement && control.type === "checkbox") {
+      control.checked = shouldRemove;
+    }
+  };
+
+  const remiReadRemoveControl = (control) => {
+    if (!control) return false;
+    if (control instanceof HTMLSelectElement) return String(control.value || "").toLowerCase() === "true";
+    if (control instanceof HTMLInputElement && control.type === "checkbox") return Boolean(control.checked);
+    return false;
+  };
+
+  const remiMatchesAccept = (file, acceptList) => {
+    const accept = String(acceptList || "").trim();
+    if (!accept) return true;
+    const name = String(file?.name || "").toLowerCase();
+    const ext = remiFileExt(name);
+    const mime = String(file?.type || "").toLowerCase();
+    return accept
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+      .some((rule) => {
+        if (rule === "*/*") return true;
+        if (rule.endsWith("/*")) {
+          const pref = rule.slice(0, -1);
+          return mime.startsWith(pref);
+        }
+        if (rule.startsWith(".")) {
+          return `.${ext}` === rule;
+        }
+        return mime === rule;
+      });
+  };
+
+  const remiHideLegacyAttachmentHints = (form, existingUrl) => {
+    if (!(form instanceof HTMLElement)) return;
+    if (!existingUrl) return;
+    form.querySelectorAll("p.edit-form-attachment-open-wrap a[href], p.muted a[href]").forEach((a) => {
+      const href = String(a.getAttribute("href") || "").trim();
+      if (!href || href !== existingUrl) return;
+      const p = a.closest("p");
+      if (p instanceof HTMLElement) p.hidden = true;
+    });
+  };
+
+  const initAttachmentEditField = (fileInput) => {
+    if (!(fileInput instanceof HTMLInputElement) || fileInput.dataset.remiAttachmentFieldWired === "1") return;
+    const meta = FILE_FIELD_META_BY_NAME[fileInput.name];
+    if (!meta) return;
+    const form = fileInput.closest("form");
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains("item-edit")) return;
+
+    const removeControl = form.querySelector(`[name="${meta.removeName}"]`);
+    const currentPathInput =
+      meta.currentName ? form.querySelector(`input[type="hidden"][name="${meta.currentName}"]`) : null;
+    const existingUrl = String(currentPathInput?.value || "").trim();
+    const maxBytes = remiMaxUploadBytes();
+    const maxSizeMsg = remiHumanFileSize(maxBytes);
+
+    remiHideLegacyAttachmentHints(form, existingUrl);
+    fileInput.dataset.remiAttachmentFieldWired = "1";
+    fileInput.hidden = true;
+    fileInput.setAttribute("aria-hidden", "true");
+
+    const ui = document.createElement("div");
+    ui.className = "edit-attachment-ui";
+    const card = document.createElement("div");
+    card.className = "edit-attachment-card";
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "edit-attachment-icon";
+    const icon = document.createElement("span");
+    icon.className = "material-symbols-outlined";
+    icon.setAttribute("aria-hidden", "true");
+    iconWrap.appendChild(icon);
+    const metaWrap = document.createElement("div");
+    metaWrap.className = "edit-attachment-meta";
+    const nameEl = document.createElement("p");
+    nameEl.className = "edit-attachment-name";
+    const subEl = document.createElement("p");
+    subEl.className = "edit-attachment-sub";
+    metaWrap.append(nameEl, subEl);
+    const actions = document.createElement("div");
+    actions.className = "edit-attachment-actions";
+    const replaceBtn = document.createElement("button");
+    replaceBtn.type = "button";
+    replaceBtn.className = "edit-attachment-btn";
+    replaceBtn.innerHTML =
+      '<span class="material-symbols-outlined" aria-hidden="true">sync</span><span>Replace File</span>';
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "edit-attachment-btn edit-attachment-btn--remove";
+    removeBtn.innerHTML =
+      '<span class="material-symbols-outlined" aria-hidden="true">delete</span><span>Remove</span>';
+    actions.append(replaceBtn, removeBtn);
+    card.append(iconWrap, metaWrap, actions);
+    ui.appendChild(card);
+    fileInput.insertAdjacentElement("afterend", ui);
+
+    const state = {
+      pendingFile: null,
+      removeMarked: remiReadRemoveControl(removeControl),
+      existingSize: "",
+      existingName: remiNameFromPath(existingUrl),
+      existingExt: remiFileExt(remiNameFromPath(existingUrl))
+    };
+
+    const syncRemoveState = () => {
+      const shouldRemove = Boolean(state.removeMarked && !state.pendingFile && existingUrl);
+      remiSetRemoveControl(removeControl, shouldRemove);
+    };
+
+    const render = () => {
+      card.classList.remove("is-pending", "is-remove");
+      let fileName = "";
+      let sub = "";
+      let ext = "";
+
+      if (state.pendingFile) {
+        card.classList.add("is-pending");
+        fileName = state.pendingFile.name;
+        ext = remiFileExt(fileName);
+        sub = `${ext ? ext.toUpperCase() : "FILE"} · ${remiHumanFileSize(state.pendingFile.size)} · Pending upload`;
+      } else if (existingUrl && !state.removeMarked) {
+        fileName = state.existingName || "Attached file";
+        ext = state.existingExt;
+        sub = `${ext ? ext.toUpperCase() : "FILE"} · ${state.existingSize || "Checking size..."}`;
+      } else if (existingUrl && state.removeMarked) {
+        card.classList.add("is-remove");
+        fileName = state.existingName || "Attached file";
+        ext = state.existingExt;
+        sub = "Marked for removal. Save changes to apply.";
+      } else {
+        fileName = meta.kind === "image" ? "No image attached" : "No attachment";
+        sub = `Max file size: ${maxSizeMsg}`;
+      }
+
+      icon.textContent = remiAttachmentIcon(meta.kind, ext);
+      nameEl.textContent = fileName;
+      subEl.textContent = sub;
+      replaceBtn.querySelector("span:last-child").textContent =
+        state.pendingFile || existingUrl ? "Replace File" : "Choose File";
+      const canRemove = Boolean(state.pendingFile || existingUrl);
+      removeBtn.hidden = !canRemove;
+      removeBtn.querySelector("span.material-symbols-outlined").textContent = state.removeMarked ? "undo" : "delete";
+      removeBtn.querySelector("span:last-child").textContent = state.removeMarked ? "Undo" : "Remove";
+      syncRemoveState();
+    };
+
+    replaceBtn.addEventListener("click", () => {
+      fileInput.click();
+    });
+
+    removeBtn.addEventListener("click", () => {
+      if (state.pendingFile) {
+        state.pendingFile = null;
+        remiClearFileInput(fileInput);
+        state.removeMarked = Boolean(existingUrl);
+      } else if (existingUrl) {
+        state.removeMarked = !state.removeMarked;
+      }
+      render();
+    });
+
+    fileInput.addEventListener("change", () => {
+      const f = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+      if (!f) {
+        state.pendingFile = null;
+        render();
+        return;
+      }
+      if (typeof window.remiIsBlockedUploadFilename === "function" && window.remiIsBlockedUploadFilename(f.name)) {
+        remiClearFileInput(fileInput);
+        window.remiShowToast?.(
+          window.remiBlockedUploadFilenameMessage ||
+            "This file type is not allowed — executables and scripts cannot be uploaded."
+        );
+        return;
+      }
+      if (!remiMatchesAccept(f, fileInput.accept || "")) {
+        remiClearFileInput(fileInput);
+        window.remiShowToast?.("Selected file type is not allowed for this field.");
+        return;
+      }
+      if (maxBytes > 0 && f.size > maxBytes) {
+        remiClearFileInput(fileInput);
+        window.remiShowToast?.(`File is too large. Max allowed is ${maxSizeMsg}.`);
+        return;
+      }
+      state.pendingFile = f;
+      state.removeMarked = false;
+      render();
+    });
+
+    if (existingUrl) {
+      fetch(existingUrl, { method: "HEAD", credentials: "same-origin" })
+        .then((res) => {
+          const raw = res.headers.get("content-length");
+          const n = raw ? parseInt(raw, 10) : NaN;
+          if (Number.isFinite(n) && n >= 0) {
+            state.existingSize = remiHumanFileSize(n);
+            render();
+          } else {
+            state.existingSize = "Unknown size";
+            render();
+          }
+        })
+        .catch(() => {
+          state.existingSize = "Unknown size";
+          render();
+        });
+    }
+
+    render();
+  };
+
+  const initAttachmentEditFieldsIn = (root) => {
+    const scope = remiIsDomQueryRoot(root) ? root : document;
+    scope.querySelectorAll("form.item-edit input[type='file'][name]").forEach((input) => {
+      initAttachmentEditField(input);
+    });
+  };
+  window.remiInitAttachmentEditFieldsIn = initAttachmentEditFieldsIn;
+  initAttachmentEditFieldsIn(document);
+
+  /** After replacing innerHTML inside a card view, reattach listeners for Edit / Delete / AJAX (e.g. spend row). */
+  const rewireInjectedActionUI = (root) => {
+    if (!remiIsDomQueryRoot(root)) return;
+    window.remiEnsureCsrfOnPostForms?.(root);
+    root.querySelectorAll("form[data-app-confirm]").forEach((f) => {
+      delete f.dataset.remiConfirmWired;
+      window.remiWireAppConfirmOnForm?.(f);
+    });
+    root.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
+      delete f.dataset.remiAjaxWired;
+      window.remiBindAjaxSubmitForm?.(f);
+    });
+    window.remiWireInlineEditOpenButtonsIn?.(root);
+    window.remiWireDateFieldsIn?.(root);
+    window.remiWireDateTimeFieldsIn?.(root);
+    window.remiWireTimeFieldsIn?.(root);
+    window.remiInitAttachmentEditFieldsIn?.(root);
+    window.remiApplyExpenseActionsDropdownOpen?.();
+  };
+
   const refreshInlineViewFromServer = async (form) => {
     const formId = form.id || "";
     if (!formId) return;
@@ -2057,6 +3597,7 @@ window.addEventListener("load", () => {
       if (!freshView) return;
       currentView.innerHTML = freshView.innerHTML;
       currentView.className = freshView.className;
+      rewireInjectedActionUI(currentView);
     } catch (e) {
       // keep existing UI if refresh fails
     }
@@ -2108,6 +3649,11 @@ window.addEventListener("load", () => {
     window.reinitTabOverTimeChart?.();
     window.rewireTabInlineEditOpenButtons?.();
     window.remiSyncTabExpenseInstantFilter?.();
+    window.remiInitAttachmentEditFieldsIn?.(document);
+    window.remiWireDateFieldsIn?.(document);
+    window.remiWireDateTimeFieldsIn?.(document);
+    window.remiWireTimeFieldsIn?.(document);
+    window.remiEnsureCsrfOnPostForms?.(document);
   };
 
   // Reposition a DOM row to the correct slot based on the fresh server HTML.
@@ -2193,6 +3739,36 @@ window.addEventListener("load", () => {
     return repositionInDayGroup(row, freshDoc, rowViewId, "data-date", "ul.day-items", "li.timeline-item");
   };
 
+  // Refresh all rendered itinerary rows from a fresh server document.
+  // Used for booking forms (flight/vehicle/accommodation) that update linked itinerary stops.
+  const syncAllRenderedItineraryRows = async () => {
+    const currentRows = Array.from(
+      document.querySelectorAll("li.timeline-item[data-itinerary-item-id]")
+    );
+    if (!currentRows.length) return false;
+    const freshDoc = await fetchFreshDoc();
+    if (!freshDoc) return false;
+    let hasAnyFreshMatch = false;
+    currentRows.forEach((row) => {
+      const itemId = (row.getAttribute("data-itinerary-item-id") || "").trim();
+      if (!itemId) return;
+      const viewId = `itinerary-view-${itemId}`;
+      if (!freshDoc.getElementById(viewId)) return;
+      hasAnyFreshMatch = true;
+      syncItineraryRow(row, freshDoc, viewId);
+    });
+    if (!hasAnyFreshMatch) return false;
+    await renderItineraryConnectors(document);
+    window.remiRefreshTripMapFromItineraryDOM?.();
+    window.remiWireInlineEditOpenButtonsIn?.(
+      document.querySelector("[data-itinerary-search-root]") || document
+    );
+    window.remiWireDateFieldsIn?.(document.querySelector("[data-itinerary-search-root]") || document);
+    window.remiWireDateTimeFieldsIn?.(document.querySelector("[data-itinerary-search-root]") || document);
+    window.remiWireTimeFieldsIn?.(document.querySelector("[data-itinerary-search-root]") || document);
+    return true;
+  };
+
   // Return any sibling itinerary forms that share the same entity (flight/vehicle/accommodation).
   const getSiblingItineraryForms = (form) => {
     const action = form.getAttribute("action") || "";
@@ -2253,6 +3829,7 @@ window.addEventListener("load", () => {
     if (currentView) {
       currentView.innerHTML = freshView.innerHTML;
       currentView.className = freshView.className;
+      rewireInjectedActionUI(currentView);
     }
 
     return repositionInDayGroup(
@@ -2308,20 +3885,25 @@ window.addEventListener("load", () => {
 
   /** Shared styled confirm: `form[data-app-confirm]` + data-confirm-title, optional body/ok/icon/variant. Runs in capture phase before `data-ajax-submit`. */
   let pendingConfirmSubmitForm = null;
+  let pendingConfirmCallback = null;
   const confirmDialogEl = document.getElementById("dialog-confirm-action");
-  if (confirmDialogEl instanceof HTMLDialogElement) {
+  const confirmDialogUsable =
+    confirmDialogEl &&
+    typeof confirmDialogEl.showModal === "function" &&
+    typeof confirmDialogEl.close === "function";
+  if (confirmDialogUsable) {
     const confirmTitleEl = document.getElementById("dialog-confirm-action-title");
     const confirmBodyEl = document.getElementById("dialog-confirm-action-desc");
     const confirmIconEl = document.getElementById("dialog-confirm-action-icon");
     const confirmOkBtn = document.getElementById("dialog-confirm-action-ok");
     const confirmCancelBtn = confirmDialogEl.querySelector("[data-confirm-cancel]");
 
-    const populateConfirmFromForm = (form) => {
-      const title = form.getAttribute("data-confirm-title") || "Confirm?";
-      const body = (form.getAttribute("data-confirm-body") || "").trim();
-      const ok = form.getAttribute("data-confirm-ok") || "Confirm";
-      const icon = form.getAttribute("data-confirm-icon") || "help_outline";
-      const variant = (form.getAttribute("data-confirm-variant") || "danger").toLowerCase();
+    const populateConfirmDialog = (opts) => {
+      const title = opts.title || "Confirm?";
+      const body = (opts.body || "").trim();
+      const ok = opts.ok || "Confirm";
+      const icon = opts.icon || "help_outline";
+      const variant = (opts.variant || "danger").toLowerCase();
       if (confirmTitleEl) {
         confirmTitleEl.textContent = title;
       }
@@ -2346,8 +3928,19 @@ window.addEventListener("load", () => {
       }
     };
 
+    const populateConfirmFromForm = (form) => {
+      populateConfirmDialog({
+        title: form.getAttribute("data-confirm-title") || "Confirm?",
+        body: (form.getAttribute("data-confirm-body") || "").trim(),
+        ok: form.getAttribute("data-confirm-ok") || "Confirm",
+        icon: form.getAttribute("data-confirm-icon") || "help_outline",
+        variant: (form.getAttribute("data-confirm-variant") || "danger").toLowerCase()
+      });
+    };
+
     const closeConfirmClearPending = () => {
       pendingConfirmSubmitForm = null;
+      pendingConfirmCallback = null;
       try {
         confirmDialogEl.close();
       } catch (e) {
@@ -2356,12 +3949,18 @@ window.addEventListener("load", () => {
     };
 
     confirmOkBtn?.addEventListener("click", () => {
+      const cb = pendingConfirmCallback;
       const f = pendingConfirmSubmitForm;
+      pendingConfirmCallback = null;
       pendingConfirmSubmitForm = null;
       try {
         confirmDialogEl.close();
       } catch (e) {
         /* ignore */
+      }
+      if (cb) {
+        cb();
+        return;
       }
       if (f) {
         f.dataset.confirmPass = "1";
@@ -2405,6 +4004,20 @@ window.addEventListener("load", () => {
     };
     document.querySelectorAll("form[data-app-confirm]").forEach((form) => wireAppConfirmOnForm(form));
     window.remiWireAppConfirmOnForm = wireAppConfirmOnForm;
+
+    window.remiOpenAppConfirm = (opts) => {
+      if (!opts || typeof opts.onConfirm !== "function") return;
+      pendingConfirmSubmitForm = null;
+      pendingConfirmCallback = opts.onConfirm;
+      populateConfirmDialog({
+        title: opts.title || "Confirm?",
+        body: (opts.body || "").trim(),
+        ok: opts.okText || opts.ok || "Confirm",
+        icon: opts.icon || "help_outline",
+        variant: (opts.variant || "danger").toLowerCase()
+      });
+      confirmDialogEl.showModal();
+    };
   }
 
   const handleAjaxFormSubmit = async (event) => {
@@ -2415,6 +4028,22 @@ window.addEventListener("load", () => {
       const method = (form.getAttribute("method") || "post").toUpperCase();
       const formData = new FormData(form);
       mergeFormAssociatedControls(form, formData);
+      const fileInputs = form.querySelectorAll("input[type='file']");
+      if (fileInputs.length && typeof window.remiIsBlockedUploadFilename === "function") {
+        for (let j = 0; j < fileInputs.length; j++) {
+          const inp = fileInputs[j];
+          if (!(inp instanceof HTMLInputElement) || !inp.files) continue;
+          for (let i = 0; i < inp.files.length; i++) {
+            if (window.remiIsBlockedUploadFilename(inp.files[i].name)) {
+              showToast(
+                window.remiBlockedUploadFilenameMessage ||
+                  "This file type is not allowed — executables and scripts cannot be uploaded."
+              );
+              return;
+            }
+          }
+        }
+      }
       if (
         form.classList.contains("tab-settlement-form") ||
         form.classList.contains("tab-settlement-edit-form")
@@ -2508,6 +4137,9 @@ window.addEventListener("load", () => {
           }
         } else {
           await refreshInlineViewFromServer(form);
+          if (/\/trips\/[^/]+\/(accommodation|vehicle-rental|flights)\/[^/]+\/update$/i.test(form.action || "")) {
+            await syncAllRenderedItineraryRows();
+          }
           if (form.id && form.id.includes("-edit-")) {
             closeInlineEdit(form.id);
           }
@@ -2555,6 +4187,15 @@ window.addEventListener("load", () => {
         if (document.querySelector(".trip-details-page .budget-tile")) {
           await refreshBudgetTilesFromPage();
         }
+        if (form.hasAttribute("data-ajax-reload-on-success")) {
+          try {
+            sessionStorage.setItem(TOAST_KEY, inferToastMessage(form));
+          } catch (e) {
+            /* ignore */
+          }
+          window.location.reload();
+          return;
+        }
         showToast(inferToastMessage(form));
       } catch (error) {
         showToast(error?.message || "Unable to save right now.");
@@ -2600,8 +4241,12 @@ window.addEventListener("load", () => {
         delete f.dataset.remiAjaxWired;
         window.remiBindAjaxSubmitForm?.(f);
       });
+      window.remiEnsureCsrfOnPostForms?.(destTbody || document);
       window.setupTabSplitRootsIn?.(destTbody || document);
       window.rewireTabInlineEditOpenButtons?.();
+      window.remiWireDateFieldsIn?.(destTbody || document);
+      window.remiWireDateTimeFieldsIn?.(destTbody || document);
+      window.remiWireTimeFieldsIn?.(destTbody || document);
       window.remiSyncTabExpenseInstantFilter?.();
       btn.textContent = "All transactions shown";
       btn.classList.add("tab-exp-view-all-disabled");
@@ -2633,7 +4278,11 @@ window.addEventListener("load", () => {
         delete f.dataset.remiAjaxWired;
         window.remiBindAjaxSubmitForm?.(f);
       });
+      window.remiEnsureCsrfOnPostForms?.(ul);
       window.rewireTabInlineEditOpenButtons?.();
+      window.remiWireDateFieldsIn?.(ul);
+      window.remiWireDateTimeFieldsIn?.(ul);
+      window.remiWireTimeFieldsIn?.(ul);
       btn.textContent = "All settlements shown";
       btn.classList.add("tab-exp-view-all-disabled");
     } catch {
@@ -2654,6 +4303,9 @@ window.addEventListener("load", () => {
       window.remiBindAjaxSubmitForm?.(f);
     });
     window.remiWireInlineEditOpenButtonsIn?.(target);
+    window.remiWireDateFieldsIn?.(target);
+    window.remiWireDateTimeFieldsIn?.(target);
+    window.remiWireTimeFieldsIn?.(target);
   });
 
   const formOwnerForField = (input) => {
@@ -2961,6 +4613,7 @@ window.addEventListener("load", () => {
     /* no trip map */
   } else {
   const gMapKey = (mapEl.getAttribute("data-google-maps-key") || "").trim();
+  const useGoogleMaps = /^AIza[0-9A-Za-z_-]{20,}$/.test(gMapKey);
   const defaultLat = parseFloat(mapEl.getAttribute("data-map-lat") || "35.6762");
   const defaultLng = parseFloat(mapEl.getAttribute("data-map-lng") || "139.6503");
   const defaultZoom = parseInt(mapEl.getAttribute("data-map-zoom") || "6", 10);
@@ -3160,7 +4813,279 @@ window.addEventListener("load", () => {
     applySelection(selectedDays);
   }
 
-  if (gMapKey) {
+  let mapNoticeEl = null;
+  let mapProviderFallbackActive = false;
+  const setTripMapNotice = (message, mode = "info") => {
+    if (!mapEl) return;
+    if (!mapNoticeEl) {
+      mapNoticeEl = document.createElement("p");
+      mapNoticeEl.className = "trip-map-runtime-notice hidden";
+      mapEl.insertAdjacentElement("afterend", mapNoticeEl);
+    }
+    const txt = String(message || "").trim();
+    if (!txt) {
+      mapNoticeEl.classList.add("hidden");
+      mapNoticeEl.textContent = "";
+      mapNoticeEl.classList.remove("error", "success");
+      return;
+    }
+    mapNoticeEl.classList.remove("hidden");
+    mapNoticeEl.classList.remove("error", "success");
+    if (mode === "error" || mode === "success") {
+      mapNoticeEl.classList.add(mode);
+    }
+    mapNoticeEl.textContent = txt;
+  };
+
+  const renderOSMEmbedFallback = (message, mode = "info") => {
+    if (!mapEl || mapProviderFallbackActive) return;
+    mapProviderFallbackActive = true;
+    const centerLat = Number.isFinite(startLat) ? startLat : 35.6762;
+    const centerLng = Number.isFinite(startLng) ? startLng : 139.6503;
+    const spanLng = 0.18;
+    const spanLat = 0.12;
+    const west = centerLng - spanLng;
+    const east = centerLng + spanLng;
+    const south = centerLat - spanLat;
+    const north = centerLat + spanLat;
+    const src =
+      "https://www.openstreetmap.org/export/embed.html?bbox=" +
+      `${encodeURIComponent(west)},${encodeURIComponent(south)},${encodeURIComponent(east)},${encodeURIComponent(north)}` +
+      `&layer=mapnik&marker=${encodeURIComponent(centerLat)},${encodeURIComponent(centerLng)}`;
+    mapEl.innerHTML = `<iframe class="trip-map-osm-embed" src="${src}" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" title="Trip map fallback"></iframe>`;
+    setTripMapNotice(message, mode);
+  };
+
+  let leafletLoadPromise = null;
+  const ensureLeafletLoaded = async () => {
+    if (typeof L !== "undefined") return true;
+    if (leafletLoadPromise) return leafletLoadPromise;
+    leafletLoadPromise = new Promise((resolve) => {
+      const finish = (ok) => resolve(Boolean(ok && typeof L !== "undefined"));
+      const candidates = [
+        {
+          css: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+          js: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        },
+        {
+          css: "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css",
+          js: "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
+        }
+      ];
+      let idx = 0;
+      const tryNext = () => {
+        if (typeof L !== "undefined") {
+          finish(true);
+          return;
+        }
+        if (idx >= candidates.length) {
+          finish(false);
+          return;
+        }
+        const c = candidates[idx++];
+        if (!document.querySelector(`link[href="${c.css}"]`)) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = c.css;
+          document.head.appendChild(link);
+        }
+        const existing = document.querySelector(`script[src="${c.js}"]`);
+        if (existing) {
+          window.setTimeout(() => {
+            if (typeof L !== "undefined") finish(true);
+            else tryNext();
+          }, 1400);
+          return;
+        }
+        const script = document.createElement("script");
+        script.async = true;
+        script.src = c.js;
+        script.onload = () => {
+          if (typeof L !== "undefined") finish(true);
+          else tryNext();
+        };
+        script.onerror = () => {
+          tryNext();
+        };
+        document.head.appendChild(script);
+      };
+      tryNext();
+      window.setTimeout(() => {
+        if (typeof L !== "undefined") finish(true);
+        else finish(false);
+      }, 8000);
+    });
+    return leafletLoadPromise;
+  };
+
+  const initLeafletTripMap = () => {
+    if (typeof L === "undefined") return false;
+    const map = L.map("map").setView([startLat, startLng], startZoom);
+    const lightLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    });
+    const darkLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+    });
+    /* Keep both basemaps mounted; flip opacity + z-index so theme changes are instant (no blank gap while swapping layers). */
+    lightLayer.addTo(map);
+    darkLayer.addTo(map);
+    const setMapTheme = (dark) => {
+      if (dark) {
+        lightLayer.setOpacity(0);
+        darkLayer.setOpacity(1);
+        lightLayer.setZIndex(100);
+        darkLayer.setZIndex(200);
+      } else {
+        darkLayer.setOpacity(0);
+        lightLayer.setOpacity(1);
+        darkLayer.setZIndex(100);
+        lightLayer.setZIndex(200);
+      }
+      map.invalidateSize(false);
+    };
+    setMapTheme(document.documentElement.classList.contains("theme-dark"));
+    document.addEventListener("remi:themechange", (event) => {
+      const dark = Boolean(event?.detail?.dark);
+      setMapTheme(dark);
+    });
+
+    const markersByDay = new Map();
+    const leafletMarkerByItemId = new Map();
+    uniqueDays.forEach((d) => markersByDay.set(d, []));
+
+    points.forEach((p) => {
+      const day = Math.max(1, p.day);
+      const ring = ringForDay(day);
+      const glyph = kindGlyph[p.kind] || kindGlyph.stop;
+      const icon = L.divIcon({
+        className: "remi-map-marker-wrap",
+        html: `<div class="remi-map-marker" style="--remi-ring:${ring}"><span class="material-symbols-outlined" aria-hidden="true">${glyph}</span></div>`,
+        iconSize: [34, 34],
+        iconAnchor: [17, 34],
+        popupAnchor: [0, -32]
+      });
+      const marker = L.marker([p.lat, p.lng], { icon });
+      marker.bindPopup(
+        `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
+      );
+      if (!markersByDay.has(day)) markersByDay.set(day, []);
+      markersByDay.get(day).push(marker);
+      if (p.itemId) {
+        leafletMarkerByItemId.set(p.itemId, marker);
+      }
+    });
+
+    const applyLeafletDaySelection = (selectedDays) => {
+      const vis = [];
+      selectedDays.forEach((d) => {
+        (markersByDay.get(d) || []).forEach((m) => {
+          vis.push(m);
+          if (!map.hasLayer(m)) m.addTo(map);
+        });
+      });
+      markersByDay.forEach((arr, d) => {
+        if (selectedDays.has(d)) return;
+        arr.forEach((m) => {
+          if (map.hasLayer(m)) map.removeLayer(m);
+        });
+      });
+      if (vis.length === 0) {
+        map.setView([startLat, startLng], startZoom);
+        return;
+      }
+      if (vis.length === 1) {
+        map.setView(vis[0].getLatLng(), Math.max(startZoom, 12));
+        return;
+      }
+      const group = L.featureGroup(vis);
+      map.fitBounds(group.getBounds(), { padding: [24, 24], maxZoom: 16 });
+    };
+
+    const refreshLeafletTripMapFromDOM = () => {
+      if (!map) return;
+      const fresh = parseTripMapPoints();
+      const seen = new Set();
+      fresh.forEach((p) => {
+        if (!p.itemId) return;
+        seen.add(p.itemId);
+        const day = Math.max(1, p.day);
+        const ring = ringForDay(day);
+        const glyph = kindGlyph[p.kind] || kindGlyph.stop;
+        const icon = L.divIcon({
+          className: "remi-map-marker-wrap",
+          html: `<div class="remi-map-marker" style="--remi-ring:${ring}"><span class="material-symbols-outlined" aria-hidden="true">${glyph}</span></div>`,
+          iconSize: [34, 34],
+          iconAnchor: [17, 34],
+          popupAnchor: [0, -32]
+        });
+        let m = leafletMarkerByItemId.get(p.itemId);
+        if (!m) {
+          m = L.marker([p.lat, p.lng], { icon });
+          m.bindPopup(
+            `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
+          );
+          leafletMarkerByItemId.set(p.itemId, m);
+        } else {
+          m.setLatLng([p.lat, p.lng]);
+          m.setIcon(icon);
+          m.setPopupContent(
+            `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
+          );
+        }
+      });
+      leafletMarkerByItemId.forEach((m, id) => {
+        if (seen.has(id)) return;
+        if (map.hasLayer(m)) map.removeLayer(m);
+        leafletMarkerByItemId.delete(id);
+      });
+      markersByDay.clear();
+      const dayNums = new Set(uniqueDays);
+      fresh.forEach((fp) => dayNums.add(Math.max(1, fp.day)));
+      dayNums.forEach((d) => markersByDay.set(d, []));
+      leafletMarkerByItemId.forEach((m, id) => {
+        const pt = fresh.find((x) => x.itemId === id);
+        const d = pt ? Math.max(1, pt.day) : 1;
+        markersByDay.get(d).push(m);
+      });
+      applyLeafletDaySelection(readTripMapLegendSelectedDays(uniqueDays));
+      map.invalidateSize(false);
+    };
+
+    window.remiRefreshTripMapFromItineraryDOM = refreshLeafletTripMapFromDOM;
+    setupTripMapDayLegend(mapEl, uniqueDays, ringForDay, applyLeafletDaySelection);
+    setTripMapNotice("");
+    window.setTimeout(() => {
+      if (mapProviderFallbackActive) return;
+      const pane = mapEl.querySelector(".leaflet-pane");
+      if (!pane) {
+        renderOSMEmbedFallback(
+          "Leaflet map assets failed to initialize. Showing OpenStreetMap fallback.",
+          "error"
+        );
+        return;
+      }
+      const panePos = window.getComputedStyle(pane).position;
+      if (panePos !== "absolute") {
+        renderOSMEmbedFallback(
+          "Leaflet styles are unavailable. Showing OpenStreetMap fallback.",
+          "error"
+        );
+      }
+    }, 1200);
+    return true;
+  };
+
+  if (gMapKey && !useGoogleMaps) {
+    setTripMapNotice(
+      "Google Maps API key is set but does not look like a valid browser key; using OpenStreetMap (Leaflet).",
+      "info"
+    );
+  }
+
+  if (useGoogleMaps) {
     /* Dark basemap via styled maps. Google’s colorScheme only applies at Map construction;
        setOptions({ colorScheme }) after create is ignored (Edge/Chrome), so theme toggles must use styles. */
     const remiGmapDarkStyles = [
@@ -3376,11 +5301,39 @@ window.addEventListener("load", () => {
       setupTripMapDayLegend(mapEl, uniqueDays, ringForDay, applyGoogleDaySelection);
       syncGoogleTripMapTheme();
     };
+    let googleInitDone = false;
+    let fallbackTried = false;
+    const fallbackToLeaflet = async (reason) => {
+      if (fallbackTried) return;
+      fallbackTried = true;
+      if (reason) {
+        setTripMapNotice("Google map unavailable. Showing OpenStreetMap fallback.");
+      }
+      if (initLeafletTripMap()) return;
+      const loaded = await ensureLeafletLoaded();
+      if (loaded && initLeafletTripMap()) return;
+      renderOSMEmbedFallback(
+        "Map libraries could not load. Showing basic OpenStreetMap fallback.",
+        "error"
+      );
+    };
+
     if (window.google && google.maps) {
-      initGoogleTripMap();
+      try {
+        initGoogleTripMap();
+        googleInitDone = true;
+      } catch (e) {
+        fallbackToLeaflet("google-init-error");
+      }
     } else {
       window.remiGoogleTripMapInit = () => {
-        initGoogleTripMap();
+        if (fallbackTried) return;
+        googleInitDone = true;
+        try {
+          initGoogleTripMap();
+        } catch (e) {
+          fallbackToLeaflet("google-init-error");
+        }
         try {
           delete window.remiGoogleTripMapInit;
         } catch (e) {
@@ -3389,149 +5342,29 @@ window.addEventListener("load", () => {
       };
       const gs = document.createElement("script");
       gs.async = true;
+      gs.onerror = () => {
+        fallbackToLeaflet("google-script-error");
+      };
       gs.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
         gMapKey
       )}&callback=remiGoogleTripMapInit&v=weekly`;
       document.head.appendChild(gs);
+      window.setTimeout(() => {
+        if (!googleInitDone) {
+          fallbackToLeaflet("google-timeout");
+        }
+      }, 9000);
     }
-  } else if (typeof L !== "undefined") {
-  const map = L.map("map").setView([startLat, startLng], startZoom);
-  const lightLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
-  });
-  const darkLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
-  });
-  /* Keep both basemaps mounted; flip opacity + z-index so theme changes are instant (no blank gap while swapping layers). */
-  lightLayer.addTo(map);
-  darkLayer.addTo(map);
-  const setMapTheme = (dark) => {
-    if (dark) {
-      lightLayer.setOpacity(0);
-      darkLayer.setOpacity(1);
-      lightLayer.setZIndex(100);
-      darkLayer.setZIndex(200);
-    } else {
-      darkLayer.setOpacity(0);
-      lightLayer.setOpacity(1);
-      darkLayer.setZIndex(100);
-      lightLayer.setZIndex(200);
-    }
-    map.invalidateSize(false);
-  };
-  setMapTheme(document.documentElement.classList.contains("theme-dark"));
-  document.addEventListener("remi:themechange", (event) => {
-    const dark = Boolean(event?.detail?.dark);
-    setMapTheme(dark);
-  });
-
-  const markersByDay = new Map();
-  const leafletMarkerByItemId = new Map();
-  uniqueDays.forEach((d) => markersByDay.set(d, []));
-
-  points.forEach((p) => {
-    const day = Math.max(1, p.day);
-    const ring = ringForDay(day);
-    const glyph = kindGlyph[p.kind] || kindGlyph.stop;
-    const icon = L.divIcon({
-      className: "remi-map-marker-wrap",
-      html: `<div class="remi-map-marker" style="--remi-ring:${ring}"><span class="material-symbols-outlined" aria-hidden="true">${glyph}</span></div>`,
-      iconSize: [34, 34],
-      iconAnchor: [17, 34],
-      popupAnchor: [0, -32]
-    });
-    const marker = L.marker([p.lat, p.lng], { icon });
-    marker.bindPopup(
-      `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
-    );
-    if (!markersByDay.has(day)) markersByDay.set(day, []);
-    markersByDay.get(day).push(marker);
-    if (p.itemId) {
-      leafletMarkerByItemId.set(p.itemId, marker);
-    }
-  });
-
-  const applyLeafletDaySelection = (selectedDays) => {
-    const vis = [];
-    selectedDays.forEach((d) => {
-      (markersByDay.get(d) || []).forEach((m) => {
-        vis.push(m);
-        if (!map.hasLayer(m)) m.addTo(map);
-      });
-    });
-    markersByDay.forEach((arr, d) => {
-      if (selectedDays.has(d)) return;
-      arr.forEach((m) => {
-        if (map.hasLayer(m)) map.removeLayer(m);
-      });
-    });
-    if (vis.length === 0) {
-      map.setView([startLat, startLng], startZoom);
-      return;
-    }
-    if (vis.length === 1) {
-      map.setView(vis[0].getLatLng(), Math.max(startZoom, 12));
-      return;
-    }
-    const group = L.featureGroup(vis);
-    map.fitBounds(group.getBounds(), { padding: [24, 24], maxZoom: 16 });
-  };
-
-  const refreshLeafletTripMapFromDOM = () => {
-    if (!map) return;
-    const fresh = parseTripMapPoints();
-    const seen = new Set();
-    fresh.forEach((p) => {
-      if (!p.itemId) return;
-      seen.add(p.itemId);
-      const day = Math.max(1, p.day);
-      const ring = ringForDay(day);
-      const glyph = kindGlyph[p.kind] || kindGlyph.stop;
-      const icon = L.divIcon({
-        className: "remi-map-marker-wrap",
-        html: `<div class="remi-map-marker" style="--remi-ring:${ring}"><span class="material-symbols-outlined" aria-hidden="true">${glyph}</span></div>`,
-        iconSize: [34, 34],
-        iconAnchor: [17, 34],
-        popupAnchor: [0, -32]
-      });
-      let m = leafletMarkerByItemId.get(p.itemId);
-      if (!m) {
-        m = L.marker([p.lat, p.lng], { icon });
-        m.bindPopup(
-          `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
+  } else {
+    if (!initLeafletTripMap()) {
+      ensureLeafletLoaded().then((loaded) => {
+        if (loaded && initLeafletTripMap()) return;
+        renderOSMEmbedFallback(
+          "Map libraries could not load. Showing basic OpenStreetMap fallback.",
+          "error"
         );
-        leafletMarkerByItemId.set(p.itemId, m);
-      } else {
-        m.setLatLng([p.lat, p.lng]);
-        m.setIcon(icon);
-        m.setPopupContent(
-          `<b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${day}</span><br>${escapeHtmlMap(p.location)}`
-        );
-      }
-    });
-    leafletMarkerByItemId.forEach((m, id) => {
-      if (seen.has(id)) return;
-      if (map.hasLayer(m)) map.removeLayer(m);
-      leafletMarkerByItemId.delete(id);
-    });
-    markersByDay.clear();
-    const dayNums = new Set(uniqueDays);
-    fresh.forEach((fp) => dayNums.add(Math.max(1, fp.day)));
-    dayNums.forEach((d) => markersByDay.set(d, []));
-    leafletMarkerByItemId.forEach((m, id) => {
-      const pt = fresh.find((x) => x.itemId === id);
-      const d = pt ? Math.max(1, pt.day) : 1;
-      markersByDay.get(d).push(m);
-    });
-    applyLeafletDaySelection(readTripMapLegendSelectedDays(uniqueDays));
-    map.invalidateSize(false);
-  };
-
-  window.remiRefreshTripMapFromItineraryDOM = refreshLeafletTripMapFromDOM;
-
-  setupTripMapDayLegend(mapEl, uniqueDays, ringForDay, applyLeafletDaySelection);
+      });
+    }
   }
   }
 
@@ -3539,8 +5372,17 @@ window.addEventListener("load", () => {
 
 (function () {
   const mq = window.matchMedia("(min-width: 681px)");
+  const mqTripDocDesktop = window.matchMedia("(min-width: 981px)");
   const applyExpenseActionsDropdownOpen = () => {
     document.querySelectorAll("main[data-long-press-sheet-root] details.trip-inline-actions-dropdown").forEach((el) => {
+      if (el.classList.contains("trip-documents-item-actions")) {
+        if (mqTripDocDesktop.matches) {
+          el.setAttribute("open", "");
+        } else {
+          el.removeAttribute("open");
+        }
+        return;
+      }
       if (mq.matches) {
         el.setAttribute("open", "");
       } else {
@@ -3552,6 +5394,7 @@ window.addEventListener("load", () => {
   const init = () => {
     applyExpenseActionsDropdownOpen();
     mq.addEventListener("change", applyExpenseActionsDropdownOpen);
+    mqTripDocDesktop.addEventListener("change", applyExpenseActionsDropdownOpen);
   };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, { once: true });
@@ -3565,7 +5408,7 @@ window.addEventListener("load", () => {
   const LONG_MS = 520;
   const MOVE_PX = 14;
   const ROW_SEL =
-    ".expense-item, .timeline-item, .reminder-checklist-item, .flight-card, .title-row, .budget-mobile-tx-item, .accommodation-card-wrap, .vehicle-rental-item";
+    ".expense-item, .timeline-item, .reminder-checklist-item, .flight-card, .title-row, .budget-mobile-tx-item, .accommodation-card-wrap, .vehicle-rental-item, .trip-documents-item";
 
   const sheet = document.getElementById("trip-long-press-sheet");
   const titleEl = document.getElementById("trip-long-press-sheet-title");
@@ -3590,7 +5433,7 @@ window.addEventListener("load", () => {
     if (!el || !root.contains(el)) {
       return true;
     }
-    if (el.closest("a, input, textarea, select, label")) {
+    if (el.closest("a, input, textarea, select, label") && !el.closest("a.trip-documents-file-link")) {
       return true;
     }
     if (el.closest(".check-row, .check-btn")) {
@@ -3639,6 +5482,13 @@ window.addEventListener("load", () => {
     }
     if (row.matches(".vehicle-rental-item")) {
       return row.querySelector(".vehicle-main-top h4")?.textContent?.trim() || "Vehicle Rental";
+    }
+    if (row.matches(".trip-documents-item")) {
+      return (
+        row.querySelector(".trip-documents-file-link")?.textContent?.trim() ||
+        row.querySelector(".trip-documents-item-titleline")?.textContent?.trim() ||
+        "Attachment"
+      );
     }
     return "Item";
   }
@@ -4302,6 +6152,23 @@ window.addEventListener("load", () => {
     mqMobile.addListener(syncByViewport);
   }
 })();
+
+const wireSiteSettingsGoogleMapsKeyForms = () => {
+  document.querySelectorAll("form[data-site-settings-map-form]").forEach((form) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    if (form.dataset.remiGmapsKeyWired === "1") return;
+    try {
+      initSiteSettingsGoogleMapsKeySection(form);
+      form.dataset.remiGmapsKeyWired = "1";
+    } catch (err) {
+      console.error("Google Maps key settings UI failed to initialize", err);
+    }
+  });
+};
+
+window.addEventListener("load", () => {
+  wireSiteSettingsGoogleMapsKeyForms();
+});
 
 (function initDashboardProfileMenu() {
   const root = document.querySelector("[data-dashboard-profile-menu-root]");
@@ -5598,5 +7465,207 @@ function initTabOverTimeChart() {
     if (amountInp instanceof HTMLInputElement) amountInp.value = amt;
     document.getElementById("record-settlement")?.scrollIntoView({ behavior: "smooth", block: "start" });
     payerSel.focus();
+  });
+})();
+
+(function initTripDocumentsPage() {
+  const root = document.querySelector("[data-trip-documents-root]");
+  if (!root) return;
+  const mqTripDocDesktop = window.matchMedia("(min-width: 981px)");
+  const searchInput = root.querySelector("[data-trip-doc-search]");
+  const categorySelect = root.querySelector("[data-trip-doc-category]");
+  const items = Array.from(root.querySelectorAll("[data-trip-doc-item]"));
+  const empty = root.querySelector("[data-trip-doc-empty]");
+  const norm = (v) => String(v || "").trim().toLowerCase();
+  const apply = () => {
+    const q = norm(searchInput?.value);
+    const cat = norm(categorySelect?.value);
+    let visible = 0;
+    items.forEach((item) => {
+      const hay = norm(item.getAttribute("data-doc-search"));
+      const itemCat = norm(item.getAttribute("data-doc-category"));
+      const match = (!q || hay.includes(q)) && (!cat || itemCat === cat);
+      item.classList.toggle("hidden", !match);
+      if (match) visible += 1;
+    });
+    if (empty) empty.classList.toggle("hidden", visible !== 0);
+  };
+  searchInput?.addEventListener("input", apply);
+  categorySelect?.addEventListener("change", apply);
+  apply();
+
+  const dropzone = root.querySelector("[data-trip-doc-dropzone]");
+  const input = root.querySelector("[data-trip-doc-file-input]");
+  const selectedList = root.querySelector("[data-trip-doc-selected-list]");
+
+  /** @type {File[]} */
+  let tripDocStagedFiles = [];
+
+  const tripDocFileKey = (f) => `${f.name}\0${f.size}\0${f.lastModified}`;
+
+  const syncTripDocUploadSubmitLabel = () => {
+    const btn = root.querySelector(".trip-documents-upload-submit");
+    if (!(btn instanceof HTMLButtonElement)) return;
+    const n = tripDocStagedFiles.length;
+    const label = n > 1 ? "Upload Documents" : "Upload Document";
+    btn.textContent = label;
+    btn.setAttribute("aria-label", label);
+  };
+
+  const syncTripDocStagedToInput = () => {
+    if (!(input instanceof HTMLInputElement)) return;
+    const dt = new DataTransfer();
+    tripDocStagedFiles.forEach((f) => dt.items.add(f));
+    input.files = dt.files;
+  };
+
+  const addTripDocFilesToStaged = (fileList) => {
+    if (!(input instanceof HTMLInputElement) || !fileList || fileList.length === 0) return;
+    const seen = new Set(tripDocStagedFiles.map(tripDocFileKey));
+    const isBlocked = window.remiIsBlockedUploadFilename;
+    const blockedMsg = window.remiBlockedUploadFilenameMessage;
+    for (let i = 0; i < fileList.length; i++) {
+      const f = fileList[i];
+      if (typeof isBlocked === "function" && isBlocked(f.name)) {
+        window.remiShowToast?.(
+          blockedMsg || "This file type is not allowed — executables and scripts cannot be uploaded."
+        );
+        continue;
+      }
+      const k = tripDocFileKey(f);
+      if (!seen.has(k)) {
+        seen.add(k);
+        tripDocStagedFiles.push(f);
+      }
+    }
+    syncTripDocStagedToInput();
+    refreshTripDocSelectedList();
+  };
+
+  const refreshTripDocSelectedList = () => {
+    syncTripDocUploadSubmitLabel();
+    if (!(selectedList instanceof HTMLElement) || !(input instanceof HTMLInputElement)) return;
+    selectedList.innerHTML = "";
+    if (tripDocStagedFiles.length === 0) {
+      selectedList.classList.add("hidden");
+      return;
+    }
+    selectedList.classList.remove("hidden");
+    tripDocStagedFiles.forEach((f, index) => {
+      const li = document.createElement("li");
+      li.className = "trip-documents-selected-files__row";
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "trip-documents-selected-files__name";
+      nameSpan.textContent = f.name;
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "trip-documents-selected-files__remove";
+      rm.setAttribute("data-trip-doc-remove-staged", String(index));
+      rm.setAttribute("aria-label", `Remove ${f.name} from upload queue`);
+      rm.setAttribute("title", "Remove file");
+      rm.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">close</span>';
+      li.append(nameSpan, rm);
+      selectedList.appendChild(li);
+    });
+  };
+
+  if (dropzone && input instanceof HTMLInputElement) {
+    input.addEventListener("change", () => {
+      if (input.files && input.files.length) {
+        addTripDocFilesToStaged(input.files);
+      }
+    });
+    const setHover = (v) => dropzone.classList.toggle("trip-documents-dropzone--hover", v);
+    ["dragenter", "dragover"].forEach((evt) =>
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        setHover(true);
+      })
+    );
+    ["dragleave", "drop"].forEach((evt) =>
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        setHover(false);
+      })
+    );
+    dropzone.addEventListener("drop", (e) => {
+      const files = e.dataTransfer?.files;
+      if (files && files.length) {
+        addTripDocFilesToStaged(files);
+      }
+    });
+    refreshTripDocSelectedList();
+  }
+
+  const closeRename = (li) => {
+    if (!(li instanceof HTMLElement)) return;
+    li.classList.remove("editing");
+    const form = li.querySelector("[data-trip-doc-rename-form]");
+    if (form) form.classList.add("hidden");
+    if (!mqTripDocDesktop.matches) {
+      const actions = li.querySelector("details.trip-documents-item-actions");
+      if (actions instanceof HTMLDetailsElement) actions.open = false;
+    }
+  };
+
+  root.addEventListener("click", (e) => {
+    const stagedRm = e.target.closest("[data-trip-doc-remove-staged]");
+    if (
+      stagedRm instanceof HTMLButtonElement &&
+      selectedList instanceof HTMLElement &&
+      selectedList.contains(stagedRm) &&
+      input instanceof HTMLInputElement
+    ) {
+      e.preventDefault();
+      const i = parseInt(stagedRm.getAttribute("data-trip-doc-remove-staged") || "", 10);
+      if (Number.isNaN(i) || i < 0 || i >= tripDocStagedFiles.length) return;
+      tripDocStagedFiles.splice(i, 1);
+      syncTripDocStagedToInput();
+      refreshTripDocSelectedList();
+      return;
+    }
+    const openUrlBtn = e.target.closest("[data-trip-doc-open-url]");
+    if (openUrlBtn && root.contains(openUrlBtn)) {
+      e.preventDefault();
+      const u = openUrlBtn.getAttribute("data-trip-doc-open-url");
+      if (u) {
+        window.open(u, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+    const openBtn = e.target.closest("[data-trip-doc-rename-toggle]");
+    if (openBtn && root.contains(openBtn)) {
+      e.preventDefault();
+      const li = openBtn.closest(".trip-documents-item");
+      if (!(li instanceof HTMLElement)) return;
+      root.querySelectorAll(".trip-documents-item.editing").forEach((other) => {
+        if (other !== li) closeRename(other);
+      });
+      li.classList.add("editing");
+      const form = li.querySelector("[data-trip-doc-rename-form]");
+      if (form) {
+        form.classList.remove("hidden");
+        const inp = form.querySelector('input[name="display_name"]');
+        if (inp instanceof HTMLInputElement) {
+          window.requestAnimationFrame(() => inp.focus());
+        }
+      }
+      return;
+    }
+    const cancelBtn = e.target.closest("[data-trip-doc-rename-cancel]");
+    if (cancelBtn && root.contains(cancelBtn)) {
+      e.preventDefault();
+      const li = cancelBtn.closest(".trip-documents-item");
+      closeRename(li);
+    }
+  });
+
+  root.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const li = e.target.closest(".trip-documents-item");
+    if (li && root.contains(li) && li.classList.contains("editing")) {
+      e.preventDefault();
+      closeRename(li);
+    }
   });
 })();

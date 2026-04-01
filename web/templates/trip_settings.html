@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=145">
+  <link rel="stylesheet" href="/static/app.css?v=174">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=130"></script>
+  <script defer src="/static/app.js?v=172"></script>
 </head>
 <body class="page-trip-settings">
   <main class="app-shell" aria-label="Trip settings" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}">
@@ -90,40 +90,46 @@
               <div class="form-grid trip-settings-form-grid remi-trip-widget-form">
                 <label class="full">Trip name<input type="text" name="name" value="{{.Details.Trip.Name}}" required></label>
                 <label class="full">Description<textarea name="description" rows="3" placeholder="Short trip summary">{{.Details.Trip.Description}}</textarea></label>
-                <label>Start date<input type="date" name="start_date" value="{{.Details.Trip.StartDate}}"></label>
-                <label>End date<input type="date" name="end_date" value="{{.Details.Trip.EndDate}}"></label>
+                <label>Start date{{template "remiDateField" (dict "name" "start_date" "value" .Details.Trip.StartDate "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings))}}</label>
+                <label>End date{{template "remiDateField" (dict "name" "end_date" "value" .Details.Trip.EndDate "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings))}}</label>
                 <label>Currency name<input type="text" name="currency_name" value="{{.CurrencyName}}" placeholder="e.g. PHP"></label>
                 <label>Currency symbol<input type="text" name="currency_symbol" value="{{.CurrencySymbol}}" placeholder="e.g. ₱"></label>
                 <div class="full trip-settings-budget-distance-row">
-                  <label>Trip Budget Limit<input type="number" step="0.01" min="0" name="budget_cap" value="{{printf "%.2f" .Details.Trip.BudgetCap}}" placeholder="0 = use computed budget" aria-describedby="hint-trip-budget-cap"></label>
+                  <label>Trip Budget<input type="number" step="0.01" min="0" name="budget_cap" value="{{printf "%.2f" .Details.Trip.BudgetCap}}" placeholder="0 = use computed budget" aria-describedby="hint-trip-budget-cap"></label>
                   <label>Distance unit for this trip
                     <select name="distance_unit" aria-describedby="hint-trip-dist">
-                      <option value="" {{if eq .Details.Trip.DistanceUnit ""}}selected{{end}}>Use my default (site settings)</option>
+                      <option value="" {{if eq .Details.Trip.DistanceUnit ""}}selected{{end}}>Use unit set in Site Settings</option>
                       <option value="km" {{if eq .Details.Trip.DistanceUnit "km"}}selected{{end}}>Kilometres</option>
                       <option value="mi" {{if eq .Details.Trip.DistanceUnit "mi"}}selected{{end}}>Miles</option>
                     </select>
                   </label>
                 </div>
-                <p id="hint-trip-budget-cap" class="settings-field-hint muted full">When set above zero, <strong>Budget Limit</strong> uses this cap; all expenses (group expenses, personal expenses, accommodation, vehicle rental, flights) count toward <strong>Actual Spending</strong>.</p>
+                <p id="hint-trip-budget-cap" class="settings-field-hint muted full">When set above zero, <strong>Trip Budget</strong> uses this cap; all expenses (group expenses, personal expenses, accommodation, vehicle rental, flights) count toward <strong>Actual Spending</strong>.</p>
                 <p id="hint-trip-dist" class="settings-field-hint muted full">Itinerary connectors and other distances on this trip follow this choice when set.</p>
                 <input type="hidden" name="cover_image_existing" value="{{.Details.Trip.CoverImage}}">
                 <label class="full">Trip cover image
-                  <select name="cover_image_mode" id="trip_cover_image_mode">
+                  <select name="cover_image_mode" id="trip_cover_image_mode" aria-describedby="hint-trip-cover">
                     <option value="clear" {{if eq .Details.Trip.CoverImage ""}}selected{{end}}>None</option>
+                    <option value="default" {{if eq .Details.Trip.CoverImage "default"}}selected{{end}}>Default photo (optimized)</option>
+                    <option value="pattern:dots" {{if eq .Details.Trip.CoverImage "pattern:dots"}}selected{{end}}>Muted pattern: dots</option>
+                    <option value="pattern:grid" {{if eq .Details.Trip.CoverImage "pattern:grid"}}selected{{end}}>Muted pattern: grid</option>
+                    <option value="pattern:noise" {{if eq .Details.Trip.CoverImage "pattern:noise"}}selected{{end}}>Muted pattern: noise</option>
+                    <option value="pattern:waves" {{if eq .Details.Trip.CoverImage "pattern:waves"}}selected{{end}}>Muted pattern: waves</option>
                     <option value="url" {{if or (hasPrefix .Details.Trip.CoverImage "https://") (hasPrefix .Details.Trip.CoverImage "http://")}}selected{{end}}>External URL</option>
                     <option value="upload" {{if hasPrefix .Details.Trip.CoverImage "/static/uploads/covers/"}}selected{{end}}>Uploaded image</option>
                   </select>
                 </label>
+                <p id="hint-trip-cover" class="settings-field-hint muted full">Applies only to this trip’s top hero on the trip page. Choose URL or upload to show your own image; patterns match the Site settings dashboard style.</p>
                 {{ $coverImg := .Details.Trip.CoverImage }}
                 {{ $coverIsURL := or (hasPrefix $coverImg "https://") (hasPrefix $coverImg "http://") }}
                 {{ $coverIsUpload := hasPrefix $coverImg "/static/uploads/covers/" }}
                 <div class="trip-cover-image-field full" data-trip-cover-field>
                   <div class="trip-cover-image-field__preview-wrap"{{if eq $coverImg ""}} hidden{{end}} data-trip-cover-preview-wrap>
-                    {{if $coverImg}}<img class="trip-cover-image-field__preview" src="{{$coverImg}}" alt="Trip cover preview">{{else}}<div class="trip-cover-image-field__preview trip-cover-image-field__preview--empty muted">No cover image</div>{{end}}
+                    {{if or $coverIsURL $coverIsUpload}}<img class="trip-cover-image-field__preview" src="{{$coverImg}}" alt="Trip cover preview">{{else if ne $coverImg ""}}<div class="trip-cover-image-field__preview trip-cover-image-field__preview--empty muted">Preset style — save to apply on the trip hero.</div>{{else}}<div class="trip-cover-image-field__preview trip-cover-image-field__preview--empty muted">No cover image</div>{{end}}
                   </div>
                   {{if not $coverIsURL}}
                   <label class="full" data-trip-cover-url-label hidden>Image URL (https)
-                    <input type="url" name="cover_image_url" value="{{$coverImg}}" placeholder="https://..." data-trip-cover-url-input>
+                    <input type="url" name="cover_image_url" value="{{if $coverIsURL}}{{$coverImg}}{{end}}" placeholder="https://..." data-trip-cover-url-input>
                   </label>
                   {{else}}
                   <label class="full" data-trip-cover-url-label>Image URL (https)
@@ -141,6 +147,18 @@
                     <input type="file" name="cover_image_upload" accept="image/jpeg,image/png,image/webp,image/gif" class="sr-only" data-trip-cover-file-input>
                   </label>
                   {{end}}
+                </div>
+                <div class="trip-settings-map-center-in-info" id="trip-map-center-settings">
+                  <p class="trip-settings-section-label" id="trip-settings-map-title">Trip map</p>
+                  <p class="muted trip-settings-section-hint trip-settings-map-center-lead">Center for <strong>Trip Map</strong> on the trip page. Search a place or clear the field to use the site default (Site settings → Default Map Center).</p>
+                  <label class="full">Map center (search places)
+                    <span class="hero-trip-name-field site-settings-default-place-field">
+                      <input type="text" name="home_map_place_label" value="{{.Details.Trip.HomeMapPlaceLabel}}" placeholder="Search places or leave empty for site default" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-describedby="hint-trip-map-center" data-trip-settings-map-name>
+                      <input type="hidden" name="home_map_latitude" value="{{if .Details.Trip.HasHomeMapCenter}}{{printf "%.6f" .Details.Trip.HomeMapLatitude}}{{end}}" data-trip-settings-map-lat>
+                      <input type="hidden" name="home_map_longitude" value="{{if .Details.Trip.HasHomeMapCenter}}{{printf "%.6f" .Details.Trip.HomeMapLongitude}}{{end}}" data-trip-settings-map-lng>
+                    </span>
+                  </label>
+                  <p id="hint-trip-map-center" class="settings-field-hint muted full">Uses <strong>OpenStreetMap</strong> unless Site settings has a valid Google Maps browser key.</p>
                 </div>
               </div>
             </div>
@@ -247,7 +265,7 @@
                   <li class="trip-layout-reorder-item trip-custom-link-reorder-item" draggable="true" data-reorder-key="{{.N}}">
                     <span class="trip-layout-reorder-handle material-symbols-outlined" aria-hidden="true">drag_indicator</span>
                     <div class="trip-custom-link-fields remi-trip-widget-form">
-                      <label>Link label<input type="text" name="custom_link_{{.N}}_label" value="{{.Label}}" placeholder="e.g. Hotel booking" maxlength="120" autocomplete="off"></label>
+                      <label>Link Text<input type="text" name="custom_link_{{.N}}_label" value="{{.Label}}" placeholder="e.g. Hotel booking" maxlength="120" autocomplete="off"></label>
                       <label>URL<input type="url" name="custom_link_{{.N}}_url" value="{{.URL}}" placeholder="https://…" autocomplete="off"></label>
                     </div>
                     <span class="trip-layout-reorder-actions">
@@ -301,11 +319,13 @@
                     </select>
                   </label>
                   <label class="full">Date display on this trip
-                    <select name="ui_date_format">
-                      <option value="dmy" {{if eq .Details.Trip.UIDateFormat "mdy"}}{{else}}selected{{end}}>DD-MM-YYYY (e.g. 31-12-2026)</option>
+                    <select name="ui_date_format" aria-describedby="hint-trip-ui-date">
+                      <option value="inherit" {{if or (eq .Details.Trip.UIDateFormat "inherit") (eq .Details.Trip.UIDateFormat "")}}selected{{end}}>Use unit set in Site Settings</option>
+                      <option value="dmy" {{if eq .Details.Trip.UIDateFormat "dmy"}}selected{{end}}>DD-MM-YYYY (e.g. 31-12-2026)</option>
                       <option value="mdy" {{if eq .Details.Trip.UIDateFormat "mdy"}}selected{{end}}>MM-DD-YYYY (e.g. 12-31-2026)</option>
                     </select>
                   </label>
+                  <p id="hint-trip-ui-date" class="settings-field-hint muted full">Overrides the default date order from Site settings for this trip only.</p>
                 </div>
               </div>
             </div>
@@ -456,7 +476,7 @@
             <div class="trip-settings-assist trip-settings-area-assist tsi-assist" aria-labelledby="trip-settings-assist-title">
               <div class="trip-settings-assist-copy">
                 <h3 class="trip-settings-assist-title" id="trip-settings-assist-title">Review &amp; Confirm</h3>
-                <p class="trip-settings-assist-text">Changes apply after you save. Hidden sections won’t appear in navigation until turned back on.</p>
+                <p class="trip-settings-assist-text">Changes will take effect once saved. Hidden sections will be removed from navigation.</p>
                 <a class="trip-settings-assist-link" href="/">Back to dashboard</a>
               </div>
               <span class="trip-settings-assist-mark" aria-hidden="true">?</span>

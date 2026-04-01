@@ -10,14 +10,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=141">
+  <link rel="stylesheet" href="/static/app.css?v=174">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script defer src="/static/app.js?v=130"></script>
+  <script defer src="/static/app.js?v=172"></script>
 </head>
 <body class="page-the-tab">
-  <main class="app-shell budget-page tab-page" aria-label="{{.Trip.GroupExpensesSectionTitle}}" data-long-press-sheet-root>
+  <main class="app-shell budget-page tab-page" aria-label="{{.Trip.GroupExpensesSectionTitle}}" data-long-press-sheet-root data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -56,7 +56,7 @@
       <header class="topbar budget-topbar">
         <div class="title-group">
           <h2>{{.Trip.GroupExpensesSectionTitle}}</h2>
-          <p>{{formatTripUIDate .Trip .Trip.StartDate}} – {{formatTripUIDate .Trip .Trip.EndDate}} · Shared costs and balances. Totals roll into {{.Trip.SpendsSectionTitle}}.</p>
+          <p>{{formatTripUIDate .Trip .Settings .Trip.StartDate}} – {{formatTripUIDate .Trip .Settings .Trip.EndDate}} · Shared costs and balances. Totals roll into {{.Trip.SpendsSectionTitle}}.</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           <div class="trip-actions-links">
@@ -314,7 +314,7 @@
               </label>
               <div class="tab-log-expense-row2">
                 <label class="tab-field-label tab-field-label--amount"><span class="tab-field-k">Amount</span>
-                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" name="amount" class="tab-field-input tab-field-input--amount" placeholder="0.00" required data-tab-amount-input></span>
+                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" class="tab-field-input tab-field-input--amount" placeholder="0.00" required data-tab-amount-input></span>
                 </label>
                 <label class="tab-field-label tab-field-label--category"><span class="tab-field-k">Category</span>
                   <select name="category" class="tab-field-input" required>
@@ -327,7 +327,7 @@
               </div>
               <div class="tab-log-expense-row2">
                 <label class="tab-field-label"><span class="tab-field-k">Date</span>
-                  <input type="date" name="spent_on" class="tab-field-input">
+                  {{template "remiDateField" (dict "name" "spent_on" "value" "" "mdy" (effectiveUIDateIsMDY .Trip .Settings) "input_class" "tab-field-input")}}
                 </label>
                 <label class="tab-field-label"><span class="tab-field-k">Payment method</span>
                   <select name="payment_method" class="tab-field-input" required>
@@ -388,7 +388,7 @@
               <label class="tab-field-label full"><span class="tab-field-k">Notes</span>
                 <input type="text" name="notes" class="tab-field-input" placeholder="Optional">
               </label>
-              <label class="tab-field-label full"><span class="tab-field-k">Attachment (optional)</span>
+              <label class="tab-field-label full"><span class="tab-field-k">Receipt</span>
                 <input type="file" name="tab_attachment" class="tab-field-input" accept=".pdf,image/*">
               </label>
               <button class="full btn tab-submit-btn" type="submit"><span class="tab-submit-label-desktop">Log Expense</span><span class="tab-submit-label-mobile">Add to {{.Trip.GroupExpensesSectionTitle}}</span></button>
@@ -432,7 +432,7 @@
               </div>
               <div class="tab-log-expense-row2">
                 <label class="tab-field-label tab-field-label--amount"><span class="tab-field-k">Amount</span>
-                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" name="amount" class="tab-field-input tab-field-input--amount" required placeholder="0.00"></span>
+                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" class="tab-field-input tab-field-input--amount" required placeholder="0.00"></span>
                 </label>
                 <label class="tab-field-label"><span class="tab-field-k">Method</span>
                   <select name="method" class="tab-field-input">
@@ -444,7 +444,7 @@
                 </label>
               </div>
               <label class="tab-field-label"><span class="tab-field-k">Date</span>
-                <input type="date" name="settled_on" class="tab-field-input">
+                {{template "remiDateField" (dict "name" "settled_on" "value" "" "mdy" (effectiveUIDateIsMDY .Trip .Settings) "input_class" "tab-field-input")}}
               </label>
               <label class="tab-field-label full"><span class="tab-field-k">Notes</span>
                 <input type="text" name="notes" class="tab-field-input" placeholder="Optional">

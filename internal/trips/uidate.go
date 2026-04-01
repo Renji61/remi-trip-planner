@@ -14,6 +14,30 @@ func NormalizeUIDateFormat(raw string) string {
 	return "dmy"
 }
 
+// NormalizeTripUIDateStorage normalizes a trip's stored ui_date_format column: dmy, mdy, or inherit (follow site default).
+func NormalizeTripUIDateStorage(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "inherit", "site", "":
+		return "inherit"
+	case "mdy":
+		return "mdy"
+	default:
+		return "dmy"
+	}
+}
+
+// EffectiveUIDateFormat resolves display order: trip "inherit" (or empty) uses app default; otherwise dmy/mdy.
+func EffectiveUIDateFormat(tripStored, appDefault string) string {
+	switch strings.ToLower(strings.TrimSpace(tripStored)) {
+	case "", "inherit", "site":
+		return NormalizeUIDateFormat(appDefault)
+	case "mdy":
+		return "mdy"
+	default:
+		return "dmy"
+	}
+}
+
 // UIDateIsMDY reports whether numeric dates should use MM-DD-YYYY order.
 func UIDateIsMDY(raw string) bool {
 	return NormalizeUIDateFormat(raw) == "mdy"

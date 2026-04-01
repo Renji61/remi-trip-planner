@@ -66,24 +66,24 @@ func normalizeMapsQuery(q string) string {
 	return strings.ToLower(strings.TrimSpace(q))
 }
 
-func (c *mapsLocationCache) geoKeyGoogle(tag mapsAPIKeyTag, q string) string {
-	return "g:" + string(tag) + ":" + normalizeMapsQuery(q)
+func (c *mapsLocationCache) geoKeyGoogle(tag mapsAPIKeyTag, lang, q string) string {
+	return "g:" + string(tag) + ":" + normalizeMapsQuery(lang) + ":" + normalizeMapsQuery(q)
 }
 
-func (c *mapsLocationCache) geoKeyNominatim(q string) string {
-	return "n:" + normalizeMapsQuery(q)
+func (c *mapsLocationCache) geoKeyNominatim(lang, q string) string {
+	return "n:" + normalizeMapsQuery(lang) + ":" + normalizeMapsQuery(q)
 }
 
-func (c *mapsLocationCache) suggestKeyGoogle(tag mapsAPIKeyTag, q string) string {
-	return "gs:" + string(tag) + ":" + normalizeMapsQuery(q)
+func (c *mapsLocationCache) suggestKeyGoogle(tag mapsAPIKeyTag, lang, q string) string {
+	return "gs:" + string(tag) + ":" + normalizeMapsQuery(lang) + ":" + normalizeMapsQuery(q)
 }
 
-func (c *mapsLocationCache) suggestKeyNominatim(q string) string {
-	return "ns:" + normalizeMapsQuery(q)
+func (c *mapsLocationCache) suggestKeyNominatim(lang, q string) string {
+	return "ns:" + normalizeMapsQuery(lang) + ":" + normalizeMapsQuery(q)
 }
 
-func (c *mapsLocationCache) placeKey(tag mapsAPIKeyTag, placeID string) string {
-	return "p:" + string(tag) + ":" + strings.TrimSpace(placeID)
+func (c *mapsLocationCache) placeKey(tag mapsAPIKeyTag, placeID, lang string) string {
+	return "p:" + string(tag) + ":" + strings.TrimSpace(placeID) + ":" + normalizeMapsQuery(lang)
 }
 
 func (c *mapsLocationCache) geoGet(key string) (lat, lng float64, hit bool, ok bool) {

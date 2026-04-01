@@ -20,20 +20,57 @@ type locationSuggestion struct {
 }
 
 // geocodeCoords resolves a free-text location to coordinates using Google Geocoding when
-// googleAPIKey is non-empty, otherwise Nominatim.
-func geocodeCoords(ctx context.Context, query, googleAPIKey string) (lat, lng float64) {
+// googleAPIKey is non-empty, otherwise Nominatim. lang is a BCP 47 tag (e.g. "en") for result language.
+func geocodeCoords(ctx context.Context, query, googleAPIKey, lang string) (lat, lng float64) {
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return 0, 0
 	}
-	if strings.TrimSpace(googleAPIKey) != "" {
-		return geocodeGoogle(ctx, q, strings.TrimSpace(googleAPIKey))
+	key := strings.TrimSpace(googleAPIKey)
+	lang = strings.TrimSpace(lang)
+	if lang == "" {
+		lang = "en"
 	}
-	return geocodeNominatim(ctx, q)
+	resolveOne := func(candidate string) (float64, float64) {
+		c := strings.TrimSpace(candidate)
+		if c == "" {
+			return 0, 0
+		}
+		if key != "" {
+			if lat, lng := geocodeGoogle(ctx, c, key, lang); lat != 0 || lng != 0 {
+				return lat, lng
+			}
+		}
+		return geocodeNominatim(ctx, c, lang)
+	}
+	if lat, lng := resolveOne(q); lat != 0 || lng != 0 {
+		return lat, lng
+	}
+	retry := normalizeGeocodeRetryQuery(q)
+	if retry != "" && retry != q {
+		return resolveOne(retry)
+	}
+	return 0, 0
 }
 
-func geocodeNominatim(ctx context.Context, query string) (lat, lng float64) {
-	cacheKey := globalMapsLocationCache.geoKeyNominatim(query)
+func normalizeGeocodeRetryQuery(query string) string {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return ""
+	}
+	// Normalize commonly pasted address strings before one retry.
+	q = strings.Join(strings.Fields(q), " ")
+	q = strings.ReplaceAll(q, ";", ",")
+	q = strings.ReplaceAll(q, "|", ",")
+	q = strings.TrimSpace(strings.TrimRight(q, ","))
+	return q
+}
+
+func geocodeNominatim(ctx context.Context, query, lang string) (lat, lng float64) {
+	if strings.TrimSpace(lang) == "" {
+		lang = "en"
+	}
+	cacheKey := globalMapsLocationCache.geoKeyNominatim(lang, query)
 	if la, ln, hit, ok := globalMapsLocationCache.geoGet(cacheKey); ok {
 		if hit {
 			return la, ln
@@ -49,6 +86,7 @@ func geocodeNominatim(ctx context.Context, query string) (lat, lng float64) {
 		return 0, 0
 	}
 	req.Header.Set("User-Agent", "REMI-Trip-Planner/1.0")
+	req.Header.Set("Accept-Language", lang)
 	client := &http.Client{Timeout: 8 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -76,9 +114,12 @@ func geocodeNominatim(ctx context.Context, query string) (lat, lng float64) {
 	return lat, lng
 }
 
-func geocodeGoogle(ctx context.Context, address, apiKey string) (lat, lng float64) {
+func geocodeGoogle(ctx context.Context, address, apiKey, lang string) (lat, lng float64) {
+	if strings.TrimSpace(lang) == "" {
+		lang = "en"
+	}
 	tag := mapsAPIKeyTagFrom(apiKey)
-	cacheKey := globalMapsLocationCache.geoKeyGoogle(tag, address)
+	cacheKey := globalMapsLocationCache.geoKeyGoogle(tag, lang, address)
 	if la, ln, hit, ok := globalMapsLocationCache.geoGet(cacheKey); ok {
 		if hit {
 			return la, ln
@@ -127,11 +168,14 @@ func geocodeGoogle(ctx context.Context, address, apiKey string) (lat, lng float6
 	return loc.Lat, loc.Lng
 }
 
-func nominatimSuggestions(ctx context.Context, query string, limit int) []locationSuggestion {
+func nominatimSuggestions(ctx context.Context, query string, limit int, lang string) []locationSuggestion {
 	if limit <= 0 {
 		limit = 5
 	}
-	sKey := globalMapsLocationCache.suggestKeyNominatim(query)
+	if strings.TrimSpace(lang) == "" {
+		lang = "en"
+	}
+	sKey := globalMapsLocationCache.suggestKeyNominatim(lang, query)
 	if cached, ok := globalMapsLocationCache.suggestGet(sKey); ok {
 		if len(cached) <= limit {
 			return cached
@@ -148,6 +192,7 @@ func nominatimSuggestions(ctx context.Context, query string, limit int) []locati
 		return nil
 	}
 	req.Header.Set("User-Agent", "REMI-Trip-Planner/1.0")
+	req.Header.Set("Accept-Language", lang)
 	client := &http.Client{Timeout: 8 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -169,9 +214,13 @@ func nominatimSuggestions(ctx context.Context, query string, limit int) []locati
 		lng, _ := strconv.ParseFloat(item.Lon, 64)
 		displayName := strings.TrimSpace(item.DisplayName)
 		name := strings.TrimSpace(item.Name)
-		shortName := name
-		if shortName == "" && displayName != "" {
+		// Prefer display_name (follows Accept-Language) over OSM's primary name (often endonym / local script).
+		shortName := ""
+		if displayName != "" {
 			shortName = strings.TrimSpace(strings.Split(displayName, ",")[0])
+		}
+		if shortName == "" {
+			shortName = name
 		}
 		if shortName == "" {
 			shortName = displayName
@@ -189,12 +238,15 @@ func nominatimSuggestions(ctx context.Context, query string, limit int) []locati
 	return out
 }
 
-func googlePlaceSuggestions(ctx context.Context, input, apiKey string, limit int) []locationSuggestion {
+func googlePlaceSuggestions(ctx context.Context, input, apiKey string, limit int, lang string) []locationSuggestion {
 	if limit <= 0 {
 		limit = 5
 	}
+	if strings.TrimSpace(lang) == "" {
+		lang = "en"
+	}
 	tag := mapsAPIKeyTagFrom(apiKey)
-	sKey := globalMapsLocationCache.suggestKeyGoogle(tag, input)
+	sKey := globalMapsLocationCache.suggestKeyGoogle(tag, lang, input)
 	if cached, ok := globalMapsLocationCache.suggestGet(sKey); ok {
 		if len(cached) <= limit {
 			return cached
@@ -241,7 +293,7 @@ func googlePlaceSuggestions(ctx context.Context, input, apiKey string, limit int
 		if strings.TrimSpace(p.PlaceID) == "" {
 			continue
 		}
-		lat, lng, display := googlePlaceDetail(ctx, p.PlaceID, apiKey, client)
+		lat, lng, display := googlePlaceDetail(ctx, p.PlaceID, apiKey, client, lang)
 		if display == "" {
 			display = p.Description
 		}
@@ -265,16 +317,20 @@ func googlePlaceSuggestions(ctx context.Context, input, apiKey string, limit int
 	return out
 }
 
-func googlePlaceDetail(ctx context.Context, placeID, apiKey string, client *http.Client) (lat, lng float64, formatted string) {
+func googlePlaceDetail(ctx context.Context, placeID, apiKey string, client *http.Client, lang string) (lat, lng float64, formatted string) {
+	if strings.TrimSpace(lang) == "" {
+		lang = "en"
+	}
 	tag := mapsAPIKeyTagFrom(apiKey)
-	pKey := globalMapsLocationCache.placeKey(tag, placeID)
+	pKey := globalMapsLocationCache.placeKey(tag, placeID, lang)
 	if la, ln, disp, ok := globalMapsLocationCache.placeGet(pKey); ok {
 		return la, ln, disp
 	}
 	u := fmt.Sprintf(
-		"https://maps.googleapis.com/maps/api/place/details/json?place_id=%s&fields=geometry%%2Flocation%%2Cformatted_address%%2Cname&key=%s",
+		"https://maps.googleapis.com/maps/api/place/details/json?place_id=%s&fields=geometry%%2Flocation%%2Cformatted_address%%2Cname&key=%s&language=%s",
 		url.QueryEscape(placeID),
 		url.QueryEscape(apiKey),
+		url.QueryEscape(lang),
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

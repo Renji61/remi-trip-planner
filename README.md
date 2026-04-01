@@ -75,6 +75,12 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 - Full **accommodation**, **vehicle rental**, and **flights** sections with forms, attachments/images/documents, and links to **itinerary stops** and **expenses** where designed.
 
+### Trip documents & uploads
+
+- **Trip Documents** at `/trips/{id}/documents`: upload general files, search and filter the full attachment list (including files from stays, rentals, flights, and group expenses), rename or delete general uploads, and jump to the source booking or expense where applicable.
+- **App settings:** **Max upload size per file (MB)** (default 5) applies to Trip Documents and attachment fields across trip forms.
+- **Docker:** Compose files mount a **`remi-uploads`** volume at `/app/web/static/uploads` so uploads persist across container rebuilds.
+
 ### Checklist
 
 - **Categorized** reminder items; mark done/undo; add from the trip page (including multi-item draft list).
@@ -191,7 +197,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.47.0` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.48.0` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 

@@ -50,7 +50,7 @@
                         {{range $.TabDepartedParticipants}}<option value="{{.ParticipantKey}}" {{if eq (tabSettlementParticipantKey $srow.PayeeUserID) .ParticipantKey}}selected{{end}}>{{.RowLabel}}{{if .IsGuestKey}} (guest){{end}} (Left trip)</option>{{end}}
                       </select>
                     </label>
-                    <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" $srow.Amount}}" required></label>
+                    <label>Amount<input type="number" step="0.01" min="0" name="amount" value="{{printf "%.2f" $srow.Amount}}" required></label>
                     <label>Method
                       <select name="method">
                         <option value="Cash" {{if or (eq $srow.Method "") (eq $srow.Method "Cash")}}selected{{end}}>Cash</option>
@@ -59,7 +59,7 @@
                         <option value="Other" {{if eq $srow.Method "Other"}}selected{{end}}>Other</option>
                       </select>
                     </label>
-                    <label>Date<input type="date" name="settled_on" value="{{$srow.SettledOn}}"></label>
+                    <label>Date{{template "remiDateField" (dict "name" "settled_on" "value" $srow.SettledOn "mdy" (effectiveUIDateIsMDY $.Trip $.Settings))}}</label>
                     <label class="full">Notes<input type="text" name="notes" value="{{$srow.Notes}}" placeholder="Optional"></label>
                     <div class="full expense-edit-actions">
                       <button type="submit">Save</button>

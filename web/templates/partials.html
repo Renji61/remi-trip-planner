@@ -34,3 +34,14 @@
     })();
   </script>
 {{end}}
+
+{{/* Sync-only controls for attachment card UI (app.js initAttachmentEditField); not shown to users. */}}
+{{define "remiRemoveAttachmentSelect"}}
+<select name="{{.}}" class="remi-remove-sync" hidden tabindex="-1" aria-hidden="true">
+  <option value="false" selected>keep</option>
+  <option value="true">remove</option>
+</select>
+{{end}}
+{{define "remiRemoveTabAttachmentCheckbox"}}
+<input type="checkbox" name="remove_tab_attachment" value="1" class="remi-remove-tab-sync" hidden tabindex="-1" aria-hidden="true">
+{{end}}

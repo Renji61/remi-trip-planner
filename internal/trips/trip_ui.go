@@ -1,6 +1,9 @@
 package trips
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // UITimeFormatIs24h reports whether trip time display should use 24-hour clock.
 func UITimeFormatIs24h(raw string) bool {
@@ -57,6 +60,11 @@ func (t Trip) SpendsDayDefaultOpen(index int) bool {
 	default:
 		return index == 0
 	}
+}
+
+// HasHomeMapCenter is true when this trip stores its own map center (non-zero lat or lng).
+func (t Trip) HasHomeMapCenter() bool {
+	return math.Abs(t.HomeMapLatitude) > 1e-9 || math.Abs(t.HomeMapLongitude) > 1e-9
 }
 
 // SectionEnabled reports whether a trip sub-area is shown and reachable.

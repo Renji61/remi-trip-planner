@@ -66,15 +66,16 @@
           <option value="Mobile Payment" {{if eq $curMethod "Mobile Payment"}}selected{{end}}>Mobile Payment</option>
         </select>
       </label>
-      <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" .Amount}}" required></label>
-      <label>Date<input type="date" name="spent_on" value="{{.SpentOn}}"></label>
+      <label>Amount<input type="number" step="0.01" min="0" name="amount" value="{{printf "%.2f" .Amount}}" required></label>
+      <label>Date{{template "remiDateField" (dict "name" "spent_on" "value" .SpentOn "mdy" (effectiveUIDateIsMDY $.Trip $.Settings))}}</label>
       <label>Notes<input type="text" name="notes" value="{{.NotesRaw}}"></label>
       {{if or .FromTab .ReceiptPath}}
+      <input type="hidden" name="current_tab_attachment_path" value="{{.ReceiptPath}}">
       {{if .ReceiptPath}}
       <p class="full muted">Current attachment: <a href="{{.ReceiptPath}}" target="_blank" rel="noopener">Open receipt</a></p>
-      <label class="full"><input type="checkbox" name="remove_tab_attachment" value="1"> Remove attachment</label>
       {{end}}
-      <label class="full">Replace attachment (optional)<input type="file" name="tab_attachment" accept=".pdf,image/*"></label>
+      {{template "remiRemoveTabAttachmentCheckbox"}}
+      <label class="full">Replace receipt (optional)<input type="file" name="tab_attachment" accept=".pdf,image/*"></label>
       {{end}}
       <div class="full expense-edit-actions">
         <button type="submit">Save</button>

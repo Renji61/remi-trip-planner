@@ -1,0 +1,9 @@
+{{define "remiTimeField"}}
+{{- $name := index . "name" -}}
+{{- $value := index . "value" -}}
+{{- $inputClass := index . "input_class" -}}
+<span class="remi-time-field" data-remi-time>
+  <input type="hidden" name="{{$name}}" value="{{$value}}" class="remi-time-iso" autocomplete="off">
+  <input type="text" class="remi-time-visible{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="hh:mm AM" spellcheck="false" readonly{{if index . "required"}} required{{end}} aria-label="Time">
+</span>
+{{end}}

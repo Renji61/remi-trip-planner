@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -50,6 +51,49 @@ func parseMapCoord(s string) (v float64, ok bool) {
 	return v, true
 }
 
+func findItineraryItemByID(items []trips.ItineraryItem, itemID string) (trips.ItineraryItem, bool) {
+	for _, it := range items {
+		if it.ID == itemID {
+			return it, true
+		}
+	}
+	return trips.ItineraryItem{}, false
+}
+
+func fallbackItineraryCoordsOnGeocodeMiss(lat, lng float64, existing trips.ItineraryItem) (float64, float64) {
+	if lat != 0 || lng != 0 {
+		return lat, lng
+	}
+	if existing.Latitude != 0 || existing.Longitude != 0 {
+		return existing.Latitude, existing.Longitude
+	}
+	return lat, lng
+}
+
+func resolveCreateCoordsOrError(
+	location string,
+	providedLat float64,
+	providedLng float64,
+	geocode func(string) (float64, float64),
+	fieldLabel string,
+) (lat float64, lng float64, err error) {
+	loc := strings.TrimSpace(location)
+	if loc == "" {
+		return 0, 0, fmt.Errorf("%s is required to place this entry on the trip map", fieldLabel)
+	}
+	if providedLat != 0 || providedLng != 0 {
+		return providedLat, providedLng, nil
+	}
+	if geocode == nil {
+		return 0, 0, fmt.Errorf("%s could not be located on the map. Try a more specific place", fieldLabel)
+	}
+	lat, lng = geocode(loc)
+	if lat == 0 && lng == 0 {
+		return 0, 0, fmt.Errorf("%s could not be located on the map. Try selecting a suggestion or adding city/country for a more specific place", fieldLabel)
+	}
+	return lat, lng, nil
+}
+
 // applyMapDefaultPlaceFromForm sets app map defaults from POST: short place label + hidden lat/lng, or Tokyo when empty; geocodes when label set but coords missing.
 func applyMapDefaultPlaceFromForm(ctx context.Context, googleMapsAPIKey string, app *trips.AppSettings, r *http.Request) {
 	placeLabel := strings.TrimSpace(r.FormValue("map_default_place_label"))
@@ -68,7 +112,7 @@ func applyMapDefaultPlaceFromForm(ctx context.Context, googleMapsAPIKey string, 
 		app.MapDefaultLongitude = lng
 		return
 	}
-	gLat, gLng := geocodeCoords(ctx, placeLabel, googleMapsAPIKey)
+	gLat, gLng := geocodeCoords(ctx, placeLabel, googleMapsAPIKey, "en")
 	if gLat == 0 && gLng == 0 {
 		app.MapDefaultPlaceLabel = trips.DefaultMapPlaceLabel
 		app.MapDefaultLatitude = trips.DefaultMapLatitude
@@ -104,6 +148,23 @@ type checklistCategoryGroup struct {
 	Items    []trips.ChecklistItem
 }
 
+type tripDocumentRow struct {
+	ID           string
+	Section      string
+	FileKind     string
+	FileTypeIcon string
+	TagAccent    bool
+	Category     string
+	ItemName     string
+	FileName     string
+	DisplayName  string
+	FileExt      string
+	FilePath     string
+	FileSize     int64
+	UploadedAt   time.Time
+	SearchText   string
+}
+
 // dashboardTripCard is a trip plus derived fields for the home dashboard grid.
 type dashboardTripCard struct {
 	trips.Trip
@@ -117,9 +178,19 @@ type dashboardTripCard struct {
 	// DashboardListLayout mirrors settings; required inside {{define "dashboardTripCard"}} where $ is the card, not the page root.
 	DashboardListLayout bool
 	Party               []trips.UserProfile
+	TripGuests          []trips.TripGuest
+	// PendingInvites matches trip sidebar order (party, then pending, then guests).
+	PendingInvites []trips.TripInvitePending
+	// DashboardCSRF is the current page CSRF token for small POST actions on cards (e.g. revoke invite).
+	DashboardCSRF       string
 	ActiveCollaborators int
 	ViewerIsOwner       bool
 	HasSharedIcon       bool
+	// CoverThumbURL is a real image URL for dashboard card thumbnails (empty for no thumb).
+	CoverThumbURL string
+	// SiteDateSettings carries merged app settings so {{define "dashboardTripCard"}} can resolve
+	// trip inherit vs site DefaultUIDateFormat ($ is the card, not the home page root).
+	SiteDateSettings trips.AppSettings
 }
 
 type dashboardBudgetRollup struct {
@@ -224,17 +295,26 @@ func NewRouter(deps Dependencies) http.Handler {
 	tmpl := template.Must(
 		template.New("").
 			Funcs(template.FuncMap{
-				"formatDateTime":       formatDateTimeDisplay,
-				"formatTripDateTime":   formatTripDateTime,
-				"formatTripClock":      formatTripClock,
-				"formatTripUIDate":     formatTripUIDate,
-				"formatTripDateRange":  formatTripDateRange,
-				"formatTripDateShort":  formatTripDateShort,
+				"formatDateTime":      formatDateTimeDisplay,
+				"formatTripDateTime":  formatTripDateTime,
+				"formatTripClock":     formatTripClock,
+				"formatTripUIDate":    formatTripUIDate,
+				"formatTripDateRange": formatTripDateRange,
+				"formatTripDateShort": formatTripDateShort,
+				"siteUIDateIsMDY": func(app trips.AppSettings) bool {
+					return trips.UIDateIsMDY(trips.NormalizeUIDateFormat(app.DefaultUIDateFormat))
+				},
+				"effectiveUIDateIsMDY": func(trip trips.Trip, app trips.AppSettings) bool {
+					eff := trips.EffectiveUIDateFormat(trip.UIDateFormat, app.DefaultUIDateFormat)
+					return trips.UIDateIsMDY(eff)
+				},
 				"formatTripMoney":      formatTripMoney,
+				"humanFileSize":        humanFileSize,
 				"expenseCategoryStyle": expenseCategoryStyle,
 				"expenseCategoryIcon":  expenseCategoryIcon,
 				"listContains":         listContainsString,
 				"hasPrefix":            strings.HasPrefix,
+				"trimSpace":            strings.TrimSpace,
 				"mainSectionVisible": func(key string, trip trips.Trip) bool {
 					return trips.MainSectionVisible(key, trip)
 				},
@@ -291,8 +371,9 @@ func NewRouter(deps Dependencies) http.Handler {
 					}
 					return "/" + s
 				},
-				"sub": func(a, b int) int { return a - b },
-				"add": func(a, b int) int { return a + b },
+				"sub":  func(a, b int) int { return a - b },
+				"add":  func(a, b int) int { return a + b },
+				"addF": func(a, b float64) float64 { return a + b },
 				"dict": func(values ...any) (map[string]any, error) {
 					if len(values)%2 != 0 {
 						return nil, fmt.Errorf("dict: expected even number of arguments")
@@ -447,6 +528,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Get("/accommodation", a.accommodationPage)
 			r.Get("/vehicle-rental", a.vehicleRentalPage)
 			r.Get("/flights", a.flightsPage)
+			r.Get("/documents", a.tripDocumentsPage)
 			r.Post("/accommodation/{lodgingID}/update", a.updateLodging)
 			r.Post("/accommodation/{lodgingID}/delete", a.deleteLodging)
 			r.Post("/accommodation", a.addLodging)
@@ -456,6 +538,9 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/flights/{flightID}/update", a.updateFlight)
 			r.Post("/flights/{flightID}/delete", a.deleteFlight)
 			r.Post("/flights", a.addFlight)
+			r.Post("/documents/upload", a.uploadTripDocuments)
+			r.Post("/documents/{documentID}/update", a.updateTripDocument)
+			r.Post("/documents/{documentID}/delete", a.deleteTripDocument)
 			r.Post("/lodging/{lodgingID}/update", a.updateLodging)
 			r.Post("/lodging/{lodgingID}/delete", a.deleteLodging)
 			r.Post("/lodging", a.addLodging)
@@ -567,49 +652,67 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 			sharedTrips = append(sharedTrips, t)
 		}
 	}
-	activeO, draftO, archO := buildDashboardTripGroups(ownerTrips, expenseTotals, rollups, listLayout, time.Now())
-	activeS, draftS, archS := buildDashboardTripGroups(sharedTrips, expenseTotals, rollups, listLayout, time.Now())
+	activeO, draftO, completedO, archO := buildDashboardTripGroups(ownerTrips, expenseTotals, rollups, listLayout, time.Now())
+	activeS, draftS, completedS, archS := buildDashboardTripGroups(sharedTrips, expenseTotals, rollups, listLayout, time.Now())
 	sortDashboardCards(activeO, sortKey)
 	sortDashboardCards(draftO, sortKey)
+	sortDashboardCards(completedO, sortKey)
 	sortDashboardCards(archO, sortKey)
 	sortDashboardCards(activeS, sortKey)
 	sortDashboardCards(draftS, sortKey)
+	sortDashboardCards(completedS, sortKey)
 	sortDashboardCards(archS, sortKey)
 
 	draftMerged := append(append([]dashboardTripCard{}, draftO...), draftS...)
 	sortDashboardCards(draftMerged, sortKey)
+	completedMerged := append(append([]dashboardTripCard{}, completedO...), completedS...)
+	sortDashboardCards(completedMerged, sortKey)
 	archMerged := append(append([]dashboardTripCard{}, archO...), archS...)
 	sortDashboardCards(archMerged, sortKey)
 
+	dashboardCSRF := CSRFToken(r.Context())
 	enrichParty := func(cards []dashboardTripCard) {
 		for i := range cards {
 			n, _ := a.tripService.TripCollaboratorCount(r.Context(), cards[i].ID)
 			cards[i].ActiveCollaborators = n
 			cards[i].ViewerIsOwner = cards[i].OwnerUserID == uid
-			cards[i].HasSharedIcon = cards[i].ViewerIsOwner && n > 0
+			guests, _ := a.tripService.ListTripGuests(r.Context(), cards[i].ID)
+			cards[i].TripGuests = guests
+			cards[i].HasSharedIcon = cards[i].ViewerIsOwner && (n > 0 || len(guests) > 0)
 			cards[i].Party, _ = a.tripService.TripParty(r.Context(), cards[i].ID)
+			cards[i].PendingInvites, _ = a.tripService.ListPendingTripInvitesForTrip(r.Context(), cards[i].ID, uid)
+			cards[i].DashboardCSRF = dashboardCSRF
+			cards[i].SiteDateSettings = settings
 		}
 	}
 	enrichParty(activeO)
 	enrichParty(draftO)
+	enrichParty(completedO)
 	enrichParty(archO)
 	enrichParty(activeS)
 	enrichParty(draftS)
+	enrichParty(completedS)
 	enrichParty(archS)
 	enrichParty(draftMerged)
+	enrichParty(completedMerged)
 	enrichParty(archMerged)
 
 	heroPatternClass := ""
 	heroImageURL := ""
-	switch bg := settings.DashboardHeroBackground; {
+	switch bg := trips.CanonicalDashboardHeroBackground(settings.DashboardHeroBackground); {
 	case strings.HasPrefix(bg, "pattern:"):
 		heroPatternClass = "dashboard-hero-adventure--pattern-" + strings.TrimPrefix(bg, "pattern:")
-	case strings.HasPrefix(bg, "https://"):
+	case strings.HasPrefix(bg, "https://") || strings.HasPrefix(bg, "http://"):
 		heroImageURL = bg
 	case strings.HasPrefix(bg, "/static/"):
 		heroImageURL = bg
 	}
-	travelDistanceDisplay := trips.FormatDistanceStat(travelStats.KmLogged, trips.EffectiveDistanceUnit(nil, settings))
+	if heroImageURL != "" && strings.HasPrefix(heroImageURL, "/") {
+		heroImageURL = absoluteURLForPublicStatic(r, heroImageURL)
+	}
+	// Travel Statistics aggregates are instance-level; use app default unit so "Distance logged"
+	// matches Site settings → Default distance unit even when the viewer's personal unit differs.
+	travelDistanceDisplay := trips.FormatDistanceStat(travelStats.KmLogged, settings.DefaultDistanceUnit)
 	homeDistanceUnit := trips.EffectiveDistanceUnit(nil, settings)
 
 	inProg := filterDashboardSidebarTrips(list, time.Now(), 2)
@@ -617,6 +720,7 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 		"ActiveTripCards":        activeO,
 		"SharedTripCards":        activeS,
 		"DraftTripCards":         draftMerged,
+		"CompletedTripCards":     completedMerged,
 		"ArchivedTripCards":      archMerged,
 		"Settings":               settings,
 		"TravelStats":            travelStats,
@@ -745,7 +849,7 @@ func (a *app) loadDashboardBudgetRollups(ctx context.Context, userID string, lis
 	return out
 }
 
-func buildDashboardTripGroups(list []trips.Trip, totals map[string]float64, rollups map[string]dashboardBudgetRollup, dashboardListLayout bool, now time.Time) (active, draft, archived []dashboardTripCard) {
+func buildDashboardTripGroups(list []trips.Trip, totals map[string]float64, rollups map[string]dashboardBudgetRollup, dashboardListLayout bool, now time.Time) (active, draft, completed, archived []dashboardTripCard) {
 	if totals == nil {
 		totals = map[string]float64{}
 	}
@@ -779,17 +883,20 @@ func buildDashboardTripGroups(list []trips.Trip, totals map[string]float64, roll
 			HasValidSchedule:      hasSched,
 			ScheduleDurationLabel: durLabel,
 			DashboardListLayout:   dashboardListLayout,
+			CoverThumbURL:         tripCoverThumbURL(t.CoverImage),
 		}
 		switch {
 		case t.IsArchived:
 			archived = append(archived, c)
 		case !tripHasValidSchedule(t):
 			draft = append(draft, c)
+		case slug == "completed":
+			completed = append(completed, c)
 		default:
 			active = append(active, c)
 		}
 	}
-	return active, draft, archived
+	return active, draft, completed, archived
 }
 
 func statusSortRank(slug string) int {
@@ -930,10 +1037,10 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 		case "custom_url":
 			heroBG = strings.TrimSpace(r.FormValue("dashboard_hero_background_url"))
 		case "custom_upload":
-			if p, err := storeDashboardHeroUpload(r, uid); err == nil && p != "" {
+			if p, err := storeDashboardHeroUpload(r, uid, a.maxUploadFileSizeBytes(r.Context())); err == nil && p != "" {
 				heroBG = p
 			} else if err != nil {
-				http.Error(w, "failed to save hero image", http.StatusBadRequest)
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			} else {
 				heroBG = strings.TrimSpace(r.FormValue("dashboard_hero_existing_path"))
@@ -958,11 +1065,19 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 	applyMapDefaultPlaceFromForm(r.Context(), geoKey, &app, r)
 	app.MapDefaultZoom = mapZoom
 	app.EnableLocationLookup = enableLookup
+	if _, ok := r.PostForm["max_upload_file_size_mb"]; ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(r.FormValue("max_upload_file_size_mb"))); err == nil && n > 0 {
+			app.MaxUploadFileSizeMB = n
+		}
+	}
 	if _, ok := r.PostForm["default_distance_unit"]; ok {
 		app.DefaultDistanceUnit = trips.NormalizeDistanceUnit(r.FormValue("default_distance_unit"))
 	}
 	if vals, ok := r.PostForm["site_registration_enabled"]; ok && len(vals) > 0 {
 		app.RegistrationEnabled = vals[len(vals)-1] == "1"
+	}
+	if _, ok := r.PostForm["default_ui_date_format"]; ok {
+		app.DefaultUIDateFormat = trips.NormalizeUIDateFormat(r.FormValue("default_ui_date_format"))
 	}
 	if err := a.tripService.SaveAppSettings(r.Context(), app); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1091,22 +1206,27 @@ func (a *app) createTrip(w http.ResponseWriter, r *http.Request) {
 			hmLng = v
 		}
 	}
+	homeMapLabel := strings.TrimSpace(r.FormValue("home_map_place_label"))
 	if hmLat == 0 && hmLng == 0 {
 		if app, err := a.tripService.GetAppSettings(r.Context()); err == nil {
 			hmLat = app.MapDefaultLatitude
 			hmLng = app.MapDefaultLongitude
+			if homeMapLabel == "" {
+				homeMapLabel = strings.TrimSpace(app.MapDefaultPlaceLabel)
+			}
 		}
 	}
 	id, err := a.tripService.CreateTrip(r.Context(), trips.Trip{
-		Name:             strings.TrimSpace(r.FormValue("name")),
-		Description:      r.FormValue("description"),
-		StartDate:        r.FormValue("start_date"),
-		EndDate:          r.FormValue("end_date"),
-		CurrencyName:     defaultIfEmpty(r.FormValue("currency_name"), "USD"),
-		CurrencySymbol:   defaultIfEmpty(r.FormValue("currency_symbol"), "$"),
-		HomeMapLatitude:  hmLat,
-		HomeMapLongitude: hmLng,
-		OwnerUserID:      uid,
+		Name:              strings.TrimSpace(r.FormValue("name")),
+		Description:       r.FormValue("description"),
+		StartDate:         r.FormValue("start_date"),
+		EndDate:           r.FormValue("end_date"),
+		CurrencyName:      defaultIfEmpty(r.FormValue("currency_name"), "USD"),
+		CurrencySymbol:    defaultIfEmpty(r.FormValue("currency_symbol"), "$"),
+		HomeMapLatitude:   hmLat,
+		HomeMapLongitude:  hmLng,
+		HomeMapPlaceLabel: homeMapLabel,
+		OwnerUserID:       uid,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1237,6 +1357,7 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		mapViewLat = details.Trip.HomeMapLatitude
 		mapViewLng = details.Trip.HomeMapLongitude
 	}
+	tripHeroExtra, tripHeroStyle := tripPageHeroFields(details.Trip.CoverImage)
 	pageData := map[string]any{
 		"Details":                     details,
 		"DayGroups":                   dayGroups,
@@ -1279,6 +1400,8 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		"MapViewLatitude":             mapViewLat,
 		"MapViewLongitude":            mapViewLng,
 		"MapViewZoom":                 mapViewZoom,
+		"TripHeroExtraClasses":        tripHeroExtra,
+		"TripHeroInlineStyle":         tripHeroStyle,
 	}
 	var buf bytes.Buffer
 	if err := a.templates.ExecuteTemplate(&buf, "trip.html", pageData); err != nil {
@@ -1556,11 +1679,12 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 	if limit > totalTx {
 		limit = totalTx
 	}
+	budgetDateLayout := trips.UIDateNumericLayout(trips.EffectiveUIDateFormat(details.Trip.UIDateFormat, settings.DefaultUIDateFormat))
 	for i := 0; i < limit; i++ {
 		e := spentExpenses[i]
 		dateLabel := ""
 		if strings.TrimSpace(e.SpentOn) != "" {
-			dateLabel = trips.FormatISODate(e.SpentOn, trips.UIDateNumericLayout(details.Trip.UIDateFormat))
+			dateLabel = trips.FormatISODate(e.SpentOn, budgetDateLayout)
 		}
 		desc := budgetSpendsDescription(e)
 		vLocked := vehicleExpenseLocked[e.ID]
@@ -1815,8 +1939,9 @@ func (a *app) theTabPage(w http.ResponseWriter, r *http.Request) {
 			NetDisplay:  nd,
 		})
 	}
+	tabEffUIDate := trips.EffectiveUIDateFormat(details.Trip.UIDateFormat, settings.DefaultUIDateFormat)
 	tabOverTimeJSON := template.JS("[]")
-	if b, err := json.Marshal(tabSpendingOverTimeSeries(details.Trip, tabExpensesAll)); err == nil && len(b) > 0 {
+	if b, err := json.Marshal(tabSpendingOverTimeSeries(details.Trip, tabEffUIDate, tabExpensesAll)); err == nil && len(b) > 0 {
 		tabOverTimeJSON = template.JS(b)
 	}
 	expMoreQS := url.Values{}
@@ -1868,7 +1993,7 @@ func (a *app) theTabPage(w http.ResponseWriter, r *http.Request) {
 		"TabSettlementsMoreURL":     tabSettlementsMoreURL,
 		"TabChartByCategory":        tabCategoryChartRows(tabExpensesAll),
 		"TabChartByPayer":           tabPayerChartRows(tabExpensesAll, details.Trip.OwnerUserID, participantLabels),
-		"TabChartByTime":            tabTimeChartRows(details.Trip, tabExpensesAll),
+		"TabChartByTime":            tabTimeChartRows(details.Trip, tabEffUIDate, tabExpensesAll),
 		"TabOverTimeChartJSON":      tabOverTimeJSON,
 		"TabEqualSplitBootstrap":    equalBootstrap,
 		"TabYourShareByExpenseID":   tabYourShareByExpenseID,
@@ -1902,6 +2027,11 @@ func (a *app) tabExpensesLoadMore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
 	tabExpensesAll := make([]trips.Expense, 0)
 	for _, e := range details.Expenses {
@@ -1979,6 +2109,7 @@ func (a *app) tabExpensesLoadMore(w http.ResponseWriter, r *http.Request) {
 	}
 	pageData := map[string]any{
 		"Trip":                    details.Trip,
+		"Settings":                settings,
 		"CSRFToken":               CSRFToken(r.Context()),
 		"CurrencySymbol":          currencySymbol,
 		"ExpenseCategories":       trips.QuickExpenseCategories,
@@ -2018,6 +2149,11 @@ func (a *app) tabSettlementsLoadMore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
 	settlements, _ := a.tripService.ListTabSettlements(r.Context(), tripID)
 	party, _ := a.tripService.TripParty(r.Context(), tripID)
@@ -2038,6 +2174,7 @@ func (a *app) tabSettlementsLoadMore(w http.ResponseWriter, r *http.Request) {
 	window := allRows[offset:end]
 	pageData := map[string]any{
 		"Trip":              details.Trip,
+		"Settings":          settings,
 		"CSRFToken":         CSRFToken(r.Context()),
 		"TabSettlementRows": window,
 	}
@@ -2115,11 +2252,13 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	txUID := CurrentUserID(r.Context())
+	txSettings, _ := a.tripService.MergedSettingsForUI(r.Context(), txUID)
+	txDateLayout := trips.UIDateNumericLayout(trips.EffectiveUIDateFormat(details.Trip.UIDateFormat, txSettings.DefaultUIDateFormat))
 	transactions := make([]budgetTransactionRowView, 0, len(window))
 	for _, e := range window {
 		dateLabel := ""
 		if strings.TrimSpace(e.SpentOn) != "" {
-			dateLabel = trips.FormatISODate(e.SpentOn, trips.UIDateNumericLayout(details.Trip.UIDateFormat))
+			dateLabel = trips.FormatISODate(e.SpentOn, txDateLayout)
 		}
 		desc := budgetSpendsDescription(e)
 		vLocked := vehicleExpenseLocked[e.ID]
@@ -2151,6 +2290,7 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 	_ = a.templates.ExecuteTemplate(w, "budget_transactions_rows", map[string]any{
 		"Trip":                 details.Trip,
 		"Details":              details,
+		"Settings":             txSettings,
 		"CSRFToken":            CSRFToken(r.Context()),
 		"CurrencySymbol":       currencySymbol,
 		"ExpenseCategories":    trips.QuickExpenseCategories,
@@ -2184,6 +2324,10 @@ func (a *app) exportBudgetReport(w http.ResponseWriter, r *http.Request) {
 
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
 
+	uid := CurrentUserID(r.Context())
+	csvSettings, _ := a.tripService.MergedSettingsForUI(r.Context(), uid)
+	csvDateLayout := trips.UIDateNumericLayout(trips.EffectiveUIDateFormat(details.Trip.UIDateFormat, csvSettings.DefaultUIDateFormat))
+
 	spentExpenses := trips.CollapseVehicleRentalExpenseDuplicates(append([]trips.Expense(nil), details.Expenses...), details.Vehicles)
 
 	// Sort: newest first (SpentOn first, fallback CreatedAt).
@@ -2216,7 +2360,7 @@ func (a *app) exportBudgetReport(w http.ResponseWriter, r *http.Request) {
 	for _, e := range spentExpenses {
 		dateLabel := "--"
 		if strings.TrimSpace(e.SpentOn) != "" {
-			dateLabel = trips.FormatISODate(e.SpentOn, trips.UIDateNumericLayout(details.Trip.UIDateFormat))
+			dateLabel = trips.FormatISODate(e.SpentOn, csvDateLayout)
 		}
 		desc := e.Notes
 		if strings.TrimSpace(desc) == "" {
@@ -2558,7 +2702,7 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	coverMode := strings.TrimSpace(r.FormValue("cover_image_mode"))
 	switch coverMode {
 	case "upload":
-		p, err := storeTripCoverUpload(r, tripID)
+		p, err := storeTripCoverUpload(r, tripID, a.maxUploadFileSizeBytes(r.Context()))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -2570,8 +2714,10 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 		}
 	case "clear":
 		existing.CoverImage = ""
-	default:
+	case "url":
 		existing.CoverImage = normalizeTripCoverImageRef(r.FormValue("cover_image_url"))
+	default:
+		existing.CoverImage = trips.NormalizeTripCoverValue(coverMode)
 	}
 	existing.DistanceUnit = strings.TrimSpace(r.FormValue("distance_unit"))
 	existing.CurrencyName = defaultIfEmpty(r.FormValue("currency_name"), "USD")
@@ -2581,6 +2727,24 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 		if v, err := strconv.ParseFloat(s, 64); err == nil && !math.IsNaN(v) && v >= 0 {
 			existing.BudgetCap = v
 		}
+	}
+	latStr := strings.TrimSpace(r.FormValue("home_map_latitude"))
+	lngStr := strings.TrimSpace(r.FormValue("home_map_longitude"))
+	if latStr == "" || lngStr == "" {
+		existing.HomeMapLatitude = 0
+		existing.HomeMapLongitude = 0
+		existing.HomeMapPlaceLabel = ""
+	} else {
+		var hmLat, hmLng float64
+		if v, err := strconv.ParseFloat(latStr, 64); err == nil && !math.IsInf(v, 0) && !math.IsNaN(v) {
+			hmLat = v
+		}
+		if v, err := strconv.ParseFloat(lngStr, 64); err == nil && !math.IsInf(v, 0) && !math.IsNaN(v) {
+			hmLng = v
+		}
+		existing.HomeMapLatitude = hmLat
+		existing.HomeMapLongitude = hmLng
+		existing.HomeMapPlaceLabel = strings.TrimSpace(r.FormValue("home_map_place_label"))
 	}
 	existing.UIShowItinerary = formTriSectionOn(r, "ui_trip_section_itinerary")
 	existing.UIShowChecklist = formTriSectionOn(r, "ui_trip_section_checklist")
@@ -2627,7 +2791,7 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 		tf = "12h"
 	}
 	existing.UITimeFormat = tf
-	existing.UIDateFormat = trips.NormalizeUIDateFormat(r.FormValue("ui_date_format"))
+	existing.UIDateFormat = trips.NormalizeTripUIDateStorage(r.FormValue("ui_date_format"))
 	existing.UILabelStay = strings.TrimSpace(r.FormValue("ui_label_stay"))
 	existing.UILabelVehicle = strings.TrimSpace(r.FormValue("ui_label_vehicle"))
 	existing.UILabelFlights = strings.TrimSpace(r.FormValue("ui_label_flights"))
@@ -2721,6 +2885,9 @@ func (a *app) deleteTrip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "only the owner can delete this trip", http.StatusForbidden)
 		return
 	}
+	details, _ := a.tripService.GetTripDetails(r.Context(), tripID)
+	tripDocs, _ := a.tripService.ListTripDocuments(r.Context(), tripID)
+	filePaths := collectTripDeletionFilePaths(details, tripDocs)
 	if err := a.tripService.DeleteTrip(r.Context(), tripID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -2729,12 +2896,18 @@ func (a *app) deleteTrip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	for _, p := range filePaths {
+		_ = deleteUploadedFileByWebPath(p)
+	}
+	_ = deleteTripUploadDirs(tripID)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	_ = r.ParseForm()
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		_ = r.ParseForm()
+	}
 	trip, err := a.tripService.GetTrip(r.Context(), tripID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -2752,15 +2925,29 @@ func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	location := strings.TrimSpace(r.FormValue("location"))
 	lat, _ := strconv.ParseFloat(r.FormValue("latitude"), 64)
 	lng, _ := strconv.ParseFloat(r.FormValue("longitude"), 64)
+	lat, lng, err = resolveCreateCoordsOrError(location, lat, lng, func(q string) (float64, float64) {
+		return a.geocodeForApp(r.Context(), q)
+	}, "Location")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	estCost, _ := strconv.ParseFloat(r.FormValue("est_cost"), 64)
+	imagePath, imgErr := storeVehicleImage(r, "stop_image", a.maxUploadFileSizeBytes(r.Context()))
+	if imgErr != nil {
+		http.Error(w, imgErr.Error(), http.StatusBadRequest)
+		return
+	}
 	err = a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
 		TripID:    tripID,
 		DayNumber: day,
 		Title:     r.FormValue("title"),
 		Notes:     r.FormValue("notes"),
-		Location:  r.FormValue("location"),
+		Location:  location,
+		ImagePath: imagePath,
 		Latitude:  lat,
 		Longitude: lng,
 		EstCost:   estCost,
@@ -2859,7 +3046,7 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 		title = strings.TrimSpace(r.FormValue("title"))
 	}
 	receiptPath := ""
-	if path, err := storeExpenseReceipt(r, tripID, "tab_attachment"); err != nil {
+	if path, err := storeExpenseReceipt(r, tripID, "tab_attachment", a.maxUploadFileSizeBytes(r.Context())); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	} else {
@@ -2902,7 +3089,9 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	itemID := chi.URLParam(r, "itemID")
-	_ = r.ParseForm()
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		_ = r.ParseForm()
+	}
 	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
 	if err != nil {
 		if tripForbiddenOrMissing(err) {
@@ -2936,12 +3125,30 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 	estCost, _ := strconv.ParseFloat(r.FormValue("est_cost"), 64)
 	location := strings.TrimSpace(r.FormValue("location"))
 	lat, lng := a.geocodeForApp(r.Context(), location)
+	if current, ok := findItineraryItemByID(details.Itinerary, itemID); ok {
+		lat, lng = fallbackItineraryCoordsOnGeocodeMiss(lat, lng, current)
+	}
+	imagePath, imgErr := storeVehicleImage(r, "stop_image", a.maxUploadFileSizeBytes(r.Context()))
+	if imgErr != nil {
+		http.Error(w, imgErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if imagePath == "" {
+		imagePath = strings.TrimSpace(r.FormValue("current_stop_image_path"))
+	}
+	if strings.TrimSpace(strings.ToLower(r.FormValue("remove_stop_image"))) == "true" {
+		if imagePath != "" {
+			_ = deleteUploadedFileByWebPath(imagePath)
+		}
+		imagePath = ""
+	}
 	err = a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        itemID,
 		TripID:    tripID,
 		DayNumber: day,
 		Title:     r.FormValue("title"),
 		Location:  location,
+		ImagePath: imagePath,
 		Latitude:  lat,
 		Longitude: lng,
 		Notes:     r.FormValue("notes"),
@@ -3029,7 +3236,7 @@ func (a *app) updateExpense(w http.ResponseWriter, r *http.Request) {
 		_ = deleteUploadedFileByWebPath(receiptPath)
 		receiptPath = ""
 	}
-	newPath, storeErr := storeExpenseReceipt(r, tripID, "tab_attachment")
+	newPath, storeErr := storeExpenseReceipt(r, tripID, "tab_attachment", a.maxUploadFileSizeBytes(r.Context()))
 	if storeErr != nil {
 		http.Error(w, storeErr.Error(), http.StatusBadRequest)
 		return
@@ -3291,9 +3498,14 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
-	attachmentPath, err := storeBookingAttachment(r, "booking_attachment")
+	attachmentPath, err := storeBookingAttachment(r, "booking_attachment", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
-		http.Error(w, "failed to save booking attachment", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	imagePath, err := storeVehicleImage(r, "entry_image", a.maxUploadFileSizeBytes(r.Context()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	name := r.FormValue("name")
@@ -3305,7 +3517,13 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 	checkInItemID := uuid.NewString()
 	checkOutItemID := uuid.NewString()
 	checkInNotes := buildLodgingCheckInNotes(notes, bookingNo, attachmentPath)
-	addrLat, addrLng := a.geocodeForApp(r.Context(), address)
+	addrLat, addrLng, err := resolveCreateCoordsOrError(address, 0, 0, func(q string) (float64, float64) {
+		return a.geocodeForApp(r.Context(), q)
+	}, "Accommodation address")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        checkInItemID,
@@ -3351,6 +3569,7 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 		Cost:                cost,
 		Notes:               notes,
 		AttachmentPath:      attachmentPath,
+		ImagePath:           imagePath,
 		CheckInItineraryID:  checkInItemID,
 		CheckOutItineraryID: checkOutItemID,
 	})
@@ -3417,9 +3636,9 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attachmentPath, err := storeBookingAttachment(r, "booking_attachment")
+	attachmentPath, err := storeBookingAttachment(r, "booking_attachment", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
-		http.Error(w, "failed to save booking attachment", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	removeAttachment := r.FormValue("remove_attachment") == "true"
@@ -3433,12 +3652,32 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 	if attachmentPath != "" && r.FormValue("current_attachment_path") != "" && attachmentPath != r.FormValue("current_attachment_path") {
 		_ = deleteUploadedFileByWebPath(r.FormValue("current_attachment_path"))
 	}
+	imagePath, err := storeVehicleImage(r, "entry_image", a.maxUploadFileSizeBytes(r.Context()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	removeImage := strings.TrimSpace(strings.ToLower(r.FormValue("remove_image"))) == "true"
+	if imagePath == "" {
+		imagePath = r.FormValue("current_image_path")
+	}
+	if removeImage && r.FormValue("current_image_path") != "" && imagePath == r.FormValue("current_image_path") {
+		_ = deleteUploadedFileByWebPath(imagePath)
+		imagePath = ""
+	}
+	if imagePath != "" && r.FormValue("current_image_path") != "" && imagePath != r.FormValue("current_image_path") {
+		_ = deleteUploadedFileByWebPath(r.FormValue("current_image_path"))
+	}
 	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
 	name := r.FormValue("name")
 	address := r.FormValue("address")
 	bookingNo := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
 	addrLat, addrLng := a.geocodeForApp(r.Context(), address)
+	addrLat, addrLng = fallbackItineraryCoordsOnGeocodeMiss(addrLat, addrLng, trips.ItineraryItem{
+		Latitude:  existing.Latitude,
+		Longitude: existing.Longitude,
+	})
 
 	checkInNotes := buildLodgingCheckInNotes(notes, bookingNo, attachmentPath)
 	lodging := trips.Lodging{
@@ -3454,6 +3693,7 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 		Cost:                cost,
 		Notes:               notes,
 		AttachmentPath:      attachmentPath,
+		ImagePath:           imagePath,
 		CheckInItineraryID:  existing.CheckInItineraryID,
 		CheckOutItineraryID: existing.CheckOutItineraryID,
 	}
@@ -3484,6 +3724,7 @@ func (a *app) deleteLodging(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	lodgingID := chi.URLParam(r, "lodgingID")
 	_ = r.ParseForm()
+	existing, _ := a.tripService.GetLodging(r.Context(), tripID, lodgingID)
 	if err := a.tripService.DeleteLodging(r.Context(), tripID, lodgingID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -3491,6 +3732,12 @@ func (a *app) deleteLodging(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if existing.AttachmentPath != "" {
+		_ = deleteUploadedFileByWebPath(existing.AttachmentPath)
+	}
+	if existing.ImagePath != "" {
+		_ = deleteUploadedFileByWebPath(existing.ImagePath)
 	}
 	next := strings.TrimSpace(r.FormValue("return_to"))
 	if next != "" && isSafeReturnForTrip(next, tripID) {
@@ -3606,9 +3853,14 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 	dropVehicleTitle := vehicleRentalTitleValue(vehicleDetail, dropLocationStr)
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
-	vehicleImagePath, err := storeVehicleImage(r, "vehicle_image")
+	vehicleImagePath, err := storeVehicleImage(r, "vehicle_image", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
-		http.Error(w, "failed to save vehicle image", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	attachmentPath, err := storeBookingAttachment(r, "booking_attachment", a.maxUploadFileSizeBytes(r.Context()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -3617,10 +3869,22 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 	dropOffItineraryID := uuid.NewString()
 	pickUpNotes := buildVehicleItineraryNotes(notes, booking, false)
 	dropOffNotes := defaultIfEmpty(notes, "")
-	locLat, locLng := a.geocodeForApp(r.Context(), location)
+	locLat, locLng, err := resolveCreateCoordsOrError(location, 0, 0, func(q string) (float64, float64) {
+		return a.geocodeForApp(r.Context(), q)
+	}, "Vehicle pick-up location")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	dropLat, dropLng := locLat, locLng
 	if dropOffSeparate && strings.TrimSpace(dropOffLocStored) != "" {
-		dropLat, dropLng = a.geocodeForApp(r.Context(), dropOffLocStored)
+		dropLat, dropLng, err = resolveCreateCoordsOrError(dropOffLocStored, 0, 0, func(q string) (float64, float64) {
+			return a.geocodeForApp(r.Context(), q)
+		}, "Vehicle drop-off location")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
@@ -3666,6 +3930,7 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 		DropOffAt:           dropOffAt.Format("2006-01-02T15:04"),
 		BookingConfirmation: booking,
 		Notes:               notes,
+		AttachmentPath:      attachmentPath,
 		VehicleImagePath:    vehicleImagePath,
 		Cost:                cost,
 		InsuranceCost:       insuranceCost,
@@ -3706,6 +3971,11 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	tripDetails, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -3751,9 +4021,9 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 	dropVehicleTitle := vehicleRentalTitleValue(vehicleDetail, dropLocationStr)
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
-	vehicleImagePath, err := storeVehicleImage(r, "vehicle_image")
+	vehicleImagePath, err := storeVehicleImage(r, "vehicle_image", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
-		http.Error(w, "failed to save vehicle image", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	removeImage := r.FormValue("remove_vehicle_image") == "true"
@@ -3767,10 +4037,32 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 	if vehicleImagePath != "" && r.FormValue("current_vehicle_image_path") != "" && vehicleImagePath != r.FormValue("current_vehicle_image_path") {
 		_ = deleteUploadedFileByWebPath(r.FormValue("current_vehicle_image_path"))
 	}
+	attachmentPath, err := storeBookingAttachment(r, "booking_attachment", a.maxUploadFileSizeBytes(r.Context()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	removeAttachment := r.FormValue("remove_attachment") == "true"
+	if attachmentPath == "" {
+		attachmentPath = r.FormValue("current_attachment_path")
+	}
+	if removeAttachment && r.FormValue("current_attachment_path") != "" && attachmentPath == r.FormValue("current_attachment_path") {
+		_ = deleteUploadedFileByWebPath(attachmentPath)
+		attachmentPath = ""
+	}
+	if attachmentPath != "" && r.FormValue("current_attachment_path") != "" && attachmentPath != r.FormValue("current_attachment_path") {
+		_ = deleteUploadedFileByWebPath(r.FormValue("current_attachment_path"))
+	}
 	locLat, locLng := a.geocodeForApp(r.Context(), location)
 	dropLat, dropLng := locLat, locLng
 	if dropOffSeparate && strings.TrimSpace(dropOffLocStored) != "" {
 		dropLat, dropLng = a.geocodeForApp(r.Context(), dropOffLocStored)
+	}
+	if currentPickUp, ok := findItineraryItemByID(tripDetails.Itinerary, existing.PickUpItineraryID); ok {
+		locLat, locLng = fallbackItineraryCoordsOnGeocodeMiss(locLat, locLng, currentPickUp)
+	}
+	if currentDropOff, ok := findItineraryItemByID(tripDetails.Itinerary, existing.DropOffItineraryID); ok {
+		dropLat, dropLng = fallbackItineraryCoordsOnGeocodeMiss(dropLat, dropLng, currentDropOff)
 	}
 
 	if err := a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
@@ -3816,6 +4108,7 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		DropOffAt:           dropOffAt.Format("2006-01-02T15:04"),
 		BookingConfirmation: booking,
 		Notes:               notes,
+		AttachmentPath:      attachmentPath,
 		VehicleImagePath:    vehicleImagePath,
 		Cost:                cost,
 		InsuranceCost:       insuranceCost,
@@ -3857,12 +4150,139 @@ func (a *app) deleteVehicleRental(w http.ResponseWriter, r *http.Request) {
 	if existing.VehicleImagePath != "" {
 		_ = deleteUploadedFileByWebPath(existing.VehicleImagePath)
 	}
+	if existing.AttachmentPath != "" {
+		_ = deleteUploadedFileByWebPath(existing.AttachmentPath)
+	}
 	next := strings.TrimSpace(r.FormValue("return_to"))
 	if next != "" && isSafeReturnForTrip(next, tripID) {
 		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/trips/"+tripID+"/vehicle-rental", http.StatusSeeOther)
+}
+
+func (a *app) tripDocumentsPage(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
+	if err != nil {
+		if tripForbiddenOrMissing(err) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	uid := CurrentUserID(r.Context())
+	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	savedDocs, err := a.tripService.ListTripDocuments(r.Context(), tripID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	rows := collectTripDocumentRows(details, savedDocs)
+	pageData := map[string]any{
+		"Details":            details,
+		"Settings":           settings,
+		"CSRFToken":          CSRFToken(r.Context()),
+		"Documents":          rows,
+		"UploadLimitMB":      settings.MaxUploadFileSizeMB,
+		"DocumentCategories": []string{"Accommodation", "Flights", "General Documents", "Group Expenses", "Vehicle Rental"},
+	}
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "documents")
+	_ = a.templates.ExecuteTemplate(w, "trip_documents.html", pageData)
+}
+
+func (a *app) uploadTripDocuments(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	trip, err := a.tripService.GetTrip(r.Context(), tripID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		http.Error(w, "invalid upload form", http.StatusBadRequest)
+		return
+	}
+	maxBytes := a.maxUploadFileSizeBytes(r.Context())
+	files := r.MultipartForm.File["documents"]
+	if len(files) == 0 {
+		http.Error(w, "please select at least one file", http.StatusBadRequest)
+		return
+	}
+	for _, fh := range files {
+		webPath, fileSize, fileName, storeErr := storeTripDocumentUpload(r, tripID, fh, maxBytes)
+		if storeErr != nil {
+			http.Error(w, storeErr.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := a.tripService.AddTripDocument(r.Context(), trips.TripDocument{
+			ID:         uuid.NewString(),
+			TripID:     tripID,
+			Section:    "general",
+			Category:   "General Documents",
+			ItemName:   trip.Name,
+			FileName:   fileName,
+			FilePath:   webPath,
+			FileSize:   fileSize,
+			UploadedAt: time.Now().UTC(),
+		}); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	http.Redirect(w, r, "/trips/"+tripID+"/documents", http.StatusSeeOther)
+}
+
+func (a *app) updateTripDocument(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	documentID := chi.URLParam(r, "documentID")
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	displayName := strings.TrimSpace(r.FormValue("display_name"))
+	if err := a.tripService.UpdateTripDocumentDisplayName(r.Context(), tripID, documentID, displayName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "document not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/trips/"+tripID+"/documents", http.StatusSeeOther)
+}
+
+func (a *app) deleteTripDocument(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	documentID := chi.URLParam(r, "documentID")
+	docs, err := a.tripService.ListTripDocuments(r.Context(), tripID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var path string
+	for _, d := range docs {
+		if d.ID == documentID {
+			path = d.FilePath
+			break
+		}
+	}
+	if err := a.tripService.DeleteTripDocument(r.Context(), tripID, documentID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(path) != "" {
+		_ = deleteUploadedFileByWebPath(path)
+	}
+	http.Redirect(w, r, "/trips/"+tripID+"/documents", http.StatusSeeOther)
 }
 
 func (a *app) flightsPage(w http.ResponseWriter, r *http.Request) {
@@ -3956,9 +4376,14 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
-	documentPath, err := storeFlightDocument(r, "flight_document")
+	documentPath, err := storeFlightDocument(r, "flight_document", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
 		http.Error(w, "failed to save flight document", http.StatusBadRequest)
+		return
+	}
+	imagePath, err := storeVehicleImage(r, "entry_image", a.maxUploadFileSizeBytes(r.Context()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	flightName := r.FormValue("flight_name")
@@ -3974,8 +4399,20 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 	arriveItineraryID := uuid.NewString()
 	departNotes := buildFlightItineraryNotes(notes, booking)
 	arriveNotes := defaultIfEmpty(notes, "")
-	departLat, departLng := a.geocodeForApp(r.Context(), departAirport)
-	arriveLat, arriveLng := a.geocodeForApp(r.Context(), arriveAirport)
+	departLat, departLng, err := resolveCreateCoordsOrError(departAirport, 0, 0, func(q string) (float64, float64) {
+		return a.geocodeForApp(r.Context(), q)
+	}, "Departure airport")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	arriveLat, arriveLng, err := resolveCreateCoordsOrError(arriveAirport, 0, 0, func(q string) (float64, float64) {
+		return a.geocodeForApp(r.Context(), q)
+	}, "Arrival airport")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        departItineraryID,
@@ -4022,6 +4459,7 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 		BookingConfirmation: booking,
 		Notes:               notes,
 		DocumentPath:        documentPath,
+		ImagePath:           imagePath,
 		Cost:                cost,
 		DepartItineraryID:   departItineraryID,
 		ArriveItineraryID:   arriveItineraryID,
@@ -4061,6 +4499,11 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	tripDetails, err := a.tripService.GetTripDetails(r.Context(), tripID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	departAt, departDate, departTime, err := parseDateTimeLocal(r.FormValue("depart_at"))
 	if err != nil {
@@ -4087,7 +4530,7 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	documentPath, err := storeFlightDocument(r, "flight_document")
+	documentPath, err := storeFlightDocument(r, "flight_document", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
 		http.Error(w, "failed to save flight document", http.StatusBadRequest)
 		return
@@ -4103,6 +4546,22 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 	if documentPath != "" && r.FormValue("current_document_path") != "" && documentPath != r.FormValue("current_document_path") {
 		_ = deleteUploadedFileByWebPath(r.FormValue("current_document_path"))
 	}
+	imagePath, err := storeVehicleImage(r, "entry_image", a.maxUploadFileSizeBytes(r.Context()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	removeImage := r.FormValue("remove_image") == "true"
+	if imagePath == "" {
+		imagePath = r.FormValue("current_image_path")
+	}
+	if removeImage && r.FormValue("current_image_path") != "" && imagePath == r.FormValue("current_image_path") {
+		_ = deleteUploadedFileByWebPath(imagePath)
+		imagePath = ""
+	}
+	if imagePath != "" && r.FormValue("current_image_path") != "" && imagePath != r.FormValue("current_image_path") {
+		_ = deleteUploadedFileByWebPath(r.FormValue("current_image_path"))
+	}
 	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
 	flightName := r.FormValue("flight_name")
 	flightNumber := r.FormValue("flight_number")
@@ -4113,6 +4572,12 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 	label := flightTitleValue(flightName, flightNumber)
 	departLat, departLng := a.geocodeForApp(r.Context(), departAirport)
 	arriveLat, arriveLng := a.geocodeForApp(r.Context(), arriveAirport)
+	if currentDepart, ok := findItineraryItemByID(tripDetails.Itinerary, existing.DepartItineraryID); ok {
+		departLat, departLng = fallbackItineraryCoordsOnGeocodeMiss(departLat, departLng, currentDepart)
+	}
+	if currentArrive, ok := findItineraryItemByID(tripDetails.Itinerary, existing.ArriveItineraryID); ok {
+		arriveLat, arriveLng = fallbackItineraryCoordsOnGeocodeMiss(arriveLat, arriveLng, currentArrive)
+	}
 
 	if err := a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
 		ID:        existing.DepartItineraryID,
@@ -4159,6 +4624,7 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 		BookingConfirmation: booking,
 		Notes:               notes,
 		DocumentPath:        documentPath,
+		ImagePath:           imagePath,
 		Cost:                cost,
 		DepartItineraryID:   existing.DepartItineraryID,
 		ArriveItineraryID:   existing.ArriveItineraryID,
@@ -4194,6 +4660,9 @@ func (a *app) deleteFlight(w http.ResponseWriter, r *http.Request) {
 	}
 	if existing.DocumentPath != "" {
 		_ = deleteUploadedFileByWebPath(existing.DocumentPath)
+	}
+	if existing.ImagePath != "" {
+		_ = deleteUploadedFileByWebPath(existing.ImagePath)
 	}
 	http.Redirect(w, r, "/trips/"+tripID+"/flights", http.StatusSeeOther)
 }
@@ -4407,6 +4876,15 @@ func isSafeSiteSettingsReturn(raw string) bool {
 	return true
 }
 
+func (a *app) maxUploadFileSizeBytes(ctx context.Context) int64 {
+	const defaultMB = int64(5)
+	mb := defaultMB
+	if s, err := a.tripService.GetAppSettings(ctx); err == nil && s.MaxUploadFileSizeMB > 0 {
+		mb = int64(s.MaxUploadFileSizeMB)
+	}
+	return mb * 1024 * 1024
+}
+
 func parseDateTimeLocal(raw string) (time.Time, string, string, error) {
 	t, err := time.Parse("2006-01-02T15:04", raw)
 	if err != nil {
@@ -4415,7 +4893,7 @@ func parseDateTimeLocal(raw string) (time.Time, string, string, error) {
 	return t, t.Format("2006-01-02"), t.Format("15:04"), nil
 }
 
-func storeBookingAttachment(r *http.Request, field string) (string, error) {
+func storeBookingAttachment(r *http.Request, field string, maxBytes int64) (string, error) {
 	file, header, err := r.FormFile(field)
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
@@ -4424,26 +4902,36 @@ func storeBookingAttachment(r *http.Request, field string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
+	return SaveValidatedUpload(file, header, maxBytes, []string{"bookings"}, UploadProfileBookingAttachment)
+}
 
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext == "" {
-		ext = ".bin"
+func storeTripDocumentUpload(r *http.Request, tripID string, fh *multipart.FileHeader, maxBytes int64) (string, int64, string, error) {
+	if !expenseUploadTripIDOK(tripID) {
+		return "", 0, "", errors.New("invalid trip id")
 	}
-	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
-	targetDir := filepath.Join("web", "static", "uploads", "bookings")
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
-	}
-	targetPath := filepath.Join(targetDir, name)
-	dst, err := os.Create(targetPath)
+	webPath, err := SaveValidatedUploadFromHeader(fh, maxBytes, []string{"trip-documents", tripID}, UploadProfileBookingAttachment)
 	if err != nil {
-		return "", err
+		return "", 0, "", err
 	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
-		return "", err
+	fileSize, _ := fileInfoFromWebPath(webPath)
+	fileName := filepath.Base(strings.TrimSpace(fh.Filename))
+	if fileName == "" || fileName == "." {
+		fileName = filepath.Base(webPath)
 	}
-	return "/static/uploads/bookings/" + name, nil
+	return webPath, fileSize, fileName, nil
+}
+
+func fileInfoFromWebPath(webPath string) (int64, time.Time) {
+	p := strings.TrimSpace(webPath)
+	if p == "" || !strings.HasPrefix(p, "/static/") {
+		return 0, time.Time{}
+	}
+	disk := filepath.Join("web", filepath.FromSlash(strings.TrimPrefix(p, "/")))
+	st, err := os.Stat(disk)
+	if err != nil {
+		return 0, time.Time{}
+	}
+	return st.Size(), st.ModTime()
 }
 
 func buildLodgingCheckInNotes(notes, bookingNo, attachmentPath string) string {
@@ -4514,6 +5002,156 @@ func buildFlightItineraryNotes(notes, bookingNo string) string {
 	return out
 }
 
+// tripDocumentFileTypeVisual maps extension and loose hints to a row icon and data-doc-file-kind CSS hook.
+func tripDocumentFileTypeVisual(extDotless, category, fileName string) (kind, icon string) {
+	ext := strings.ToLower(strings.TrimSpace(extDotless))
+	cat := strings.ToLower(category)
+	fn := strings.ToLower(fileName)
+	switch ext {
+	case "pdf":
+		return "pdf", "picture_as_pdf"
+	case "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "svg":
+		return "image", "image"
+	case "xls", "xlsx", "csv":
+		return "spreadsheet", "table_chart"
+	case "doc", "docx", "txt", "rtf", "md", "odt":
+		return "document", "description"
+	}
+	if strings.Contains(cat, "ticket") || strings.Contains(fn, "boarding-pass") || strings.Contains(fn, "boarding pass") || strings.Contains(fn, "e-ticket") || strings.Contains(fn, "e_ticket") {
+		return "pass", "qr_code_2"
+	}
+	return "other", "draft"
+}
+
+func collectTripDocumentRows(details trips.TripDetails, saved []trips.TripDocument) []tripDocumentRow {
+	rows := make([]tripDocumentRow, 0, len(saved)+len(details.Lodgings)+len(details.Vehicles)+len(details.Flights))
+	add := func(id, section, category, itemName, fileName, filePath string, uploadedAt time.Time, fileSize int64, displayName string) {
+		if strings.TrimSpace(filePath) == "" {
+			return
+		}
+		if strings.TrimSpace(fileName) == "" {
+			fileName = filepath.Base(filePath)
+		}
+		if uploadedAt.IsZero() {
+			_, uploadedAt = fileInfoFromWebPath(filePath)
+		}
+		dn := strings.TrimSpace(displayName)
+		extShort := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+		fileExt := ""
+		if extShort != "" {
+			fileExt = strings.ToUpper(extShort)
+		}
+		kind, typeIcon := tripDocumentFileTypeVisual(extShort, category, fileName)
+		tagAccent := strings.Contains(strings.ToLower(category), "ticket")
+		search := strings.ToLower(strings.TrimSpace(itemName + " " + fileName + " " + dn + " " + category + " " + section))
+		rows = append(rows, tripDocumentRow{
+			ID:           id,
+			Section:      section,
+			FileKind:     kind,
+			FileTypeIcon: typeIcon,
+			TagAccent:    tagAccent,
+			Category:     category,
+			ItemName:     itemName,
+			FileName:     fileName,
+			DisplayName:  dn,
+			FileExt:      fileExt,
+			FilePath:     filePath,
+			FileSize:     fileSize,
+			UploadedAt:   uploadedAt,
+			SearchText:   search,
+		})
+	}
+	for _, d := range saved {
+		add(d.ID, d.Section, d.Category, d.ItemName, d.FileName, d.FilePath, d.UploadedAt, d.FileSize, d.DisplayName)
+	}
+	for _, l := range details.Lodgings {
+		size, ts := fileInfoFromWebPath(l.AttachmentPath)
+		add(uuid.NewString(), "accommodation", "Accommodation", l.Name, "", l.AttachmentPath, ts, size, "")
+	}
+	for _, v := range details.Vehicles {
+		size, ts := fileInfoFromWebPath(v.AttachmentPath)
+		add(uuid.NewString(), "vehicle", "Vehicle Rental", vehicleRentalTitleValue(v.VehicleDetail, v.PickUpLocation), "", v.AttachmentPath, ts, size, "")
+	}
+	for _, f := range details.Flights {
+		size, ts := fileInfoFromWebPath(f.DocumentPath)
+		add(uuid.NewString(), "flights", "Flights", flightTitleValue(f.FlightName, f.FlightNumber), "", f.DocumentPath, ts, size, "")
+	}
+	for _, e := range details.Expenses {
+		if !e.FromTab {
+			continue
+		}
+		size, ts := fileInfoFromWebPath(e.ReceiptPath)
+		itemName := strings.TrimSpace(e.Title)
+		if itemName == "" {
+			itemName = "Group Expense"
+		}
+		add(uuid.NewString(), "group-expenses", "Group Expenses", itemName, "", e.ReceiptPath, ts, size, "")
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rows[i].UploadedAt.After(rows[j].UploadedAt)
+	})
+	return rows
+}
+
+func collectTripDeletionFilePaths(details trips.TripDetails, docs []trips.TripDocument) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 64)
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if p := strings.TrimSpace(details.Trip.CoverImage); strings.HasPrefix(p, "/static/") {
+		add(p)
+	}
+	for _, it := range details.Itinerary {
+		add(it.ImagePath)
+	}
+	for _, l := range details.Lodgings {
+		add(l.AttachmentPath)
+		add(l.ImagePath)
+	}
+	for _, v := range details.Vehicles {
+		add(v.AttachmentPath)
+		add(v.VehicleImagePath)
+	}
+	for _, f := range details.Flights {
+		add(f.DocumentPath)
+		add(f.ImagePath)
+	}
+	for _, e := range details.Expenses {
+		add(e.ReceiptPath)
+	}
+	for _, d := range docs {
+		add(d.FilePath)
+	}
+	return out
+}
+
+func deleteTripUploadDirs(tripID string) error {
+	if !expenseUploadTripIDOK(tripID) {
+		return nil
+	}
+	dirs := []string{
+		filepath.Join("web", "static", "uploads", "expenses", tripID),
+		filepath.Join("web", "static", "uploads", "trip-documents", tripID),
+		filepath.Join("web", "static", "uploads", "covers", tripID),
+	}
+	var firstErr error
+	for _, dir := range dirs {
+		if err := os.RemoveAll(dir); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func dayNumberFromDate(startDate, endDate, itineraryDate string) (int, error) {
 	if itineraryDate == "" {
 		return 0, errors.New("date is required")
@@ -4536,15 +5174,37 @@ func dayNumberFromDate(startDate, endDate, itineraryDate string) (int, error) {
 	return int(selected.Sub(start).Hours()/24) + 1, nil
 }
 
+// absoluteURLForPublicStatic turns a root-relative /static/... path into an absolute URL for CSS url()
+// (some clients resolve relative URLs inside inline styles inconsistently).
+func absoluteURLForPublicStatic(r *http.Request, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || r == nil || !strings.HasPrefix(path, "/") {
+		return path
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if fp := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); fp == "https" || fp == "http" {
+		scheme = fp
+	}
+	host := strings.TrimSpace(r.Host)
+	if host == "" {
+		return path
+	}
+	return scheme + "://" + host + path
+}
+
 func normalizeDashboardHeroBackground(s string) string {
 	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, `\`, `/`)
 	if s == "" {
 		return "default"
 	}
 	if strings.HasPrefix(s, "pattern:") {
 		return s
 	}
-	if strings.HasPrefix(s, "https://") {
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") {
 		return s
 	}
 	if strings.HasPrefix(s, "/static/") {
@@ -4554,6 +5214,47 @@ func normalizeDashboardHeroBackground(s string) string {
 		return "/" + s
 	}
 	return s
+}
+
+func tripCoverThumbURL(cover string) string {
+	c := strings.TrimSpace(cover)
+	if c == "" || strings.HasPrefix(c, "pattern:") {
+		return ""
+	}
+	if c == "default" {
+		return "https://images.unsplash.com/photo-1527786356703-4b100091d2fc?auto=format&fit=crop&w=800&q=70"
+	}
+	if strings.HasPrefix(c, "https://") || strings.HasPrefix(c, "http://") || strings.HasPrefix(c, "/static/") {
+		return c
+	}
+	return ""
+}
+
+func tripPageHeroFields(cover string) (extraClasses string, inlineStyle template.CSS) {
+	c := strings.TrimSpace(cover)
+	switch {
+	case c == "":
+		return "", ""
+	case strings.HasPrefix(c, "pattern:"):
+		suf := strings.TrimPrefix(c, "pattern:")
+		switch suf {
+		case "dots", "grid", "noise", "waves":
+			return " hero-map--backdrop hero-map--pattern-" + suf, ""
+		}
+		return "", ""
+	case c == "default":
+		return " hero-map--backdrop hero-map--default-photo", ""
+	case strings.HasPrefix(c, "https://") || strings.HasPrefix(c, "http://") || strings.HasPrefix(c, "/static/"):
+		return " has-cover", tripHeroMapInlineBackground(c)
+	default:
+		return "", ""
+	}
+}
+
+func tripHeroMapInlineBackground(rawURL string) template.CSS {
+	u := strings.ReplaceAll(rawURL, `\`, `\\`)
+	u = strings.ReplaceAll(u, `"`, `\"`)
+	return template.CSS(fmt.Sprintf(`background-image: linear-gradient(130deg, rgba(0, 32, 70, 0.55), rgba(27, 54, 93, 0.55)), url("%s"); background-size: cover; background-position: center;`, u))
 }
 
 func normalizeTripCoverImageRef(s string) string {
@@ -4573,7 +5274,7 @@ func normalizeTripCoverImageRef(s string) string {
 	return s
 }
 
-func storeDashboardHeroUpload(r *http.Request, userID string) (string, error) {
+func storeDashboardHeroUpload(r *http.Request, userID string, maxBytes int64) (string, error) {
 	if !expenseUploadTripIDOK(userID) {
 		return "", errors.New("invalid user id")
 	}
@@ -4585,30 +5286,10 @@ func storeDashboardHeroUpload(r *http.Request, userID string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
-	default:
-		return "", errors.New("unsupported image type")
-	}
-	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
-	targetDir := filepath.Join("web", "static", "uploads", "hero", userID)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
-	}
-	targetPath := filepath.Join(targetDir, name)
-	dst, err := os.Create(targetPath)
-	if err != nil {
-		return "", err
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
-		return "", err
-	}
-	return "/static/uploads/hero/" + userID + "/" + name, nil
+	return SaveValidatedUpload(file, header, maxBytes, []string{"hero", userID}, UploadProfileImageOnly)
 }
 
-func storeTripCoverUpload(r *http.Request, tripID string) (string, error) {
+func storeTripCoverUpload(r *http.Request, tripID string, maxBytes int64) (string, error) {
 	if !expenseUploadTripIDOK(tripID) {
 		return "", errors.New("invalid trip id")
 	}
@@ -4620,30 +5301,10 @@ func storeTripCoverUpload(r *http.Request, tripID string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
-	default:
-		return "", errors.New("unsupported image type")
-	}
-	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
-	targetDir := filepath.Join("web", "static", "uploads", "covers", tripID)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
-	}
-	targetPath := filepath.Join(targetDir, name)
-	dst, err := os.Create(targetPath)
-	if err != nil {
-		return "", err
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
-		return "", err
-	}
-	return "/static/uploads/covers/" + tripID + "/" + name, nil
+	return SaveValidatedUpload(file, header, maxBytes, []string{"covers", tripID}, UploadProfileImageOnly)
 }
 
-func storeVehicleImage(r *http.Request, field string) (string, error) {
+func storeVehicleImage(r *http.Request, field string, maxBytes int64) (string, error) {
 	file, header, err := r.FormFile(field)
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
@@ -4652,29 +5313,10 @@ func storeVehicleImage(r *http.Request, field string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
-
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext == "" {
-		ext = ".jpg"
-	}
-	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
-	targetDir := filepath.Join("web", "static", "uploads", "vehicles")
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
-	}
-	targetPath := filepath.Join(targetDir, name)
-	dst, err := os.Create(targetPath)
-	if err != nil {
-		return "", err
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
-		return "", err
-	}
-	return "/static/uploads/vehicles/" + name, nil
+	return SaveValidatedUpload(file, header, maxBytes, []string{"vehicles"}, UploadProfileImageOnly)
 }
 
-func storeFlightDocument(r *http.Request, field string) (string, error) {
+func storeFlightDocument(r *http.Request, field string, maxBytes int64) (string, error) {
 	file, header, err := r.FormFile(field)
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
@@ -4683,26 +5325,7 @@ func storeFlightDocument(r *http.Request, field string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
-
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext == "" {
-		ext = ".bin"
-	}
-	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
-	targetDir := filepath.Join("web", "static", "uploads", "flights")
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
-	}
-	targetPath := filepath.Join(targetDir, name)
-	dst, err := os.Create(targetPath)
-	if err != nil {
-		return "", err
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
-		return "", err
-	}
-	return "/static/uploads/flights/" + name, nil
+	return SaveValidatedUpload(file, header, maxBytes, []string{"flights"}, UploadProfileBookingAttachment)
 }
 
 func expenseUploadTripIDOK(id string) bool {
@@ -4739,9 +5362,12 @@ func expenseReceiptWebPathAllowed(clean string) bool {
 }
 
 // storeExpenseReceipt saves multipart field to web/static/uploads/expenses/{tripID}/ and returns a web path, or "" if no file.
-func storeExpenseReceipt(r *http.Request, tripID, field string) (string, error) {
+func storeExpenseReceipt(r *http.Request, tripID, field string, maxBytes int64) (string, error) {
 	if !expenseUploadTripIDOK(tripID) {
 		return "", errors.New("invalid trip id")
+	}
+	if !strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		return "", nil
 	}
 	file, header, err := r.FormFile(field)
 	if err != nil {
@@ -4751,26 +5377,7 @@ func storeExpenseReceipt(r *http.Request, tripID, field string) (string, error) 
 		return "", err
 	}
 	defer file.Close()
-
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext == "" {
-		ext = ".bin"
-	}
-	name := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
-	targetDir := filepath.Join("web", "static", "uploads", "expenses", tripID)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
-	}
-	targetPath := filepath.Join(targetDir, name)
-	dst, err := os.Create(targetPath)
-	if err != nil {
-		return "", err
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
-		return "", err
-	}
-	return "/static/uploads/expenses/" + tripID + "/" + name, nil
+	return SaveValidatedUpload(file, header, maxBytes, []string{"expenses", tripID}, UploadProfileReceipt)
 }
 
 func formatDateTimeDisplay(raw string) string {
@@ -4784,8 +5391,21 @@ func formatDateTimeDisplay(raw string) string {
 	return parsed.Format("02-01-2006 | 03:04 PM")
 }
 
+func humanFileSize(size int64) string {
+	if size <= 0 {
+		return "—"
+	}
+	if size < 1024 {
+		return fmt.Sprintf("%d B", size)
+	}
+	if size < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(size)/1024.0)
+	}
+	return fmt.Sprintf("%.2f MB", float64(size)/(1024.0*1024.0))
+}
+
 // formatTripDateTime formats datetime-local values using the trip’s date order and 12h/24h preference (trip detail pages only).
-func formatTripDateTime(t trips.Trip, raw string) string {
+func formatTripDateTime(t trips.Trip, app trips.AppSettings, raw string) string {
 	if strings.TrimSpace(raw) == "" {
 		return "--"
 	}
@@ -4793,7 +5413,8 @@ func formatTripDateTime(t trips.Trip, raw string) string {
 	if err != nil {
 		return raw
 	}
-	dateLayout := trips.UIDateNumericLayout(t.UIDateFormat)
+	eff := trips.EffectiveUIDateFormat(t.UIDateFormat, app.DefaultUIDateFormat)
+	dateLayout := trips.UIDateNumericLayout(eff)
 	if trips.UITimeFormatIs24h(t.UITimeFormat) {
 		return parsed.Format(dateLayout + " | 15:04")
 	}
@@ -4834,30 +5455,35 @@ func extractTripFromTemplate(v any) (trips.Trip, bool) {
 	}
 }
 
-// formatTripUIDate renders a stored YYYY-MM-DD using the trip’s MM-DD-YYYY vs DD-MM-YYYY preference (templates pass .Trip or a dashboard card).
-func formatTripUIDate(ctx any, iso string) string {
+// formatTripUIDate renders a stored YYYY-MM-DD using effective trip/site date order (templates pass .Trip or dashboard card + .Settings).
+func formatTripUIDate(ctx any, app trips.AppSettings, iso string) string {
 	t, ok := extractTripFromTemplate(ctx)
-	layout := "02-01-2006"
+	layout := trips.UIDateNumericLayout(trips.NormalizeUIDateFormat(app.DefaultUIDateFormat))
 	if ok {
-		layout = trips.UIDateNumericLayout(t.UIDateFormat)
+		eff := trips.EffectiveUIDateFormat(t.UIDateFormat, app.DefaultUIDateFormat)
+		layout = trips.UIDateNumericLayout(eff)
 	}
 	return trips.FormatISODate(iso, layout)
 }
 
-func formatTripDateRange(ctx any, startISO, endISO string) string {
+func formatTripDateRange(ctx any, app trips.AppSettings, startISO, endISO string) string {
 	t, ok := extractTripFromTemplate(ctx)
 	if !ok {
 		t = trips.Trip{}
 	}
-	return formatTripDateRangeForTrip(t, startISO, endISO)
+	t2 := t
+	t2.UIDateFormat = trips.EffectiveUIDateFormat(t.UIDateFormat, app.DefaultUIDateFormat)
+	return formatTripDateRangeForTrip(t2, startISO, endISO)
 }
 
-func formatTripDateShort(ctx any, startISO, endISO string) string {
+func formatTripDateShort(ctx any, app trips.AppSettings, startISO, endISO string) string {
 	t, ok := extractTripFromTemplate(ctx)
 	if !ok {
 		t = trips.Trip{}
 	}
-	return formatTripDateShortForTrip(t, startISO, endISO)
+	t2 := t
+	t2.UIDateFormat = trips.EffectiveUIDateFormat(t.UIDateFormat, app.DefaultUIDateFormat)
+	return formatTripDateShortForTrip(t2, startISO, endISO)
 }
 
 func formatTripDateRangeForTrip(t trips.Trip, startISO, endISO string) string {
@@ -4891,7 +5517,10 @@ func formatTripDateRangeForTrip(t trips.Trip, startISO, endISO string) string {
 	return st.Format("2 Jan 2006") + " – " + en.Format("2 Jan 2006")
 }
 
-func formatTripDateShortForTrip(t trips.Trip, startISO, endISO string) string {
+// formatTripDateShortForTrip renders compact ranges for dashboard mobile cards:
+// same calendar month: "d – d Mon"; same year, different months: "d Mon – d Mon";
+// different years: "d Mon 'yy – d Mon 'yy". (Trip UIDateFormat does not apply here.)
+func formatTripDateShortForTrip(_ trips.Trip, startISO, endISO string) string {
 	s := strings.TrimSpace(startISO)
 	e := strings.TrimSpace(endISO)
 	if s == "" || e == "" {
@@ -4902,23 +5531,19 @@ func formatTripDateShortForTrip(t trips.Trip, startISO, endISO string) string {
 	if err1 != nil || err2 != nil || en.Before(st) {
 		return ""
 	}
-	mdy := trips.UIDateIsMDY(t.UIDateFormat)
-	if mdy {
-		if st.Year() == en.Year() && st.Month() == en.Month() {
-			return st.Format("Jan 2") + " – " + strconv.Itoa(en.Day())
+	y2 := func(y int) int { return y % 100 }
+	if st.Year() != en.Year() {
+		return fmt.Sprintf("%d %s '%02d – %d %s '%02d",
+			st.Day(), st.Format("Jan"), y2(st.Year()),
+			en.Day(), en.Format("Jan"), y2(en.Year()))
+	}
+	if st.Month() == en.Month() {
+		if st.Day() == en.Day() {
+			return fmt.Sprintf("%d %s", st.Day(), st.Format("Jan"))
 		}
-		if st.Year() == en.Year() {
-			return st.Format("Jan 2") + " – " + en.Format("Jan 2")
-		}
-		return st.Format("Jan 2, 2006") + " – " + en.Format("Jan 2, 2006")
+		return fmt.Sprintf("%d – %d %s", st.Day(), en.Day(), st.Format("Jan"))
 	}
-	if st.Year() == en.Year() && st.Month() == en.Month() {
-		return st.Format("2 Jan") + " – " + strconv.Itoa(en.Day())
-	}
-	if st.Year() == en.Year() {
-		return st.Format("2 Jan") + " – " + en.Format("2 Jan")
-	}
-	return st.Format("2 Jan 2006") + " – " + en.Format("2 Jan 2006")
+	return fmt.Sprintf("%d %s – %d %s", st.Day(), st.Format("Jan"), en.Day(), en.Format("Jan"))
 }
 
 func formatTripMoney(amount float64) string {
@@ -5107,6 +5732,7 @@ func deleteUploadedFileByWebPath(webPath string) error {
 	allowed := strings.HasPrefix(clean, "static/uploads/bookings/") ||
 		strings.HasPrefix(clean, "static/uploads/vehicles/") ||
 		strings.HasPrefix(clean, "static/uploads/flights/") ||
+		strings.HasPrefix(clean, "static/uploads/trip-documents/") ||
 		strings.HasPrefix(clean, "static/uploads/hero/") ||
 		strings.HasPrefix(clean, "static/uploads/covers/")
 	if strings.HasPrefix(clean, "static/uploads/expenses/") {

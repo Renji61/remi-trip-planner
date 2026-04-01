@@ -4,7 +4,7 @@
               {{$catStyle := expenseCategoryStyle .Category}}
               {{$thumb := tabPayerThumb $.Party $.TripGuests $.TabDepartedParticipants $pb}}
               {{$tabRowCanEdit := and (not $.Trip.IsArchived) (eq $.CurrentUserID $.Trip.OwnerUserID) (eq .LodgingID "") (not (index $.VehicleExpenseLocked .ID)) (not (index $.FlightExpenseLocked .ID))}}
-              <tr class="tab-expense-row" data-tab-tx-view="{{.ID}}" tabindex="{{if $tabRowCanEdit}}0{{else}}-1{{end}}" data-tab-exp-category="{{.Category}}" data-tab-exp-search="{{if .Title}}{{.Title}} {{end}}{{.Category}} {{$thumb.Name}} {{tabSplitModeShort .SplitMode}} {{$.CurrencySymbol}}{{printf "%.2f" .Amount}} {{$.CurrencySymbol}}{{printf "%.2f" (index $.TabYourShareByExpenseID .ID)}}{{if .SpentOn}} {{formatTripUIDate $.Trip .SpentOn}}{{end}}{{if .Notes}} {{.Notes}}{{end}}">
+              <tr class="tab-expense-row" data-tab-tx-view="{{.ID}}" tabindex="{{if $tabRowCanEdit}}0{{else}}-1{{end}}" data-tab-exp-category="{{.Category}}" data-tab-exp-search="{{if .Title}}{{.Title}} {{end}}{{.Category}} {{$thumb.Name}} {{tabSplitModeShort .SplitMode}} {{$.CurrencySymbol}}{{printf "%.2f" .Amount}} {{$.CurrencySymbol}}{{printf "%.2f" (index $.TabYourShareByExpenseID .ID)}}{{if .SpentOn}} {{formatTripUIDate $.Trip $.Settings .SpentOn}}{{end}}{{if .Notes}} {{.Notes}}{{end}}">
                 <td class="tab-exp-col-expense">
                   <div class="tab-exp-title-cell">
                     <span class="tab-exp-cat-icon expense-cat-icon expense-cat-icon--{{$catStyle}}" aria-hidden="true">
@@ -12,7 +12,7 @@
                     </span>
                     <div class="tab-exp-title-text">
                       <strong class="tab-exp-desc-title">{{if .Title}}{{.Title}}{{else}}{{.Category}}{{end}}</strong>
-                      <span class="muted tab-exp-title-meta">{{if .SpentOn}}{{formatTripUIDate $.Trip .SpentOn}}{{else}}—{{end}} · {{.Category}}</span>
+                      <span class="muted tab-exp-title-meta">{{if .SpentOn}}{{formatTripUIDate $.Trip $.Settings .SpentOn}}{{else}}—{{end}} · {{.Category}}</span>
                     </div>
                   </div>
                 </td>
@@ -37,6 +37,7 @@
                     <div class="trip-inline-actions-buttons">
                       <button type="button" class="item-action-btn" data-inline-edit-open="tab-expense-edit-{{.ID}}">Edit</button>
                       <form method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this group expense?" data-confirm-body="This removes the expense from your trip ledger." data-confirm-ok="Delete" data-confirm-icon="receipt_long" data-confirm-variant="danger" data-ajax-submit data-toast-message="Entry deleted.">
+                        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                         <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/group-expenses">
                         <button type="submit" class="item-action-btn danger">Delete</button>
                       </form>
@@ -60,6 +61,7 @@
               data-initial-json="{{.SplitJSON}}"
             >
             <form id="tab-expense-edit-{{.ID}}" method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ID}}/update" class="form-grid item-edit full tab-expense-edit-form" enctype="multipart/form-data" data-ajax-submit data-toast-message="Entry updated." data-tab-expense-id="{{.ID}}">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
               <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/group-expenses">
               <input type="hidden" name="tab_meta_submitted" value="1">
               <input type="hidden" name="split_mode" value="{{.SplitMode}}" data-tab-split-mode>
@@ -91,8 +93,8 @@
                   <option value="Mobile Payment" {{if eq $curMethod "Mobile Payment"}}selected{{end}}>Mobile Payment</option>
                 </select>
               </label>
-              <label>Amount<input type="number" step="0.01" name="amount" value="{{printf "%.2f" .Amount}}" required data-tab-amount-input></label>
-              <label>Date<input type="date" name="spent_on" value="{{.SpentOn}}"></label>
+              <label>Amount<input type="number" step="0.01" min="0" name="amount" value="{{printf "%.2f" .Amount}}" required data-tab-amount-input></label>
+              <label>Date{{template "remiDateField" (dict "name" "spent_on" "value" .SpentOn "mdy" (effectiveUIDateIsMDY $.Trip $.Settings))}}</label>
               <label class="full">Paid by
                 <select name="paid_by" required data-tab-paid-by>
                   {{$paid := .PaidBy}}
@@ -120,11 +122,12 @@
                 {{template "tabSplitBreakdownShell" (dict "Party" $.Party "TripGuests" $.TripGuests "TabDepartedParticipants" $.TabDepartedParticipants "CurrencySymbol" $.CurrencySymbol "CurrentUserID" $.CurrentUserID "Trip" $.Trip "PaidByKey" .PaidBy)}}
               </div>
               <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}"></label>
+              <input type="hidden" name="current_tab_attachment_path" value="{{.ReceiptPath}}">
               {{if .ReceiptPath}}
               <p class="full muted">Current attachment: <a href="{{.ReceiptPath}}" target="_blank" rel="noopener">Open receipt</a></p>
-              <label class="full"><input type="checkbox" name="remove_tab_attachment" value="1"> Remove attachment</label>
               {{end}}
-              <label class="full">Replace attachment (optional)<input type="file" name="tab_attachment" accept=".pdf,image/*"></label>
+              {{template "remiRemoveTabAttachmentCheckbox"}}
+              <label class="full">Replace receipt (optional)<input type="file" name="tab_attachment" accept=".pdf,image/*"></label>
               <div class="full expense-edit-actions">
                 <button type="submit">Save</button>
                 <button type="button" class="secondary-btn" data-inline-edit-cancel="tab-expense-edit-{{.ID}}">Cancel</button>
@@ -142,9 +145,9 @@
           {{$gpb := tabEffectivePaidBy . $.Trip.OwnerUserID}}
           {{$gcat := expenseCategoryStyle .Category}}
           {{$tabGridCanEdit := and (not $.Trip.IsArchived) (eq $.CurrentUserID $.Trip.OwnerUserID) (eq .LodgingID "") (not (index $.VehicleExpenseLocked .ID)) (not (index $.FlightExpenseLocked .ID))}}
-          <article class="tab-exp-grid-card" data-tab-tx-view="{{.ID}}" tabindex="{{if $tabGridCanEdit}}0{{else}}-1{{end}}" data-tab-exp-category="{{.Category}}" data-tab-exp-search="{{if .Title}}{{.Title}} {{end}}{{.Category}} {{index $.TabParticipantLabels $gpb}} {{tabSplitModeShort .SplitMode}} {{$.CurrencySymbol}}{{printf "%.2f" .Amount}} {{$.CurrencySymbol}}{{printf "%.2f" (index $.TabYourShareByExpenseID .ID)}}{{if .SpentOn}} {{formatTripUIDate $.Trip .SpentOn}}{{end}}{{if .Notes}} {{.Notes}}{{end}}">
+          <article class="tab-exp-grid-card" data-tab-tx-view="{{.ID}}" tabindex="{{if $tabGridCanEdit}}0{{else}}-1{{end}}" data-tab-exp-category="{{.Category}}" data-tab-exp-search="{{if .Title}}{{.Title}} {{end}}{{.Category}} {{index $.TabParticipantLabels $gpb}} {{tabSplitModeShort .SplitMode}} {{$.CurrencySymbol}}{{printf "%.2f" .Amount}} {{$.CurrencySymbol}}{{printf "%.2f" (index $.TabYourShareByExpenseID .ID)}}{{if .SpentOn}} {{formatTripUIDate $.Trip $.Settings .SpentOn}}{{end}}{{if .Notes}} {{.Notes}}{{end}}">
             <div class="tab-exp-grid-top">
-              <span class="tab-exp-grid-date">{{if .SpentOn}}{{formatTripUIDate $.Trip .SpentOn}}{{else}}—{{end}}</span>
+              <span class="tab-exp-grid-date">{{if .SpentOn}}{{formatTripUIDate $.Trip $.Settings .SpentOn}}{{else}}—{{end}}</span>
               <span class="tab-exp-cat-pill tab-exp-cat-pill--{{$gcat}}">{{.Category}}</span>
             </div>
             <h4 class="tab-exp-grid-title">{{if .Title}}{{.Title}}{{else}}{{.Category}}{{end}}</h4>

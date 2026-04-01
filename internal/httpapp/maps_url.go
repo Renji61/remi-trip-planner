@@ -33,18 +33,43 @@ func locationLineBeforeComma(s string) string {
 	return s
 }
 
-// itineraryNotesDisplay removes noisy attachment suffixes that are internal plumbing
-// (e.g. "| Attachment: /static/uploads/...") from itinerary note text.
+// itineraryNotesDisplay removes noisy attachment segments that are internal plumbing.
+// buildLodgingCheckInNotes may append " | Attachment: /static/..." or, when nothing else
+// is present, only "Attachment: /static/..." (no leading pipe).
 func itineraryNotesDisplay(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
-	lower := strings.ToLower(s)
-	if i := strings.Index(lower, "| attachment:"); i >= 0 {
-		return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s[:i]), "|"))
+	parts := strings.Split(s, " | ")
+	var kept []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(p), "attachment:") {
+			continue
+		}
+		kept = append(kept, p)
 	}
-	return s
+	out := strings.TrimSpace(strings.Join(kept, " | "))
+	if strings.Contains(out, "\n") {
+		lines := strings.Split(out, "\n")
+		var kl []string
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if strings.HasPrefix(strings.ToLower(line), "attachment:") {
+				continue
+			}
+			kl = append(kl, line)
+		}
+		out = strings.TrimSpace(strings.Join(kl, "\n"))
+	}
+	return out
 }
 
 // isImageWebPath reports whether a stored web path likely points to an image file.

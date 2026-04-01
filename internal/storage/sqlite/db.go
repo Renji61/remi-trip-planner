@@ -92,6 +92,7 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	for _, stmt := range []string{
 		`ALTER TABLE app_settings ADD COLUMN google_maps_api_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE app_settings ADD COLUMN default_distance_unit TEXT NOT NULL DEFAULT 'km'`,
+		`ALTER TABLE app_settings ADD COLUMN max_upload_file_size_mb INTEGER NOT NULL DEFAULT 5`,
 		`ALTER TABLE trips ADD COLUMN distance_unit TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle_rentals ADD COLUMN drop_off_location TEXT NOT NULL DEFAULT ''`,
 	} {
@@ -135,12 +136,16 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	for _, stmt := range []string{
 		`ALTER TABLE trips ADD COLUMN home_map_latitude REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE trips ADD COLUMN home_map_longitude REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE trips ADD COLUMN home_map_place_label TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return nil, err
 		}
 	}
 	if _, err = db.Exec(`ALTER TABLE app_settings ADD COLUMN map_default_place_label TEXT NOT NULL DEFAULT 'Tokyo'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE app_settings ADD COLUMN default_ui_date_format TEXT NOT NULL DEFAULT 'dmy'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}
 	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN budget_cap REAL NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
@@ -223,6 +228,37 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN ui_date_format TEXT NOT NULL DEFAULT 'dmy'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE lodging_entries ADD COLUMN image_path TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vehicle_rentals ADD COLUMN attachment_path TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE flight_entries ADD COLUMN image_path TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE itinerary_items ADD COLUMN image_path TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS trip_documents (
+			id TEXT PRIMARY KEY,
+			trip_id TEXT NOT NULL,
+			section TEXT NOT NULL DEFAULT '',
+			category TEXT NOT NULL DEFAULT '',
+			item_name TEXT NOT NULL DEFAULT '',
+			file_name TEXT NOT NULL DEFAULT '',
+			file_path TEXT NOT NULL DEFAULT '',
+			file_size INTEGER NOT NULL DEFAULT 0,
+			uploaded_at DATETIME NOT NULL,
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_trip_documents_trip ON trip_documents(trip_id, uploaded_at DESC)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE trip_documents ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}
 	return db, nil

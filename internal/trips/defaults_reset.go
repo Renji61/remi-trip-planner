@@ -19,6 +19,8 @@ func DefaultAppSettings() AppSettings {
 		DashboardHeroBackground: "default",
 		DefaultDistanceUnit:     "km",
 		GoogleMapsAPIKey:        "",
+		MaxUploadFileSizeMB:     5,
+		DefaultUIDateFormat:     "dmy",
 	}
 }
 
@@ -50,7 +52,7 @@ func ApplyDefaultTripUIPresets(t *Trip) {
 	t.UISpendsExpand = "first"
 	t.UITabExpand = "first"
 	t.UITimeFormat = "12h"
-	t.UIDateFormat = "dmy"
+	t.UIDateFormat = "inherit"
 	t.UILabelStay = ""
 	t.UILabelVehicle = ""
 	t.UILabelFlights = ""

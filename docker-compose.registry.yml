@@ -25,6 +25,7 @@ services:
       SQLITE_PATH: /app/data/trips.db
     volumes:
       - remi-data:/app/data
+      - remi-uploads:/app/web/static/uploads
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
@@ -34,3 +35,4 @@ services:
 
 volumes:
   remi-data:
+  remi-uploads:

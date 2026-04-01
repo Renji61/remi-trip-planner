@@ -1,0 +1,14 @@
+{{define "remiDateTimeField"}}
+{{- $name := index . "name" -}}
+{{- $value := index . "value" -}}
+{{- $min := index . "min" -}}
+{{- $max := index . "max" -}}
+{{- $mdy := index . "mdy" -}}
+{{- $inputClass := index . "input_class" -}}
+{{- $dph := "DD-MM-YYYY" -}}{{if $mdy}}{{$dph = "MM-DD-YYYY"}}{{end}}
+<span class="remi-datetime-field" data-remi-datetime data-mdy="{{if $mdy}}1{{else}}0{{end}}"{{if $min}} data-min="{{$min}}"{{end}}{{if $max}} data-max="{{$max}}"{{end}}>
+  <input type="hidden" name="{{$name}}" value="{{$value}}" class="remi-datetime-iso" autocomplete="off">
+  <input type="text" class="remi-date-visible remi-datetime-date-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$dph}}" spellcheck="false" readonly{{if index . "required"}} required{{end}} aria-label="Date">
+  <input type="text" class="remi-datetime-time-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="hh:mm AM" spellcheck="false" readonly{{if index . "required"}} required{{end}} aria-label="Time">
+</span>
+{{end}}

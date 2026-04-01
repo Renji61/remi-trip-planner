@@ -136,13 +136,13 @@ type TabTimeSeriesPoint struct {
 	Amount float64 `json:"amount"`
 }
 
-func tabSpendingOverTimeSeries(trip trips.Trip, tab []trips.Expense) []TabTimeSeriesPoint {
+func tabSpendingOverTimeSeries(trip trips.Trip, effUIDate string, tab []trips.Expense) []TabTimeSeriesPoint {
 	start, end, ok := tabTripDateRange(trip.StartDate, trip.EndDate, tab)
 	if !ok {
 		return nil
 	}
 	labelLayout := "02-Jan"
-	if trips.UIDateIsMDY(trip.UIDateFormat) {
+	if trips.UIDateIsMDY(effUIDate) {
 		labelLayout = "Jan-02"
 	}
 	byDay := map[string]float64{}
@@ -268,7 +268,7 @@ func tabPayerChartRows(tab []trips.Expense, ownerID string, labels map[string]st
 	})
 }
 
-func tabTimeChartRows(trip trips.Trip, tab []trips.Expense) []TabChartRow {
+func tabTimeChartRows(trip trips.Trip, effUIDate string, tab []trips.Expense) []TabChartRow {
 	m := map[string]float64{}
 	for _, e := range tab {
 		d := strings.TrimSpace(e.SpentOn)
@@ -288,7 +288,7 @@ func tabTimeChartRows(trip trips.Trip, tab []trips.Expense) []TabChartRow {
 			max = v
 		}
 	}
-	layout := trips.UIDateNumericLayout(trip.UIDateFormat)
+	layout := trips.UIDateNumericLayout(effUIDate)
 	var rows []TabChartRow
 	for _, k := range keys {
 		pct := 0.0
@@ -404,8 +404,14 @@ func (a *app) resolveTabSplitForRequest(ctx context.Context, tripID string, trip
 	guests, _ := a.tripService.ListTripGuests(ctx, tripID)
 	departed, _ := a.tripService.ListDepartedTabParticipants(ctx, tripID)
 	allowed := tabAllowedParticipantKeys(party, guests, departed)
+	quickEqualAll := strings.TrimSpace(strings.ToLower(r.FormValue("quick_tab_equal_all"))) == "1" ||
+		strings.TrimSpace(strings.ToLower(r.FormValue("quick_tab_equal_all"))) == "true"
 
-	if splitMode == "" && splitJSON == "" {
+	if quickEqualAll && splitMode == "" && splitJSON == "" {
+		// Quick add on Trip Details always starts from equal split across all current members + guests.
+		splitMode = trips.TabSplitEqual
+		splitJSON = buildEqualSplitJSON(party, guests)
+	} else if splitMode == "" && splitJSON == "" {
 		if strings.TrimSpace(trip.TabDefaultSplitMode) != "" && strings.TrimSpace(trip.TabDefaultSplitJSON) != "" {
 			splitMode = trip.TabDefaultSplitMode
 			splitJSON = trip.TabDefaultSplitJSON

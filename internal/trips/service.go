@@ -24,13 +24,14 @@ type Trip struct {
 	CoverImage     string
 	CurrencyName   string
 	CurrencySymbol string
-	// HomeMapLatitude/Longitude: optional center from dashboard “Trip name” place pick (0 = use app map defaults).
-	HomeMapLatitude  float64
-	HomeMapLongitude float64
-	IsArchived       bool
-	OwnerUserID      string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// HomeMapLatitude/Longitude: optional center from dashboard / trip settings place pick (0 = use app map defaults).
+	HomeMapLatitude   float64
+	HomeMapLongitude  float64
+	HomeMapPlaceLabel string // display label for chosen map center (optional)
+	IsArchived        bool
+	OwnerUserID       string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 	// BudgetCap: trip spending cap for Budget Limit UI; when > 0 it overrides legacy computed allocation.
 	BudgetCap float64
 	// Per-trip UI: section visibility on trip page and nav (default all enabled).
@@ -49,7 +50,7 @@ type Trip struct {
 	UITabExpand string
 	// UITimeFormat: 12h | 24h for displayed datetimes and clock times.
 	UITimeFormat string
-	// UIDateFormat: mdy (MM-DD-YYYY) | dmy (DD-MM-YYYY) for displayed calendar dates.
+	// UIDateFormat: mdy | dmy | inherit (use site default_ui_date_format for display).
 	UIDateFormat         string
 	UILabelStay          string
 	UILabelVehicle       string
@@ -81,6 +82,7 @@ type ItineraryItem struct {
 	Title     string
 	Notes     string
 	Location  string
+	ImagePath string
 	Latitude  float64
 	Longitude float64
 	EstCost   float64
@@ -218,6 +220,7 @@ type Lodging struct {
 	Cost                float64
 	Notes               string
 	AttachmentPath      string
+	ImagePath           string
 	CheckInItineraryID  string
 	CheckOutItineraryID string
 	CreatedAt           time.Time
@@ -233,6 +236,7 @@ type VehicleRental struct {
 	DropOffAt           string
 	BookingConfirmation string
 	Notes               string
+	AttachmentPath      string
 	VehicleImagePath    string
 	Cost                float64
 	InsuranceCost       float64
@@ -256,6 +260,7 @@ type Flight struct {
 	BookingConfirmation string
 	Notes               string
 	DocumentPath        string
+	ImagePath           string
 	Cost                float64
 	DepartItineraryID   string
 	ArriveItineraryID   string
@@ -294,6 +299,23 @@ type AppSettings struct {
 	DefaultDistanceUnit string
 	// UserDistanceUnit: merged from user_settings (per-user override); not a DB column on app_settings.
 	UserDistanceUnit string
+	// MaxUploadFileSizeMB: per-file upload cap across trip documents and entry attachments.
+	MaxUploadFileSizeMB int
+	// DefaultUIDateFormat: instance default mdy | dmy when trip UIDateFormat is inherit.
+	DefaultUIDateFormat string
+}
+
+type TripDocument struct {
+	ID          string
+	TripID      string
+	Section     string
+	Category    string
+	ItemName    string
+	FileName    string
+	DisplayName string
+	FilePath    string
+	FileSize    int64
+	UploadedAt  time.Time
 }
 
 type TripDetails struct {
@@ -415,6 +437,10 @@ type Repository interface {
 	DeleteTabSettlement(ctx context.Context, tripID, settlementID string) error
 	SearchTabExpenseIDs(ctx context.Context, tripID, query string) ([]string, error)
 	UpdateTripTabDefaults(ctx context.Context, tripID, mode, splitJSON string) error
+	ListTripDocuments(ctx context.Context, tripID string) ([]TripDocument, error)
+	AddTripDocument(ctx context.Context, doc TripDocument) error
+	UpdateTripDocumentDisplayName(ctx context.Context, tripID, documentID, displayName string) error
+	DeleteTripDocument(ctx context.Context, tripID, documentID string) error
 }
 
 type Service struct {
@@ -449,6 +475,7 @@ func (s *Service) CreateTrip(ctx context.Context, t Trip) (tripID string, err er
 	if t.Name == "" {
 		return "", errors.New("trip name is required")
 	}
+	t.CoverImage = NormalizeTripCoverValue(t.CoverImage)
 	return s.repo.CreateTrip(ctx, t)
 }
 
@@ -731,6 +758,7 @@ func (s *Service) UpdateTrip(ctx context.Context, t Trip) error {
 	if current.IsArchived {
 		return errors.New("archived trips are read-only")
 	}
+	t.CoverImage = NormalizeTripCoverValue(t.CoverImage)
 	return s.repo.UpdateTrip(ctx, t)
 }
 
@@ -1586,15 +1614,12 @@ func spendNotesPlaceLabel(s string) string {
 }
 
 func vehicleExpenseNotes(v VehicleRental, kind string) string {
-	parts := []string{"Vehicle Rental", kind}
-	if v.VehicleDetail != "" {
-		parts = append(parts, "Vehicle rental: "+v.VehicleDetail)
+	parts := []string{}
+	if n := strings.TrimSpace(v.VehicleDetail); n != "" {
+		parts = append(parts, n)
 	}
-	if v.BookingConfirmation != "" {
-		parts = append(parts, "Booking: "+v.BookingConfirmation)
-	}
-	if v.Notes != "" {
-		parts = append(parts, v.Notes)
+	if b := strings.TrimSpace(v.BookingConfirmation); b != "" {
+		parts = append(parts, "Booking: "+b)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -1700,11 +1725,8 @@ func lodgingExpenseNotes(l Lodging) string {
 	if n := strings.TrimSpace(l.Name); n != "" {
 		parts = append(parts, spendNotesPlaceLabel(n))
 	}
-	if l.BookingConfirmation != "" {
-		parts = append(parts, "Booking: "+l.BookingConfirmation)
-	}
-	if l.Notes != "" {
-		parts = append(parts, l.Notes)
+	if b := strings.TrimSpace(l.BookingConfirmation); b != "" {
+		parts = append(parts, "Booking: "+b)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -1721,16 +1743,15 @@ func lodgingExpenseSpentOn(l Lodging) string {
 }
 
 func flightExpenseNotes(f Flight) string {
-	parts := []string{"Flight"}
-	label := flightLabelValue(f.FlightName, f.FlightNumber)
-	if label != "" {
-		parts = append(parts, label)
+	parts := []string{}
+	if n := strings.TrimSpace(f.FlightName); n != "" {
+		parts = append(parts, n)
 	}
-	if f.BookingConfirmation != "" {
-		parts = append(parts, "Booking: "+f.BookingConfirmation)
+	if n := strings.TrimSpace(f.FlightNumber); n != "" {
+		parts = append(parts, n)
 	}
-	if f.Notes != "" {
-		parts = append(parts, f.Notes)
+	if b := strings.TrimSpace(f.BookingConfirmation); b != "" {
+		parts = append(parts, "Booking: "+b)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -1850,6 +1871,9 @@ func (s *Service) GetAppSettings(ctx context.Context) (AppSettings, error) {
 	settings.DashboardTripLayout = normalizeDashboardLayout(settings.DashboardTripLayout)
 	settings.DashboardTripSort = normalizeDashboardSort(settings.DashboardTripSort)
 	settings.DashboardHeroBackground = normalizeHeroBackground(settings.DashboardHeroBackground)
+	if settings.MaxUploadFileSizeMB <= 0 {
+		settings.MaxUploadFileSizeMB = 5
+	}
 	return settings, nil
 }
 
@@ -1881,7 +1905,52 @@ func (s *Service) SaveAppSettings(ctx context.Context, settings AppSettings) err
 	settings.DashboardTripLayout = normalizeDashboardLayout(settings.DashboardTripLayout)
 	settings.DashboardTripSort = normalizeDashboardSort(settings.DashboardTripSort)
 	settings.DashboardHeroBackground = normalizeHeroBackground(settings.DashboardHeroBackground)
+	if settings.MaxUploadFileSizeMB <= 0 {
+		settings.MaxUploadFileSizeMB = 5
+	}
 	return s.repo.SaveAppSettings(ctx, settings)
+}
+
+func (s *Service) ListTripDocuments(ctx context.Context, tripID string) ([]TripDocument, error) {
+	return s.repo.ListTripDocuments(ctx, tripID)
+}
+
+func (s *Service) AddTripDocument(ctx context.Context, doc TripDocument) error {
+	if strings.TrimSpace(doc.TripID) == "" {
+		return errors.New("trip id is required")
+	}
+	doc.Section = strings.TrimSpace(doc.Section)
+	doc.Category = strings.TrimSpace(doc.Category)
+	doc.ItemName = strings.TrimSpace(doc.ItemName)
+	doc.FileName = strings.TrimSpace(doc.FileName)
+	doc.DisplayName = strings.TrimSpace(doc.DisplayName)
+	if len(doc.DisplayName) > 512 {
+		doc.DisplayName = doc.DisplayName[:512]
+	}
+	doc.FilePath = strings.TrimSpace(doc.FilePath)
+	if doc.Section == "" {
+		doc.Section = "general"
+	}
+	if doc.Category == "" {
+		doc.Category = "General Documents"
+	}
+	return s.repo.AddTripDocument(ctx, doc)
+}
+
+func (s *Service) UpdateTripDocumentDisplayName(ctx context.Context, tripID, documentID, displayName string) error {
+	documentID = strings.TrimSpace(documentID)
+	if documentID == "" {
+		return errors.New("document id is required")
+	}
+	displayName = strings.TrimSpace(displayName)
+	if len(displayName) > 512 {
+		displayName = displayName[:512]
+	}
+	return s.repo.UpdateTripDocumentDisplayName(ctx, tripID, documentID, displayName)
+}
+
+func (s *Service) DeleteTripDocument(ctx context.Context, tripID, documentID string) error {
+	return s.repo.DeleteTripDocument(ctx, tripID, documentID)
 }
 
 func normalizeThemePreference(s string) string {
@@ -1911,6 +1980,36 @@ func normalizeDashboardSort(s string) string {
 	}
 }
 
+// NormalizeTripCoverValue returns a safe stored cover value: "", "default", pattern:<id>, an http(s) URL, or a /static uploads path.
+func NormalizeTripCoverValue(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.EqualFold(s, "default") {
+		return "default"
+	}
+	low := strings.ToLower(s)
+	if strings.HasPrefix(low, "pattern:") {
+		p := strings.TrimSpace(low[len("pattern:"):])
+		switch p {
+		case "dots", "grid", "noise", "waves":
+			return "pattern:" + p
+		}
+		return ""
+	}
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") {
+		return s
+	}
+	if strings.HasPrefix(s, "/static/") {
+		return s
+	}
+	if strings.HasPrefix(s, "static/uploads/") {
+		return "/" + s
+	}
+	return ""
+}
+
 // normalizeHeroBackground returns default, pattern:<id>, or an https:// image URL.
 func normalizeHeroBackground(s string) string {
 	s = strings.TrimSpace(s)
@@ -1927,6 +2026,34 @@ func normalizeHeroBackground(s string) string {
 		return "default"
 	}
 	if strings.HasPrefix(s, "https://") {
+		return s
+	}
+	return "default"
+}
+
+// CanonicalDashboardHeroBackground normalizes hero values from settings for UI (layout, Site settings, dashboard).
+func CanonicalDashboardHeroBackground(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, `\`, `/`)
+	if s == "" || strings.EqualFold(s, "default") {
+		return "default"
+	}
+	if !strings.HasPrefix(s, "/") && strings.HasPrefix(strings.ToLower(s), "static/uploads/") {
+		s = "/" + s
+	}
+	low := strings.ToLower(s)
+	if strings.HasPrefix(low, "pattern:") {
+		p := strings.TrimSpace(low[len("pattern:"):])
+		switch p {
+		case "dots", "grid", "noise", "waves":
+			return "pattern:" + p
+		}
+		return "default"
+	}
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") {
+		return s
+	}
+	if strings.HasPrefix(s, "/static/") {
 		return s
 	}
 	return "default"
