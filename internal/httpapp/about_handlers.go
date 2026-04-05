@@ -3,12 +3,14 @@ package httpapp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	ht "html"
 	"html/template"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -281,17 +283,25 @@ func (a *app) aboutPage(w http.ResponseWriter, r *http.Request) {
 }
 
 type aboutUpdateCheckResponse struct {
-	Current         string `json:"current"`
-	Latest          string `json:"latest"`
-	UpdateAvailable bool   `json:"update_available"`
-	CheckOK         bool   `json:"check_ok"`
-	Message         string `json:"message,omitempty"`
+	Current          string `json:"current"`
+	Latest           string `json:"latest"`
+	UpdateAvailable  bool   `json:"update_available"`
+	AheadOfPublished bool   `json:"ahead_of_published"`
+	CheckOK          bool   `json:"check_ok"`
+	Message          string `json:"message,omitempty"`
 }
 
 type ghReleaseListItem struct {
 	TagName    string `json:"tag_name"`
 	Draft      bool   `json:"draft"`
 	Prerelease bool   `json:"prerelease"`
+}
+
+// semverThreePart matches normalized X.Y.Z (no v prefix, no pre-release suffix).
+var semverThreePart = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+type ghTagListItem struct {
+	Name string `json:"name"`
 }
 
 // highestStableReleaseTag returns the greatest semver among published, non-draft, non-prerelease releases.
@@ -312,6 +322,85 @@ func highestStableReleaseTag(releases []ghReleaseListItem) string {
 	return best
 }
 
+// highestSemverFromGitTagNames returns the greatest X.Y.Z among git tag names (e.g. v1.49.1).
+// Tags with pre-release suffixes are ignored so "latest" stays a stable triplet.
+func highestSemverFromGitTagNames(names []string) string {
+	var best string
+	for _, raw := range names {
+		tag := changelog.NormalizeVersion(raw)
+		if tag == "" || !semverThreePart.MatchString(tag) {
+			continue
+		}
+		if best == "" || version.Compare(tag, best) > 0 {
+			best = tag
+		}
+	}
+	return best
+}
+
+func greaterSemver(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	if version.Compare(b, a) > 0 {
+		return b
+	}
+	return a
+}
+
+// latestUpstreamSemver combines GitHub Releases and git tags. Newer versions often exist only as
+// tags (CI) without a full GitHub Release object; Releases alone can incorrectly report an old
+// version (e.g. v1.40.0) as "latest".
+func latestUpstreamSemver(releases []ghReleaseListItem, tagNames []string) string {
+	return greaterSemver(highestStableReleaseTag(releases), highestSemverFromGitTagNames(tagNames))
+}
+
+func applyGitHubAPIHeaders(req *http.Request, appVersion string) {
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "REMI-Trip-Planner/"+appVersion)
+}
+
+// githubFetchJSONArray pages through GitHub list APIs (releases or tags), up to maxPages×100 items.
+func githubFetchJSONArray[T any](ctx context.Context, client *http.Client, resource string, appVersion string, maxPages int) ([]T, error) {
+	resource = strings.Trim(resource, "/")
+	var all []T
+	for page := 1; page <= maxPages; page++ {
+		u := fmt.Sprintf("https://api.github.com/repos/%s/%s?per_page=100&page=%d", version.GitHubRepo, resource, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		applyGitHubAPIHeaders(req, appVersion)
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("github %s: %s", resource, resp.Status)
+		}
+		var batch []T
+		if err := json.Unmarshal(body, &batch); err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		all = append(all, batch...)
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return all, nil
+}
+
 func (a *app) aboutUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	cur := version.Version
@@ -320,48 +409,41 @@ func (a *app) aboutUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		Latest:  cur,
 		CheckOK: false,
 	}
-	// GitHub's /releases/latest follows the repo "latest release" flag, which may lag behind
-	// newer tags. List releases and take the highest stable semver instead.
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet,
-		"https://api.github.com/repos/"+version.GitHubRepo+"/releases?per_page=100", nil)
-	if err != nil {
-		out.Message = "Could not prepare request."
-		_ = json.NewEncoder(w).Encode(out)
-		return
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "REMI-Trip-Planner/"+cur)
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
+	ctx := r.Context()
+	client := &http.Client{Timeout: 18 * time.Second}
+
+	releases, errRel := githubFetchJSONArray[ghReleaseListItem](ctx, client, "releases", cur, 10)
+	tags, errTags := githubFetchJSONArray[ghTagListItem](ctx, client, "tags", cur, 10)
+
+	if errRel != nil && errTags != nil {
 		out.Message = "Could not reach GitHub."
 		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		_, _ = io.ReadAll(io.LimitReader(resp.Body, 2048))
-		out.Message = "Release check failed."
-		if resp.StatusCode == http.StatusNotFound {
-			out.Message = "No releases found for this repository."
+
+	var relList []ghReleaseListItem
+	if errRel == nil {
+		relList = releases
+	}
+	var tagNames []string
+	if errTags == nil {
+		for _, t := range tags {
+			if n := strings.TrimSpace(t.Name); n != "" {
+				tagNames = append(tagNames, n)
+			}
 		}
-		_ = json.NewEncoder(w).Encode(out)
-		return
 	}
-	var releases []ghReleaseListItem
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&releases); err != nil {
-		out.Message = "Could not read releases."
-		_ = json.NewEncoder(w).Encode(out)
-		return
-	}
-	latest := highestStableReleaseTag(releases)
+
+	latest := latestUpstreamSemver(relList, tagNames)
 	if latest == "" {
-		out.Message = "No stable releases found for this repository."
+		out.Message = "No stable version found. GitHub returned no usable releases or vX.Y.Z tags."
 		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
+
 	out.Latest = latest
 	out.CheckOK = true
 	out.UpdateAvailable = version.Compare(latest, cur) > 0
+	out.AheadOfPublished = version.Compare(cur, latest) > 0
 	_ = json.NewEncoder(w).Encode(out)
 }

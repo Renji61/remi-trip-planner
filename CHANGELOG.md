@@ -10,6 +10,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.49.2] - 2026-04-08
+
+### Fixed
+
+- **About / update check** (`GET /api/about/update-check` and the About page): **latest** version is now the maximum stable **SemVer** across **GitHub Releases and git tags** (paginated API calls). Tags without a matching Release (e.g. CI-only **`v1.49.x`**) no longer leave the UI showing a stale “latest” such as **v1.40.0**. Response includes **`ahead_of_published`** when the running build is newer than that computed latest.
+
+### Changed
+
+- **Docker Compose:** removed the **`remi-volume-perms`** init service from **`docker-compose.yml`**, **`docker-compose.registry.yml`**, and **`docker-compose.install.yml`**; **volume ownership** is handled only by the image **`docker-entrypoint.sh`**, so the stack shows a single long-running service in Docker UIs.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.49.2`** (and GHCR tag **`v1.49.2`** when CI builds) so instances on **1.49.1** or older see an update on About / `GET /api/about/update-check`.
+
 ## [1.49.1] - 2026-04-06
 
 ### Fixed
@@ -346,7 +360,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.1...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.2...HEAD
+[1.49.2]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.1...v1.49.2
 [1.49.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.0...v1.49.1
 [1.49.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.48.0...v1.49.0
 [1.48.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.47.0...v1.48.0

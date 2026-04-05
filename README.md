@@ -110,7 +110,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 ### About & updates
 
-- **About** page with installed version, bundled changelog excerpt for that version, and **check for updates** (compares to **GitHub’s latest Release** for self-hosted instances — publish a **Release** for each **`v*.*.*`** tag so older installs show an update).
+- **About** page with installed version, bundled changelog excerpt for that version, and **check for updates** for self-hosted installs: the server compares your build to the **newest stable SemVer** found from **GitHub Releases and git tags** (so tag-only publishes still count). Publish **`v*.*.*`** on GitHub for update prompts; **`ahead_of_published`** in the JSON covers preview builds newer than the latest tag.
 
 ### PWA
 
@@ -218,7 +218,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.49.1` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.49.2` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 
@@ -246,14 +246,12 @@ docker compose up -d --build
 - **Uploads:** named volume **`remi-uploads`** → `/app/web/static/uploads` (same as registry/install compose variants).
 - **Health:** image includes `wget` and a `HEALTHCHECK` on `GET /healthz` (also declared in Compose).
 - **Hardening (default compose):** app user is non-root; service may use **read-only** root, **`tmpfs`** on `/tmp`, and dropped capabilities — override only if you need extra privileges.
-- **Volume permissions:** Compose runs a one-shot **`remi-volume-perms`** job before the app so **`remi-data`** / **`remi-uploads`** are `chown`'d for the non-root user; the image **entrypoint** repeats this on start so plain **`docker run`** with those mounts also works.
+- **Volume permissions:** the image **`docker-entrypoint.sh`** runs as root on each start, **`chown`s** **`remi-data`** / **`remi-uploads`** mount points for user **`remi`**, then starts the app with **`su-exec`** (so Compose shows one running service). Images **before** this entrypoint may need a one-off manual **`chown`** on those paths.
 - **Manual update (git):** `git pull && docker compose up -d --build`
 
 ### Registry compose (optional `.env` overrides)
 
 [`docker-compose.registry.yml`](docker-compose.registry.yml) defaults to the same official image and host port **4122** (→ container **8080**) — **no `.env` required**. Set `REMI_IMAGE` or `REMI_PORT` in `.env` only if you fork the image or need another port.
-
-Registry and **install** compose files use the same **`remi-volume-perms`** + **`depends_on`** pattern as the default stack so fresh volumes work with the non-root app user.
 
 Compose files **do not** include Watchtower or other auto-update sidecars; pull/rebuild when you want a new version, or add your own tooling.
 

@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=267">
+  <link rel="stylesheet" href="/static/app.css?v=268">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=245"></script>
+  <script defer src="/static/app.js?v=246"></script>
 </head>
 <body class="page-about">
   <main class="app-shell" aria-label="About">
@@ -86,7 +86,7 @@
             <li>Add custom links in the trip sidebar for quick references.</li>
             <li>Stay in sync while a trip is open: the app can use a <strong>live event stream</strong> of changes so lists and panels refresh without reloading the whole page.</li>
             <li>Export a <strong>JSON snapshot</strong> of your visible data from Profile (no password material; app secrets redacted) and use optional <strong>backup scripts</strong> or Compose profile for SQLite snapshots.</li>
-            <li>Use the About page to see your installed version and whether a newer release is available (for self-hosted installs).</li>
+            <li>Use the <strong>About</strong> page to see your installed version and check for updates on self-hosted installs: the app compares against the latest stable version from <strong>GitHub Releases and version tags</strong> (not only formal release posts), and can tell you if you are on a build newer than the latest published tag.</li>
             <li>Install as an app (PWA) for a more app-like experience on your device.</li>
           </ul>
         </section>
@@ -112,6 +112,8 @@
       }
       if (data.update_available) {
         setStatus("Update available: latest release is v" + data.latest + ". Ask your server admin to deploy the new version.");
+      } else if (data.ahead_of_published) {
+        setStatus("You're on v" + data.current + " (newer than the latest published v" + data.latest + ").");
       } else {
         setStatus("You're using the latest version (v" + data.latest + ").");
       }

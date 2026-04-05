@@ -24,9 +24,9 @@ Data lives in the **`remi-data`** Docker volume (`/app/data/trips.db` inside the
 
 The app runs as a **non-root** user. New named volumes often mount as **`root`-owned** directories, so SQLite cannot create `trips.db` or WAL files until ownership is fixed.
 
-**Shipped Compose files** run a one-shot **`remi-volume-perms`** service before **`remi`** (`chown` on `/app/data` and `/app/web/static/uploads`). Current images also use an **entrypoint** that performs the same `chown` on every container start, so **`docker run`** without that Compose file still works.
+**Current images** ship **`docker-entrypoint.sh`**: the container starts as **root**, runs **`chown -R remi:remi`** on **`/app/data`** and **`/app/web/static/uploads`**, then **`su-exec remi`** runs the server. That applies on **every** start, including **`docker compose`** and plain **`docker run`** with the same volume mounts.
 
-If you use a **custom** Compose file without the init step and an **older** image without the entrypoint, you can still fix volumes manually with a one-off root container (see troubleshooting in release notes / community docs).
+If you use an **older** image **without** that entrypoint (or a **custom** image), run a **one-off** root helper container that mounts the same volumes and **`chown`s** those paths, or adjust host-side permissions on bind mounts.
 
 ### Manual update (git + rebuild)
 

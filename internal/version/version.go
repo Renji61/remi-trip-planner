@@ -6,7 +6,7 @@ import (
 )
 
 // Version is the semver of this build (no "v" prefix). Bump when cutting a release.
-const Version = "1.49.1"
+const Version = "1.49.2"
 
 // GitHubRepo is "owner/repo" for public release checks (same as upstream).
 const GitHubRepo = "Renji61/remi-trip-planner"
