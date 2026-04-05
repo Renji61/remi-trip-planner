@@ -1,0 +1,61 @@
+{{define "trip_document_row"}}
+{{- $d := .D -}}
+<li class="trip-documents-item" data-trip-doc-item data-trip-doc-id="{{$d.ID}}" data-doc-search="{{$d.SearchText}}" data-doc-category="{{$d.Category}}"{{if eq $d.Section "general"}} tabindex="0"{{end}}>
+  <div class="trip-documents-item-top">
+    <a class="trip-documents-item-icon-link" href="{{$d.FilePath}}" target="_blank" rel="noreferrer" title="{{$d.FileName}}" aria-label="Open attachment: {{$d.FileName}}">
+      <div class="trip-documents-item-icon" data-doc-file-kind="{{$d.FileKind}}" aria-hidden="true"><span class="material-symbols-outlined">{{$d.FileTypeIcon}}</span></div>
+    </a>
+    <div class="trip-documents-item-main">
+      <div class="trip-documents-item-titleline">
+        {{if and $d.ItemName (eq $d.Section "general")}}<strong class="trip-documents-item-context">{{$d.ItemName}}</strong><span class="trip-documents-item-sep" aria-hidden="true">·</span>{{end}}
+        <span class="trip-documents-file-link-wrap">
+          <a class="trip-documents-file-link" href="{{$d.FilePath}}" target="_blank" rel="noreferrer" title="{{$d.FileName}}">{{if eq $d.Section "general"}}{{if $d.DisplayName}}{{$d.DisplayName}}{{else}}{{$d.FileName}}{{end}}{{else}}{{$d.FileName}}{{end}}</a>
+        </span>
+        <span class="trip-documents-item-sep trip-documents-item-sep--before-tag" aria-hidden="true">·</span>
+        <span class="trip-documents-tag{{if $d.TagAccent}} trip-documents-tag--accent{{end}}">{{$d.Category}}</span>
+      </div>
+      <small class="trip-documents-item-meta">{{if $d.UploadedAt.IsZero}}—{{else}}Uploaded {{$d.UploadedAt.Format "Jan 2, 2006"}}{{end}} · {{humanFileSize $d.FileSize}}</small>
+      {{if eq $d.Section "accommodation"}}
+      <p class="itinerary-hint trip-documents-source-hint">From <a href="/trips/{{.Details.Trip.ID}}/accommodation">{{.Details.Trip.StaySectionTitle}}</a>; edit the booking there.</p>
+      {{else if eq $d.Section "vehicle"}}
+      <p class="itinerary-hint trip-documents-source-hint">From <a href="/trips/{{.Details.Trip.ID}}/vehicle-rental">{{.Details.Trip.VehicleSectionTitle}}</a>; edit the booking there.</p>
+      {{else if eq $d.Section "flights"}}
+      <p class="itinerary-hint trip-documents-source-hint">From <a href="/trips/{{.Details.Trip.ID}}/flights">{{.Details.Trip.FlightsSectionTitle}}</a>; edit the booking there.</p>
+      {{else if eq $d.Section "group-expenses"}}
+      <p class="itinerary-hint trip-documents-source-hint">From <a href="/trips/{{.Details.Trip.ID}}/group-expenses">{{.Details.Trip.GroupExpensesSectionTitle}}</a>; edit the entry there.</p>
+      {{end}}
+    </div>
+    <details class="item-actions trip-inline-actions-dropdown trip-documents-item-actions">
+      <summary class="trip-documents-item-actions-summary">
+        <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
+        <span class="visually-hidden">Attachment actions</span>
+      </summary>
+      <div class="trip-inline-actions-buttons">
+        {{if eq $d.Section "general"}}
+        <a class="item-action-btn item-action-btn--download" href="{{$d.FilePath}}" download="{{$d.FileName}}">Download</a>
+        <button type="button" class="item-action-btn" data-trip-doc-rename-toggle>Edit</button>
+        <form method="post" action="/trips/{{.Details.Trip.ID}}/documents/{{$d.ID}}/delete" data-app-confirm data-ajax-submit data-toast-message="Document deleted." data-confirm-title="Delete this attachment?" data-confirm-body="The file will be removed from trip documents. This cannot be undone." data-confirm-ok="Delete" data-confirm-icon="delete_forever" data-confirm-variant="danger">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button type="submit" class="item-action-btn danger">Delete</button>
+        </form>
+        {{else}}
+        <a class="item-action-btn item-action-btn--download" href="{{$d.FilePath}}" download="{{$d.FileName}}">Download</a>
+        <button type="button" class="item-action-btn" data-trip-doc-open-url="{{$d.FilePath}}">Open file</button>
+        {{end}}
+      </div>
+    </details>
+  </div>
+  {{if eq $d.Section "general"}}
+  <form class="trip-documents-rename-form hidden" method="post" action="/trips/{{.Details.Trip.ID}}/documents/{{$d.ID}}/update" data-trip-doc-rename-form data-ajax-submit data-toast-message="Display name saved.">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label class="trip-documents-rename-label">Rename file
+      <input type="text" name="display_name" value="{{$d.DisplayName}}" maxlength="512" placeholder="{{$d.FileName}}" autocomplete="off">
+    </label>
+    <div class="trip-documents-rename-actions">
+      <button type="submit" class="item-action-btn">Save</button>
+      <button type="button" class="item-action-btn secondary-btn" data-trip-doc-rename-cancel>Cancel</button>
+    </div>
+  </form>
+  {{end}}
+</li>
+{{end}}

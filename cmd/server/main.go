@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -90,6 +92,12 @@ func chdirToModuleRoot() {
 func main() {
 	chdirToModuleRoot()
 
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("REMI_ENV")), "production") {
+		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	} else {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	}
+
 	dbPath := envOrDefault("SQLITE_PATH", "./data/trips.db")
 	// Default loopback-only so the app is not reachable from the LAN. Set APP_ADDR=:4122 to listen on all interfaces.
 	addr := envOrDefault("APP_ADDR", "127.0.0.1:4122")
@@ -102,9 +110,11 @@ func main() {
 
 	repo := sqlite.NewRepository(db)
 	service := trips.NewService(repo)
+	service.StartReminderScheduler(context.Background())
 
 	router := httpapp.NewRouter(httpapp.Dependencies{
 		TripService: service,
+		DB:          db,
 	})
 
 	log.Printf("server listening on %s", addr)

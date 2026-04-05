@@ -1,0 +1,20 @@
+{{define "tripKeepNoteColorSwatches"}}
+{{$hasLeg := ne .LegacyColor ""}}
+<div class="trip-keep-color-field">
+  <span class="trip-keep-color-field__label" id="keep-color-lbl-{{.PickerID}}">Color</span>
+  <div class="trip-keep-color-swatches" role="radiogroup" aria-labelledby="keep-color-lbl-{{.PickerID}}">
+    {{if $hasLeg}}
+    <label class="sr-only"><input type="radio" name="color" value="{{.LegacyColor}}" checked>Keep previous color</label>
+    {{end}}
+    {{range .Colors}}
+    <label class="trip-keep-color-swatch trip-keep-color-swatch--{{.Key}}" title="{{.Label}}" aria-label="{{.Label}}">
+      <input type="radio" name="color" value="{{.Key}}" class="trip-keep-color-swatch-input"{{if $hasLeg}}{{else if eq $.Selected ""}}{{if eq .Key "default"}} checked{{end}}{{else if eq .Key $.Selected}} checked{{end}}>
+      <span class="trip-keep-color-swatch-face" aria-hidden="true">
+        {{if eq .Key "default"}}<span class="material-symbols-outlined trip-keep-color-swatch-icon" aria-hidden="true">highlight_off</span>{{end}}
+      </span>
+      <span class="trip-keep-color-swatch-check" aria-hidden="true"><span class="material-symbols-outlined">check</span></span>
+    </label>
+    {{end}}
+  </div>
+</div>
+{{end}}

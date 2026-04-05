@@ -3,11 +3,21 @@ package trips
 import (
 	"math"
 	"strings"
+	"time"
 )
 
 // UITimeFormatIs24h reports whether trip time display should use 24-hour clock.
 func UITimeFormatIs24h(raw string) bool {
 	return strings.TrimSpace(strings.ToLower(raw)) == "24h"
+}
+
+// FormatTripDepartureClock formats a local departure time using the trip’s 12h / 24h preference
+// (same rules as itinerary flight rows / formatTripClock in httpapp).
+func FormatTripDepartureClock(trip Trip, t time.Time) string {
+	if UITimeFormatIs24h(trip.UITimeFormat) {
+		return t.Format("15:04")
+	}
+	return t.Format("3:04 PM")
 }
 
 func sectionTitleOrDefault(custom, def string) string {
@@ -62,6 +72,18 @@ func (t Trip) SpendsDayDefaultOpen(index int) bool {
 	}
 }
 
+// GroupExpensesDayDefaultOpen controls initial open state for group-expense day groups on the trip page (stored as UITabExpand / ui_tab_expand).
+func (t Trip) GroupExpensesDayDefaultOpen(index int) bool {
+	switch strings.TrimSpace(strings.ToLower(t.UITabExpand)) {
+	case "all":
+		return true
+	case "none":
+		return false
+	default:
+		return index == 0
+	}
+}
+
 // HasHomeMapCenter is true when this trip stores its own map center (non-zero lat or lng).
 func (t Trip) HasHomeMapCenter() bool {
 	return math.Abs(t.HomeMapLatitude) > 1e-9 || math.Abs(t.HomeMapLongitude) > 1e-9
@@ -75,3 +97,4 @@ func (t Trip) SectionEnabledSpends() bool    { return t.UIShowSpends }
 func (t Trip) SectionEnabledItinerary() bool { return t.UIShowItinerary }
 func (t Trip) SectionEnabledChecklist() bool { return t.UIShowChecklist }
 func (t Trip) SectionEnabledTheTab() bool    { return t.UIShowTheTab && t.UIShowSpends }
+func (t Trip) SectionEnabledDocuments() bool { return t.UIShowDocuments }

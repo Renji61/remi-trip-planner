@@ -8,16 +8,37 @@
       <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">account_circle</span>
       <span>Profile</span>
     </a>
+    <a class="dashboard-profile-menu__item" role="menuitem" href="/notifications">
+      <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">notifications</span>
+      <span>Notifications{{if gt .NotificationUnreadCount 0}} ({{.NotificationUnreadCount}}){{end}}</span>
+    </a>
+    {{if and .Details .Details.Trip}}
+    <a class="dashboard-profile-menu__item" role="menuitem" href="/trips/{{.Details.Trip.ID}}/settings">
+      <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">tune</span>
+      <span>Trip Settings</span>
+    </a>
+    {{else if .Trip}}
+    <a class="dashboard-profile-menu__item" role="menuitem" href="/trips/{{.Trip.ID}}/settings">
+      <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">tune</span>
+      <span>Trip Settings</span>
+    </a>
+    {{end}}
     <a class="dashboard-profile-menu__item" role="menuitem" href="/settings{{if and .Details .Details.Trip}}?trip_id={{.Details.Trip.ID}}{{else if .TripID}}?trip_id={{.TripID}}{{else if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}">
       <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">settings</span>
-      <span>App settings</span>
+      <span>App Settings</span>
     </a>
+    {{if .CurrentUser.IsAdmin}}
+    <a class="dashboard-profile-menu__item" role="menuitem" href="/admin/users">
+      <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">manage_accounts</span>
+      <span>User Management</span>
+    </a>
+    {{end}}
     <hr class="dashboard-profile-menu__sep" aria-hidden="true">
     <form method="post" action="/logout" class="dashboard-profile-menu__logout-form">
       <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
       <button type="submit" class="dashboard-profile-menu__item dashboard-profile-menu__item--button dashboard-profile-menu__item--logout">
         <span class="material-symbols-outlined dashboard-profile-menu__item-icon" aria-hidden="true">logout</span>
-        <span>Log out</span>
+        <span>Logout</span>
       </button>
     </form>
   </div>

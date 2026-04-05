@@ -10,11 +10,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=174">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script defer src="/static/app.js?v=172"></script>
+  <script defer src="/static/app.js?v=244"></script>
 </head>
 <body class="page-the-tab">
   <main class="app-shell budget-page tab-page" aria-label="{{.Trip.GroupExpensesSectionTitle}}" data-long-press-sheet-root data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
@@ -39,7 +39,7 @@
     </aside>
 
     <section class="main">
-      <header class="trip-mobile-header">
+      <header class="trip-mobile-header site-settings-mobile-header">
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
           <span class="material-symbols-outlined" aria-hidden="true">home</span>
         </a>
@@ -56,13 +56,13 @@
       <header class="topbar budget-topbar">
         <div class="title-group">
           <h2>{{.Trip.GroupExpensesSectionTitle}}</h2>
-          <p>{{formatTripUIDate .Trip .Settings .Trip.StartDate}} – {{formatTripUIDate .Trip .Settings .Trip.EndDate}} · Shared costs and balances. Totals roll into {{.Trip.SpendsSectionTitle}}.</p>
+          <p>{{formatTripUIDate .Trip .Settings .Trip.StartDate}} – {{formatTripUIDate .Trip .Settings .Trip.EndDate}} · Shared costs and balances. Totals are included in {{.Trip.SpendsSectionTitle}}.</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           <div class="trip-actions-links">
-            <a class="secondary-btn" href="/trips/{{.Trip.ID}}/expenses">Open {{.Trip.SpendsSectionTitle}}</a>
-            <a class="btn" href="#add-group-expense">Log Expense</a>
-            <a class="btn" href="#record-settlement">Log Settlement</a>
+            <a class="secondary-btn" href="/trips/{{.Trip.ID}}/expenses">View {{.Trip.SpendsSectionTitle}}</a>
+            <a class="btn" href="#add-group-expense">Add Expense</a>
+            <a class="btn" href="#record-settlement">Save Settlement</a>
           </div>
           {{template "tripDesktopHeaderTools" .}}
         </div>
@@ -78,7 +78,7 @@
             </div>
           </div>
           <div class="tab-summary-hero-total">
-            <span class="tab-summary-label tab-summary-hero-total-label">Total group spending</span>
+            <span class="tab-summary-label tab-summary-hero-total-label">Total Group Spending</span>
             <strong class="tab-summary-hero-total-value">{{$.CurrencySymbol}}{{printf "%.2f" .TabTotalSpent}}</strong>
           </div>
           <div class="tab-summary-hero-share tab-summary-hero-share--desktop">
@@ -88,7 +88,7 @@
           <div class="tab-summary-hero-net">
             <span class="tab-summary-label tab-summary-hero-net-label">Net balance</span>
             <span class="tab-summary-net-pill {{if ge .TabYourNet 0.0}}tab-summary-net-pill--pos{{else}}tab-summary-net-pill--neg{{end}}">{{if ge .TabYourNet 0.0}}+{{end}}{{$.CurrencySymbol}}{{printf "%.2f" .TabYourNet}}</span>
-            <span class="muted tab-summary-hint tab-summary-hero-hint">After splits &amp; recorded settlements</span>
+            <span class="muted tab-summary-hint tab-summary-hero-hint">After splits and settlements</span>
           </div>
         </div>
       </section>
@@ -99,15 +99,15 @@
             <span class="tab-log-expense-accent" aria-hidden="true"></span>
             <div class="tab-balance-title-block">
               <h3 class="tab-section-title" id="tab-balance-heading">
-                <span class="tab-section-title-desktop">Balances &amp; simplified debts</span>
+                <span class="tab-section-title-desktop">Balances &amp; Settlements</span>
                 <span class="tab-section-title-mobile">Member balances</span>
               </h3>
-              <p class="tab-balance-pending-badge{{if ne .TabBalanceView "debts"}} hidden{{end}}" data-tab-balance-pending-badge role="status">Settlements pending</p>
+              <p class="tab-balance-pending-badge{{if ne .TabBalanceView "debts"}} hidden{{end}}" data-tab-balance-pending-badge role="status">Pending Settlements</p>
             </div>
           </div>
           <div class="tab-balance-toggle" role="tablist" aria-label="Balance display">
             <button type="button" role="tab" class="tab-balance-toggle-btn{{if eq .TabBalanceView "net"}} tab-balance-toggle-btn--active{{end}}" data-tab-balance-view-btn="net" aria-selected="{{if eq .TabBalanceView "net"}}true{{else}}false{{end}}">Net by person</button>
-            <button type="button" role="tab" class="tab-balance-toggle-btn{{if eq .TabBalanceView "debts"}} tab-balance-toggle-btn--active{{end}}" data-tab-balance-view-btn="debts" aria-selected="{{if eq .TabBalanceView "debts"}}true{{else}}false{{end}}">Total owed / simplified</button>
+            <button type="button" role="tab" class="tab-balance-toggle-btn{{if eq .TabBalanceView "debts"}} tab-balance-toggle-btn--active{{end}}" data-tab-balance-view-btn="debts" aria-selected="{{if eq .TabBalanceView "debts"}}true{{else}}false{{end}}">Total Owed</button>
           </div>
         </div>
         <div class="tab-balance-panel{{if ne .TabBalanceView "net"}} hidden{{end}}" data-tab-balance-panel="net" role="tabpanel">
@@ -139,10 +139,10 @@
             <div class="tab-summary-card tab-debt-summary-card tab-debt-summary-card--out">
               <span class="tab-summary-label">Total to pay</span>
               <strong class="tab-summary-value tab-net--neg">{{$.CurrencySymbol}}{{printf "%.2f" .TabOwedOutTotal}}</strong>
-              <span class="muted tab-summary-hint">Combined amount owed by people who are net debtors</span>
+              <span class="muted tab-summary-hint">Combined amount owed by net debtors</span>
             </div>
           </div>
-          <p class="muted tab-simplify-explainer">Suggested payments below use the same balances as <strong>Net by person</strong> and minimize the number of transfers (integer cents; guests included).</p>
+          <p class="muted tab-simplify-explainer">Suggested payments are based on net balances and minimize the number of transfers.</p>
           <div class="tab-balance-cards-wrap tab-simplify-cards-wrap">
             <ul class="tab-balance-cards tab-simplify-cards" role="list">
               {{range .TabSimplifyRows}}
@@ -196,7 +196,7 @@
                 {{end}}
               </li>
               {{else}}
-              <li class="tab-balance-card tab-balance-card--empty tab-simplify-card--empty muted" role="listitem">Everyone is square, or add Tab expenses to see suggested payments.</li>
+              <li class="tab-balance-card tab-balance-card--empty tab-simplify-card--empty muted" role="listitem">Everyone is settled. Add expenses to see suggested payments.</li>
               {{end}}
             </ul>
           </div>
@@ -279,10 +279,10 @@
         </div>
       </section>
 
-      <section class="tab-the-tab-fold tab-dashboard-fold" aria-label="Log expense and settlements">
+      <section class="tab-the-tab-fold tab-dashboard-fold" aria-label="Add expenses and settlements">
         <div class="tab-the-tab-fold-summary tab-log-expense-head tab-dashboard-fold-summary">
           <span class="tab-log-expense-accent" aria-hidden="true"></span>
-          <h3 class="tab-dashboard-fold-title">Log expenses &amp; settlements</h3>
+          <h3 class="tab-dashboard-fold-title">Add Expenses &amp; Settlements</h3>
         </div>
         <div class="tab-the-tab-fold-panel tab-dashboard-fold-panel">
       <div class="tab-dashboard-grid">
@@ -290,7 +290,7 @@
           <section id="add-group-expense" class="card tab-log-expense-card" aria-labelledby="tab-add-title">
             <div class="tab-log-expense-head">
               <span class="tab-log-expense-accent" aria-hidden="true"></span>
-              <h3 id="tab-add-title">Log new expense</h3>
+              <h3 id="tab-add-title">Add New Expense</h3>
             </div>
             {{if .Trip.IsArchived}}
             <p class="muted">Trip is archived.</p>
@@ -304,21 +304,21 @@
               data-trip-default-mode="{{.Trip.TabDefaultSplitMode}}"
               data-trip-default-json="{{.Trip.TabDefaultSplitJSON}}"
             >
-            <form method="post" action="/trips/{{.Trip.ID}}/expenses" class="tab-log-expense-form" enctype="multipart/form-data" data-ajax-submit data-toast-message="Expense logged.">
+            <form method="post" action="/trips/{{.Trip.ID}}/expenses" class="tab-log-expense-form" enctype="multipart/form-data" data-ajax-submit data-toast-message="Expense added.">
               <input type="hidden" name="from_tab" value="1">
               <input type="hidden" name="return_to" value="/trips/{{.Trip.ID}}/group-expenses">
               <input type="hidden" name="split_mode" value="equal" data-tab-split-mode>
               <input type="hidden" name="split_json" value="" data-tab-split-json autocomplete="off">
-              <label class="tab-field-label full"><span class="tab-field-k">Expense title</span>
+              <label class="tab-field-label full"><span class="tab-field-k">Title</span>
                 <input type="text" name="title" class="tab-field-input" placeholder="e.g. Scuba diving in El Nido" maxlength="200" data-tab-title-input>
               </label>
               <div class="tab-log-expense-row2">
                 <label class="tab-field-label tab-field-label--amount"><span class="tab-field-k">Amount</span>
-                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" class="tab-field-input tab-field-input--amount" placeholder="0.00" required data-tab-amount-input></span>
+                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" autocomplete="transaction-amount" {{template "remiPmIgnoreExt"}} class="tab-field-input tab-field-input--amount" placeholder="0.00" required data-tab-amount-input></span>
                 </label>
                 <label class="tab-field-label tab-field-label--category"><span class="tab-field-k">Category</span>
                   <select name="category" class="tab-field-input" required>
-                    <option value="" disabled selected>Select category</option>
+                    <option value="" disabled selected>Select a category</option>
                     {{range .ExpenseCategories}}
                     <option value="{{.}}">{{.}}</option>
                     {{end}}
@@ -327,11 +327,11 @@
               </div>
               <div class="tab-log-expense-row2">
                 <label class="tab-field-label"><span class="tab-field-k">Date</span>
-                  {{template "remiDateField" (dict "name" "spent_on" "value" "" "mdy" (effectiveUIDateIsMDY .Trip .Settings) "input_class" "tab-field-input")}}
+                  {{template "remiDateField" (dict "name" "spent_on" "value" .ExpenseFormDefaultDateISO "mdy" (effectiveUIDateIsMDY .Trip .Settings) "input_class" "tab-field-input")}}
                 </label>
-                <label class="tab-field-label"><span class="tab-field-k">Payment method</span>
+                <label class="tab-field-label"><span class="tab-field-k">Payment Method</span>
                   <select name="payment_method" class="tab-field-input" required>
-                    <option value="" disabled selected>Select payment method</option>
+                    <option value="" disabled selected>Select a payment method</option>
                     <option value="Cash">Cash</option>
                     <option value="Credit Card">Credit Card</option>
                     <option value="Crypto">Crypto</option>
@@ -375,26 +375,26 @@
                 </button>
                 {{end}}
               </div>
-              <p class="tab-field-k tab-field-k--standalone">Split configuration</p>
+              <p class="tab-field-k tab-field-k--standalone">Split Method</p>
               <div class="tab-split-mode-row tab-split-mode-row--log" role="group" aria-label="Split method">
                 <button type="button" class="tab-split-mode-btn tab-split-mode-btn--active" data-tab-split-mode-btn="equal">Equal</button>
                 <button type="button" class="tab-split-mode-btn" data-tab-split-mode-btn="exact">Exact</button>
                 <button type="button" class="tab-split-mode-btn" data-tab-split-mode-btn="percent">Percentage</button>
                 <button type="button" class="tab-split-mode-btn" data-tab-split-mode-btn="shares">Shares</button>
               </div>
-              <p class="tab-split-hint muted" data-tab-split-hint>Split equally among selected people.</p>
-              <p class="tab-split-amount-warning hidden" data-tab-amount-warning role="alert" aria-live="polite">Enter an expense amount first, then configure the split.</p>
+              <p class="tab-split-hint muted" data-tab-split-hint>Split equally among selected members.</p>
+              <p class="tab-split-amount-warning hidden" data-tab-amount-warning role="alert" aria-live="polite">Enter an amount before configuring the split.</p>
               {{template "tabSplitBreakdownShell" (dict "Party" .Party "TripGuests" .TripGuests "TabDepartedParticipants" .TabDepartedParticipants "CurrencySymbol" .CurrencySymbol "CurrentUserID" .CurrentUserID "Trip" .Trip "PaidByKey" (printf "user:%s" .CurrentUserID))}}
               <label class="tab-field-label full"><span class="tab-field-k">Notes</span>
-                <input type="text" name="notes" class="tab-field-input" placeholder="Optional">
+                <input type="text" name="notes" class="tab-field-input" placeholder="Add any notes">
               </label>
               <label class="tab-field-label full"><span class="tab-field-k">Receipt</span>
                 <input type="file" name="tab_attachment" class="tab-field-input" accept=".pdf,image/*">
               </label>
-              <button class="full btn tab-submit-btn" type="submit"><span class="tab-submit-label-desktop">Log Expense</span><span class="tab-submit-label-mobile">Add to {{.Trip.GroupExpensesSectionTitle}}</span></button>
+              <button class="full btn tab-submit-btn" type="submit"><span class="tab-submit-label-desktop">Add Expense</span><span class="tab-submit-label-mobile">Add to {{.Trip.GroupExpensesSectionTitle}}</span></button>
             </form>
             </div>
-            <p class="muted tab-standard-note">Your last split method is saved as this trip’s <strong>standard split</strong> for next time (change anytime).</p>
+            <p class="muted tab-standard-note">Your last split method will be saved as default for this trip.</p>
             {{end}}
           </section>
         </div>
@@ -403,8 +403,8 @@
             <div class="tab-log-expense-head tab-settle-head">
               <span class="tab-log-expense-accent" aria-hidden="true"></span>
               <div class="tab-log-expense-head-text">
-                <h3 id="tab-settle-title">Record settlement</h3>
-                <p class="trip-resource-form-subtitle">Log a payment from one person to another on this trip.</p>
+                <h3 id="tab-settle-title">Save Settlement</h3>
+                <p class="trip-resource-form-subtitle">Record a payment between members for this trip.</p>
               </div>
             </div>
             {{if .Trip.IsArchived}}
@@ -432,9 +432,9 @@
               </div>
               <div class="tab-log-expense-row2">
                 <label class="tab-field-label tab-field-label--amount"><span class="tab-field-k">Amount</span>
-                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" class="tab-field-input tab-field-input--amount" required placeholder="0.00"></span>
+                  <span class="tab-amount-input-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" autocomplete="transaction-amount" {{template "remiPmIgnoreExt"}} class="tab-field-input tab-field-input--amount" required placeholder="0.00"></span>
                 </label>
-                <label class="tab-field-label"><span class="tab-field-k">Method</span>
+                <label class="tab-field-label"><span class="tab-field-k">Payment Method</span>
                   <select name="method" class="tab-field-input">
                     <option value="Cash">Cash</option>
                     <option value="Bank Transfer">Bank Transfer</option>
@@ -447,13 +447,13 @@
                 {{template "remiDateField" (dict "name" "settled_on" "value" "" "mdy" (effectiveUIDateIsMDY .Trip .Settings) "input_class" "tab-field-input")}}
               </label>
               <label class="tab-field-label full"><span class="tab-field-k">Notes</span>
-                <input type="text" name="notes" class="tab-field-input" placeholder="Optional">
+                <input type="text" name="notes" class="tab-field-input" placeholder="Add any notes">
               </label>
-              <button type="submit" class="full btn tab-submit-btn tab-settle-submit-btn"><span class="tab-submit-label-desktop">Record settlement</span><span class="tab-submit-label-mobile">Confirm payment</span></button>
+              <button type="submit" class="full btn tab-submit-btn tab-settle-submit-btn"><span class="tab-submit-label-desktop">Save Settlement</span><span class="tab-submit-label-mobile">Confirm payment</span></button>
             </form>
             {{end}}
             <div class="tab-recent-settlements" id="tab-recent-settlements">
-              <h4 class="tab-recent-settlements-title">Recent settlements</h4>
+              <h4 class="tab-recent-settlements-title">Recent Settlements</h4>
               <div data-tab-refresh-region="tab-settlements-list">
               {{if .TabSettlementRows}}
               <ul id="tab-settlements-ul" class="tab-settlement-list" role="list">
@@ -470,7 +470,7 @@
               </div>
               {{end}}
               {{else}}
-              <p class="muted tab-settlement-empty">No settlements recorded.</p>
+              <p class="muted tab-settlement-empty">No settlements yet</p>
               {{end}}
               </div>
             </div>
@@ -539,7 +539,7 @@
           {{if .TabCanShowMoreExpenses}}
           <button type="button" class="link-btn tab-exp-view-all" id="tab-exp-view-all-btn" data-tab-expenses-more-url="{{.TabExpensesMoreURL}}">View all transactions</button>
           {{else}}
-          <span class="tab-exp-view-all-disabled muted">All transactions shown</span>
+          <span class="tab-exp-view-all-disabled muted">Showing all transactions</span>
           {{end}}
         </div>
         {{else}}
@@ -554,13 +554,14 @@
   <dialog id="tab-mobile-expense-edit" class="budget-mobile-expense-edit-dialog" aria-labelledby="tab-mobile-expense-edit-title">
     <div class="budget-mobile-expense-edit-dialog__panel">
       <div class="budget-mobile-expense-edit-dialog__head">
-        <h3 id="tab-mobile-expense-edit-title">Edit expense</h3>
+        <h3 id="tab-mobile-expense-edit-title">Edit Expense</h3>
         <button type="button" class="secondary-btn" data-tab-mobile-edit-close>Close</button>
       </div>
       <div class="budget-mobile-expense-edit-dialog__body" data-tab-mobile-edit-slot></div>
     </div>
   </dialog>
 
+  {{if tripMobileFabHasItems .Trip}}
   <div class="mobile-fab-wrap" data-mobile-fab>
     <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation">
       <span class="material-symbols-outlined" aria-hidden="true">add</span>
@@ -569,10 +570,11 @@
       {{template "tripMobileFabLinks" (dict "Trip" .Trip)}}
     </div>
   </div>
+  {{end}}
 
   {{template "tripBottomNavCore" (dict "Trip" .Trip "Active" "group-expenses")}}
   {{template "tripLongPressSheet"}}
-  {{template "tripMobileProfileSheet" .}}
+  {{template "appMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}
 </body>
 </html>

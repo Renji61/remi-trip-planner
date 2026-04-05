@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=174">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=172"></script>
+  <script defer src="/static/app.js?v=244"></script>
 </head>
 <body>
   <main class="app-shell" aria-label="{{.Details.Trip.VehicleSectionTitle}}" data-long-press-sheet-root data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
@@ -37,7 +37,7 @@
     </aside>
 
     <section class="main vehicle-redesign">
-      <header class="trip-mobile-header">
+      <header class="trip-mobile-header site-settings-mobile-header">
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
           <span class="material-symbols-outlined" aria-hidden="true">home</span>
         </a>
@@ -54,7 +54,7 @@
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
           <h2>{{.Details.Trip.VehicleSectionTitle}}</h2>
-          <p>Manage your {{.Details.Trip.VehicleSectionTitle}} bookings.</p>
+          <p>Manage your vehicle rental bookings.</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           {{template "tripDesktopHeaderTools" .}}
@@ -66,25 +66,25 @@
           <div class="vehicle-section-head">
             <div class="vehicle-section-icon" aria-hidden="true"><span class="material-symbols-outlined">add_road</span></div>
             <div class="vehicle-section-head-text">
-              <h3 id="vehicle-form-title">New {{.Details.Trip.VehicleSectionTitle}} booking</h3>
-              <p class="trip-resource-form-subtitle">Details sync to your itinerary and expenses.</p>
+              <h3 id="vehicle-form-title">New {{.Details.Trip.VehicleSectionTitle}} Booking</h3>
+              <p class="trip-resource-form-subtitle">Details sync with your itinerary and expenses.</p>
             </div>
           </div>
           {{if .Details.Trip.IsArchived}}
           <p class="muted">Trip is archived. Vehicle rental entries are disabled.</p>
           {{else}}
           <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form data-ajax-submit data-ajax-reload-on-success data-toast-message="{{.Details.Trip.VehicleSectionTitle}} booking saved.">
-            <label>Vehicle rental name<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
-            <label>Booking Confirmation<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
-            <label>Pick-up Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
-            <label>Pick-up Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
+            <label>Vehicle<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
+            <label>Booking Reference<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
+            <label>Pickup Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+            <label>Pickup Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
             <fieldset class="vehicle-dropoff-fieldset">
-              <legend class="vehicle-dropoff-legend">Drop-off location</legend>
-              <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pick-up">
-                <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" checked data-vehicle-dropoff-same> Same as pick-up</label>
-                <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="different" data-vehicle-dropoff-diff> Different drop-off</label>
+              <legend class="vehicle-dropoff-legend">Drop-off Location</legend>
+              <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pickup">
+                <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" checked data-vehicle-dropoff-same> Same as pickup</label>
+                <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="different" data-vehicle-dropoff-diff> Different drop-off location</label>
               </div>
-              <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field hidden>Drop-off location<input type="text" name="drop_off_location" value="" placeholder="Return location" autocomplete="off" data-location-autocomplete disabled></label>
+              <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field hidden>Drop-off Location<input type="text" name="drop_off_location" value="" placeholder="Return location" autocomplete="off" data-location-autocomplete disabled></label>
             </fieldset>
             <label>Drop-off Date & Time{{template "remiDateTimeField" (dict "name" "drop_off_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
             <label>Rental Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
@@ -92,7 +92,7 @@
             <label>Rental Agreement Attachment<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
             <label>Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
             <label class="full">Notes<input type="text" name="notes" placeholder="Notes about insurance coverage, keys, etc."></label>
-            <button class="full vehicle-submit-btn" type="submit">Save {{.Details.Trip.VehicleSectionTitle}} booking</button>
+            <button class="full vehicle-submit-btn" type="submit">Save Vehicle Rental</button>
           </form>
           {{end}}
         </section>
@@ -113,7 +113,7 @@
                 </summary>
                 <div class="trip-inline-actions-buttons">
                   <button type="button" class="item-action-btn" data-inline-edit-open="vehicle-rental-edit-{{.ID}}" aria-label="Edit vehicle rental: {{if .VehicleDetail}}{{.VehicleDetail}}{{else}}booking{{end}}" title="Edit this rental">Edit</button>
-                  <form method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this vehicle rental?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete rental" data-confirm-icon="car_rental" data-confirm-variant="danger">
+                  <form method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/delete" data-app-confirm data-ajax-submit data-toast-message="Vehicle rental deleted." data-confirm-title="Delete this vehicle rental?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete rental" data-confirm-icon="car_rental" data-confirm-variant="danger">
                     <button type="submit" class="item-action-btn danger" aria-label="Delete vehicle rental: {{if .VehicleDetail}}{{.VehicleDetail}}{{else}}booking{{end}}" title="Delete this rental">Delete</button>
                   </form>
                 </div>
@@ -148,8 +148,8 @@
                       </div>
                     </div>
                     <div class="vehicle-meta-grid vehicle-meta-grid--rental-flow">
-                      <div class="vehicle-meta-grid--location"><span class="material-symbols-outlined" aria-hidden="true">arrow_circle_up</span><div class="vehicle-meta-location-col"><div class="vehicle-meta-location-line vehicle-pickup-line">{{if .PickUpLocation}}<strong>{{locationLineBeforeComma .PickUpLocation}}</strong>{{else}}<strong>—</strong>{{end}}{{with googleMapsSearchURL 0 0 .PickUpLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open pick-up location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings .PickUpAt}}</small></div></div>
-                      <div class="vehicle-meta-grid--location"><span class="material-symbols-outlined" aria-hidden="true">arrow_circle_down</span><div class="vehicle-meta-location-col"><div class="vehicle-meta-location-line vehicle-pickup-line">{{if ne .DropOffLocation ""}}<strong>{{locationLineBeforeComma .DropOffLocation}}</strong>{{with googleMapsSearchURL 0 0 .DropOffLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open drop-off location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}{{else}}<strong class="vehicle-meta-same-pickup">Same as pick-up</strong>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings .DropOffAt}}</small></div></div>
+                      <div class="vehicle-meta-grid--location"><span class="material-symbols-outlined" aria-hidden="true">arrow_circle_up</span><div class="vehicle-meta-location-col"><div class="vehicle-meta-location-line vehicle-pickup-line">{{if .PickUpLocation}}<strong>{{locationLineBeforeComma .PickUpLocation}}</strong>{{else}}<strong>—</strong>{{end}}{{with googleMapsSearchURL 0 0 .PickUpLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open pickup location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings .PickUpAt}}</small></div></div>
+                      <div class="vehicle-meta-grid--location"><span class="material-symbols-outlined" aria-hidden="true">arrow_circle_down</span><div class="vehicle-meta-location-col"><div class="vehicle-meta-location-line vehicle-pickup-line">{{if ne .DropOffLocation ""}}<strong>{{locationLineBeforeComma .DropOffLocation}}</strong>{{with googleMapsSearchURL 0 0 .DropOffLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open drop-off location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}{{else}}<strong class="vehicle-meta-same-pickup">Same as pickup</strong>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings .DropOffAt}}</small></div></div>
                       <div>
                         {{if and (ne .Cost 0.0) (ne .InsuranceCost 0.0)}}
                         <span class="material-symbols-outlined" aria-hidden="true">payments</span><div><strong>{{$.CurrencySymbol}}{{printf "%.2f" .Cost}} · {{$.CurrencySymbol}}{{printf "%.2f" .InsuranceCost}}</strong><small>Rental · Insurance</small></div>
@@ -160,7 +160,7 @@
                         {{end}}
                       </div>
                       {{if .BookingConfirmation}}
-                      <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Confirmation</small></div></div>
+                      <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Reference</small></div></div>
                       {{end}}
                       {{if .AttachmentPath}}
                       <div><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><a class="flight-doc-link" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">Open Attachment</a><small>Rental Agreement Attachment</small></div></div>
@@ -173,25 +173,26 @@
                 </div>
               </div>
               {{if not $.Details.Trip.IsArchived}}
-              <form id="vehicle-rental-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/update" class="form-grid item-edit hidden full vehicle-edit-form vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form>
+              <form id="vehicle-rental-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.ID}}/update" class="form-grid item-edit hidden full vehicle-edit-form vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form data-ajax-submit data-toast-message="Vehicle rental updated.">
+                <input type="hidden" name="expected_updated_at" value="{{.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
                 <div class="full vehicle-section-head vehicle-edit-form-head">
                   <div class="vehicle-section-icon" aria-hidden="true"><span class="material-symbols-outlined">edit_square</span></div>
                   <div class="vehicle-section-head-text">
-                    <h3>Edit {{$.Details.Trip.VehicleSectionTitle}}</h3>
-                    <p class="vehicle-edit-subtitle muted">Update details here and it will sync to itinerary and expenses.</p>
+                    <h3>Edit Vehicle Rental</h3>
+                    <p class="vehicle-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.</p>
                   </div>
                 </div>
-                <label>Vehicle rental name<input type="text" name="vehicle_detail" value="{{.VehicleDetail}}" placeholder="e.g. Range Rover Velar"></label>
-                <label>Booking Confirmation<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="#REMI-9921"></label>
-                <label>Pick-up Location<input type="text" name="pick_up_location" value="{{.PickUpLocation}}" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
-                <label>Pick-up Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" .PickUpAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
+                <label>Vehicle<input type="text" name="vehicle_detail" value="{{.VehicleDetail}}" placeholder="e.g. Range Rover Velar"></label>
+                <label>Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="#REMI-9921"></label>
+                <label>Pickup Location<input type="text" name="pick_up_location" value="{{.PickUpLocation}}" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+                <label>Pickup Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" .PickUpAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
                 <fieldset class="vehicle-dropoff-fieldset">
-                  <legend class="vehicle-dropoff-legend">Drop-off location</legend>
-                  <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pick-up">
-                    <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" {{if eq .DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-same> Same as pick-up</label>
-                    <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="different" {{if ne .DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-diff> Different drop-off</label>
+                  <legend class="vehicle-dropoff-legend">Drop-off Location</legend>
+                  <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pickup">
+                    <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" {{if eq .DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-same> Same as pickup</label>
+                    <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="different" {{if ne .DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-diff> Different drop-off location</label>
                   </div>
-                  <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field {{if eq .DropOffLocation ""}}hidden{{end}}>Drop-off location<input type="text" name="drop_off_location" value="{{.DropOffLocation}}" placeholder="Return location" autocomplete="off" data-location-autocomplete {{if eq .DropOffLocation ""}}disabled{{end}}></label>
+                  <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field {{if eq .DropOffLocation ""}}hidden{{end}}>Drop-off Location<input type="text" name="drop_off_location" value="{{.DropOffLocation}}" placeholder="Return location" autocomplete="off" data-location-autocomplete {{if eq .DropOffLocation ""}}disabled{{end}}></label>
                 </fieldset>
                 <label>Drop-off Date & Time{{template "remiDateTimeField" (dict "name" "drop_off_at" "value" .DropOffAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
                 <label>Rental Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
@@ -225,15 +226,16 @@
           </ul>
           {{else}}
           <div class="vehicle-empty-state">
-            <div class="vehicle-empty-icon" aria-hidden="true"><span class="material-symbols-outlined">directions_car</span></div>
-            <p>Discover more options</p>
-            <small>Need a convertible for the coast or a van for the crew?</small>
+            <div aria-hidden="true"><span class="material-symbols-outlined">directions_car</span></div>
+            <h4>No rentals yet.</h4>
+            <p>Add your first vehicle rental to keep your itinerary and budget in sync.</p>
           </div>
           {{end}}
         </section>
       </div>
     </section>
   </main>
+  {{if tripMobileFabHasItems .Details.Trip}}
   <div class="mobile-fab-wrap" data-mobile-fab>
     <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation">
       <span class="material-symbols-outlined" aria-hidden="true">add</span>
@@ -242,9 +244,10 @@
       {{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}
     </div>
   </div>
+  {{end}}
   {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "vehicle")}}
   {{template "tripLongPressSheet"}}
-  {{template "tripMobileProfileSheet" .}}
+  {{template "appMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}
 </body>
 </html>

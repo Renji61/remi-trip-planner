@@ -1,0 +1,49 @@
+{{define "tripKeepComposerTabbed"}}
+{{/* Args: Trip, Settings, CSRFToken, KeepNoteColors, ReminderCategories, Prefix (id prefix), ColorPickerID (unique for color field aria ids) */}}
+<div class="trip-keep-composer-embed">
+  <section class="card trip-keep-composer-card trip-keep-composer-card--tabbed" aria-label="Add note / checklist">
+    <h3 class="trip-keep-composer-title">Add Note / Checklist</h3>
+    <p class="muted trip-keep-composer-hint trip-keep-composer-hint--card">Create a note or a checklist.</p>
+    <div class="add-stop-tabs trip-keep-composer-tabs" data-add-stop-tabs>
+      <div class="add-stop-tabs__bar" role="tablist" aria-label="Note or checklist">
+        <button type="button" class="add-stop-tabs__tab add-stop-tabs__tab--active" role="tab" aria-selected="true" id="{{.Prefix}}-tab-note" data-add-stop-tab="note">Add Note</button>
+        <button type="button" class="add-stop-tabs__tab" role="tab" aria-selected="false" tabindex="-1" id="{{.Prefix}}-tab-checklist" data-add-stop-tab="checklist">Add Checklist</button>
+      </div>
+      <div class="add-stop-tabs__panel trip-keep-composer-tab-panel" role="tabpanel" id="{{.Prefix}}-panel-note" data-add-stop-panel="note" aria-labelledby="{{.Prefix}}-tab-note">
+        <p class="muted trip-keep-composer-hint">Title is optional. Add notes, links, or reminders.</p>
+        <form method="post" action="/trips/{{.Trip.ID}}/notes/note" class="trip-keep-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <input class="trip-keep-input" type="text" name="title" placeholder="Note Title (e.g. Hidden gems in Tokyo)" maxlength="500" autocomplete="off">
+          <textarea class="trip-keep-textarea" name="body" rows="3" placeholder="Write your notes, links, or reminders..."></textarea>
+          <label class="trip-keep-label">Set Reminder (optional)
+            {{template "remiDateField" (dict "name" "due_at" "value" "" "min" "" "max" "" "mdy" (effectiveUIDateIsMDY .Trip .Settings) "clearable" true "input_class" "trip-keep-input")}}
+          </label>
+          {{template "tripKeepNoteColorSwatches" (dict "Colors" .KeepNoteColors "Selected" "" "LegacyColor" "" "PickerID" .ColorPickerID)}}
+          <button type="submit" class="btn">Save Note</button>
+        </form>
+      </div>
+      <div class="add-stop-tabs__panel trip-keep-composer-tab-panel hidden" role="tabpanel" id="{{.Prefix}}-panel-checklist" data-add-stop-panel="checklist" aria-labelledby="{{.Prefix}}-tab-checklist" hidden>
+        <form method="post" action="/trips/{{.Trip.ID}}/notes/checklist" class="form-grid remi-trip-widget-form trip-keep-notes-checklist-builder" data-checklist-builder>
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <label class="full">Category
+            <select name="category" required>
+              <option value="" disabled selected>Select a category</option>
+              {{range .ReminderCategories}}<option value="{{.}}">{{.}}</option>{{end}}
+            </select>
+          </label>
+          <div class="inline-form full">
+            <input type="text" data-checklist-item-input placeholder="Add item..." autocomplete="off">
+            <button type="button" class="secondary-btn checklist-add-btn" data-checklist-add-btn>Add Item</button>
+          </div>
+          <p class="muted full checklist-builder-empty" data-checklist-draft-empty>No items added yet.</p>
+          <ul class="list full checklist-draft-list hidden" data-checklist-draft-list></ul>
+          <input type="hidden" name="items_json" value="[]" data-checklist-items-json>
+          <label class="full">Set Reminder (optional){{template "remiDateField" (dict "name" "due_at" "value" "" "min" "" "max" "" "mdy" (effectiveUIDateIsMDY .Trip .Settings) "clearable" true)}}</label>
+          <p class="location-hint full" data-checklist-builder-status></p>
+          <button class="full" type="submit">Add Checklist</button>
+        </form>
+      </div>
+    </div>
+  </section>
+</div>
+{{end}}

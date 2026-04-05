@@ -3,9 +3,12 @@ package httpapp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -16,7 +19,7 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	u, err := a.tripService.GetUserByID(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	settings, _ := a.tripService.MergedSettingsForUI(r.Context(), uid)
@@ -26,10 +29,27 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 		"EmailVerified": verified, "Saved": r.URL.Query().Get("saved") == "1",
 	}
 	if err := a.mergeDashboardShell(r.Context(), uid, "profile", "", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	_ = a.templates.ExecuteTemplate(w, "profile.html", data)
+}
+
+func (a *app) profileExport(w http.ResponseWriter, r *http.Request) {
+	uid := CurrentUserID(r.Context())
+	exp, err := a.tripService.BuildAccountExport(r.Context(), uid)
+	if err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	fname := fmt.Sprintf("remi-export-%s.json", time.Now().UTC().Format("20060102"))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fname))
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(exp); err != nil {
+		return
+	}
 }
 
 func (a *app) profileSave(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +69,7 @@ func (a *app) profileSave(w http.ResponseWriter, r *http.Request) {
 			"Error": err.Error(), "EmailVerified": !u.EmailVerifiedAt.IsZero(),
 		}
 		if err2 := a.mergeDashboardShell(r.Context(), uid, "profile", "", data); err2 != nil {
-			http.Error(w, err2.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err2)
 			return
 		}
 		_ = a.templates.ExecuteTemplate(w, "profile.html", data)
@@ -78,7 +98,7 @@ func (a *app) profilePassword(w http.ResponseWriter, r *http.Request) {
 			"PasswordError": "Passwords do not match.", "EmailVerified": !u.EmailVerifiedAt.IsZero(),
 		}
 		if err := a.mergeDashboardShell(r.Context(), uid, "profile", "", data); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err)
 			return
 		}
 		_ = a.templates.ExecuteTemplate(w, "profile.html", data)
@@ -97,12 +117,20 @@ func (a *app) profilePassword(w http.ResponseWriter, r *http.Request) {
 			data["PasswordError"] = err.Error()
 		}
 		if err2 := a.mergeDashboardShell(r.Context(), uid, "profile", "", data); err2 != nil {
-			http.Error(w, err2.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err2)
 			return
 		}
 		_ = a.templates.ExecuteTemplate(w, "profile.html", data)
 		return
 	}
+	ip := clientIPString(r.RemoteAddr)
+	rid := RequestIDFromContext(r.Context())
+	slog.InfoContext(r.Context(), "password_changed",
+		slog.String("user_id", uid),
+		slog.String("client_ip", ip),
+		slog.String("request_id", rid),
+		slog.String("user_agent", TruncatedUserAgent(r)),
+	)
 	http.Redirect(w, r, "/profile?saved=1", http.StatusSeeOther)
 }
 
@@ -112,9 +140,26 @@ func (a *app) profileResendVerify(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/profile?saved=1", http.StatusSeeOther)
 }
 
+// tripCollaborationEnabled is for handlers already gated to the trip owner: returns false and writes 403 when the trip has collaboration UI disabled.
+func (a *app) tripCollaborationEnabled(w http.ResponseWriter, r *http.Request, tripID string) bool {
+	trip, err := a.tripService.GetTrip(r.Context(), tripID)
+	if err != nil {
+		http.Error(w, "trip not found", http.StatusNotFound)
+		return false
+	}
+	if !trip.UICollaborationEnabled {
+		http.Error(w, "collaboration is disabled for this trip", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 func (a *app) tripInviteCollaborator(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	if !a.requireTripOwner(w, r, tripID) {
+		return
+	}
+	if !a.tripCollaborationEnabled(w, r, tripID) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -143,6 +188,9 @@ func (a *app) tripCreateInviteLink(w http.ResponseWriter, r *http.Request) {
 	if !a.requireTripOwner(w, r, tripID) {
 		return
 	}
+	if !a.tripCollaborationEnabled(w, r, tripID) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
@@ -167,6 +215,9 @@ func (a *app) tripRemoveMember(w http.ResponseWriter, r *http.Request) {
 	if !a.requireTripOwner(w, r, tripID) {
 		return
 	}
+	if !a.tripCollaborationEnabled(w, r, tripID) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
@@ -187,6 +238,9 @@ func (a *app) tripRemoveMember(w http.ResponseWriter, r *http.Request) {
 func (a *app) tripRevokeInvite(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	if !a.requireTripOwner(w, r, tripID) {
+		return
+	}
+	if !a.tripCollaborationEnabled(w, r, tripID) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {

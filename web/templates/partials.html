@@ -45,3 +45,6 @@
 {{define "remiRemoveTabAttachmentCheckbox"}}
 <input type="checkbox" name="remove_tab_attachment" value="1" class="remi-remove-tab-sync" hidden tabindex="-1" aria-hidden="true">
 {{end}}
+
+{{/* Hint to password-manager extensions: not a credential field (1Password / LastPass / Bitwarden; others may still inject). */}}
+{{define "remiPmIgnoreExt"}}data-1p-ignore data-lpignore="true" data-bwignore{{end}}

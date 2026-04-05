@@ -3,6 +3,10 @@
   <a href="/" class="trip-desktop-header-btn trip-desktop-header-btn--icon" aria-label="Go to dashboard" title="Go to dashboard">
     <span class="material-symbols-outlined" aria-hidden="true">home</span>
   </a>
+  <a href="/notifications" class="trip-desktop-header-btn trip-desktop-header-btn--icon notifications-bell{{if gt .NotificationUnreadCount 0}} notifications-bell--unread{{end}}" aria-label="Notifications{{if gt .NotificationUnreadCount 0}}, {{.NotificationUnreadCount}} unread{{end}}">
+    <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
+    {{if gt .NotificationUnreadCount 0}}<span class="notifications-bell__badge" aria-hidden="true">{{.NotificationUnreadCount}}</span>{{end}}
+  </a>
   <button type="button" class="trip-desktop-header-btn trip-desktop-header-btn--icon" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
     <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
   </button>

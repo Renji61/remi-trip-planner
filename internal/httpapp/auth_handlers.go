@@ -1,6 +1,7 @@
 package httpapp
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -49,7 +50,7 @@ func (a *app) redirectAfterAuthWithNext(w http.ResponseWriter, r *http.Request, 
 func (a *app) setupPage(w http.ResponseWriter, r *http.Request) {
 	n, err := a.tripService.CountUsers(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if n > 0 {
@@ -92,7 +93,7 @@ func (a *app) setupSubmit(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeSessionCookie(w, tok)
+	a.writeSessionCookie(w, tok)
 	http.Redirect(w, r, "/?saved=1", http.StatusSeeOther)
 	_ = u
 }
@@ -100,7 +101,7 @@ func (a *app) setupSubmit(w http.ResponseWriter, r *http.Request) {
 func (a *app) loginPage(w http.ResponseWriter, r *http.Request) {
 	n, err := a.tripService.CountUsers(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if n == 0 {
@@ -113,7 +114,7 @@ func (a *app) loginPage(w http.ResponseWriter, r *http.Request) {
 	}
 	app, err := a.tripService.GetAppSettings(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	next := strings.TrimSpace(r.URL.Query().Get("next"))
@@ -137,7 +138,7 @@ func (a *app) loginPage(w http.ResponseWriter, r *http.Request) {
 func (a *app) registerPage(w http.ResponseWriter, r *http.Request) {
 	n, err := a.tripService.CountUsers(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if n == 0 {
@@ -150,7 +151,7 @@ func (a *app) registerPage(w http.ResponseWriter, r *http.Request) {
 	}
 	app, err := a.tripService.GetAppSettings(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if !app.RegistrationEnabled {
@@ -172,7 +173,7 @@ func (a *app) registerSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	app, err := a.tripService.GetAppSettings(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if !app.RegistrationEnabled {
@@ -199,18 +200,19 @@ func (a *app) registerSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	u, tok, _, err := a.tripService.RegisterUser(r.Context(), email, username, displayName, password)
 	if err != nil {
+		msg := registerUserFacingError(err)
 		_ = a.templates.ExecuteTemplate(w, "register.html", map[string]any{
 			"Settings":    app,
 			"Next":        next,
 			"LoginURL":    loginURLWithNext(next),
-			"Error":       err.Error(),
+			"Error":       msg,
 			"Email":       email,
 			"Username":    username,
 			"DisplayName": displayName,
 		})
 		return
 	}
-	writeSessionCookie(w, tok)
+	a.writeSessionCookie(w, tok)
 	if next != "" {
 		a.redirectAfterAuthWithNext(w, r, u.ID, next, "/?registered=1")
 		return
@@ -229,6 +231,13 @@ func (a *app) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	next := strings.TrimSpace(r.FormValue("next"))
 	u, tok, _, err := a.tripService.LoginWithIdentifier(r.Context(), id, pw)
 	if err != nil {
+		ip := clientIPString(r.RemoteAddr)
+		rid := RequestIDFromContext(r.Context())
+		slog.WarnContext(r.Context(), "login_failed",
+			slog.String("client_ip", ip),
+			slog.String("request_id", rid),
+			slog.String("user_agent", TruncatedUserAgent(r)),
+		)
 		q := "err=1"
 		if next != "" {
 			q += "&next=" + url.QueryEscape(next)
@@ -236,19 +245,44 @@ func (a *app) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?"+q, http.StatusSeeOther)
 		return
 	}
-	writeSessionCookie(w, tok)
+	a.writeSessionCookie(w, tok)
+	ip := clientIPString(r.RemoteAddr)
+	rid := RequestIDFromContext(r.Context())
+	slog.InfoContext(r.Context(), "login_success",
+		slog.String("user_id", u.ID),
+		slog.String("client_ip", ip),
+		slog.String("request_id", rid),
+		slog.String("user_agent", TruncatedUserAgent(r)),
+	)
 	if next != "" {
 		a.redirectAfterAuthWithNext(w, r, u.ID, next, "/")
 		return
 	}
-	_ = u
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (a *app) logout(w http.ResponseWriter, r *http.Request) {
+	ok, err := requestHasValidCSRF(r)
+	if err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	if !ok {
+		http.Error(w, "invalid security token", http.StatusForbidden)
+		return
+	}
+	uid := CurrentUserID(r.Context())
+	ip := clientIPString(r.RemoteAddr)
+	rid := RequestIDFromContext(r.Context())
+	slog.InfoContext(r.Context(), "logout",
+		slog.String("user_id", uid),
+		slog.String("client_ip", ip),
+		slog.String("request_id", rid),
+		slog.String("user_agent", TruncatedUserAgent(r)),
+	)
 	tok := SessionTokenRaw(r.Context())
 	_ = a.tripService.Logout(r.Context(), tok)
-	http.SetCookie(w, clearSessionCookie())
+	http.SetCookie(w, a.clearSessionCookie())
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -320,4 +354,23 @@ func (a *app) inviteAcceptSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/trips/"+tripID, http.StatusSeeOther)
+}
+
+// registerUserFacingError maps errors to messages that avoid leaking whether an email/username exists.
+func registerUserFacingError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "password must be at least"),
+		strings.Contains(msg, "username must be at least"),
+		strings.Contains(msg, "username may only contain"),
+		strings.Contains(msg, "email is required"),
+		strings.Contains(msg, "registration is disabled"),
+		strings.Contains(msg, "complete initial setup"):
+		return msg
+	default:
+		return "Unable to register with these details. Try signing in, or use a different email or username."
+	}
 }

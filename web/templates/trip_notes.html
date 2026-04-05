@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  {{template "themeHeadScript" .}}
+  <title>Notes &amp; Checklists | {{.Details.Trip.Name}} | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=266">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="/static/app.js?v=244"></script>
+</head>
+<body class="page-trip-notes" data-trip-keep-live data-trip-id="{{.Details.Trip.ID}}" data-keep-view="{{.KeepView}}">
+  <main class="app-shell" aria-label="Notes and checklists" data-long-press-sheet-root>
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Go to dashboard">
+        <div class="brand-logo">R</div>
+        <div><h1>{{.Settings.AppTitle}}</h1><p>Serene Navigator</p></div>
+      </a>
+      {{template "tripSidebarNav" .}}
+      {{template "tripMembersPanel" .}}
+      <div class="sidebar-bottom">
+        <a class="btn" href="/">Back to Dashboard</a>
+        <a class="support-link sidebar-icon-link" href="/about"><span class="material-symbols-outlined" aria-hidden="true">info</span>About</a>
+        <form method="post" action="/logout" class="sidebar-logout-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button type="submit" class="logout-link sidebar-icon-link"><span class="material-symbols-outlined" aria-hidden="true">logout</span>Logout</button>
+        </form>
+      </div>
+    </aside>
+    <section class="main">
+      <header class="trip-mobile-header site-settings-mobile-header">
+        <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard"><span class="material-symbols-outlined" aria-hidden="true">home</span></a>
+        <h2 class="trip-mobile-header-title">Notes &amp; Checklists</h2>
+        <div class="budget-mobile-header-actions">
+          <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+          {{template "tripMobileHeaderProfileBtn" .}}
+        </div>
+      </header>
+      <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
+      <header class="topbar trip-mobile-topbar">
+        <div class="title-group">
+          <h2>Notes &amp; Checklists</h2>
+          <p>Capture notes and checklists for your trip in one place.</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">{{template "tripDesktopHeaderTools" .}}</div>
+      </header>
+
+      <div class="trip-keep-page">
+        <div class="trip-keep-layout">
+          <nav class="trip-keep-util card" aria-label="Notes views">
+            <a href="/trips/{{.Details.Trip.ID}}/notes" class="trip-keep-util-link{{if eq .KeepView "notes"}} trip-keep-util-link--active{{end}}"><span class="material-symbols-outlined" aria-hidden="true">lightbulb</span>Notes</a>
+            <a href="/trips/{{.Details.Trip.ID}}/notes?view=reminders" class="trip-keep-util-link{{if eq .KeepView "reminders"}} trip-keep-util-link--active{{end}}"><span class="material-symbols-outlined" aria-hidden="true">notifications_active</span>Reminders</a>
+            <a href="/trips/{{.Details.Trip.ID}}/notes?view=archive" class="trip-keep-util-link{{if eq .KeepView "archive"}} trip-keep-util-link--active{{end}}"><span class="material-symbols-outlined" aria-hidden="true">archive</span>Archive</a>
+            <a href="/trips/{{.Details.Trip.ID}}/notes?view=trash" class="trip-keep-util-link{{if eq .KeepView "trash"}} trip-keep-util-link--active{{end}}"><span class="material-symbols-outlined" aria-hidden="true">delete</span>Trash</a>
+          </nav>
+
+          <div class="trip-keep-main">
+            <form class="trip-keep-search card" method="get" action="/trips/{{.Details.Trip.ID}}/notes" role="search" data-trip-keep-search-form>
+              {{if ne .KeepView "notes"}}<input type="hidden" name="view" value="{{.KeepView}}">{{end}}
+              <label class="sr-only" for="keep-search-q">Search notes and checklists</label>
+              <span class="material-symbols-outlined trip-keep-search-icon" aria-hidden="true">search</span>
+              <div class="trip-keep-search-field">
+                <input id="keep-search-q" class="trip-keep-search-input trip-keep-search-input--with-clear" type="search" name="q" value="{{.KeepQuery}}" placeholder="Search…" autocomplete="off">
+                <button type="button" class="trip-keep-search-clear-btn{{if not (trimSpace .KeepQuery)}} hidden{{end}}" data-trip-keep-search-clear aria-label="Clear search" title="Clear search">
+                  <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                </button>
+              </div>
+              <button type="submit" class="btn secondary-btn trip-keep-search-btn">Search</button>
+            </form>
+
+            {{if eq .KeepView "notes"}}
+            <div class="trip-keep-composer-row{{if trimSpace .KeepQuery}} trip-keep-composer-row--hidden-for-search{{end}}" data-trip-keep-composer-row>
+              {{template "tripKeepComposerTabbed" (dict "Trip" .Details.Trip "Settings" .Settings "CSRFToken" .CSRFToken "KeepNoteColors" .KeepNoteColors "ReminderCategories" .ReminderCategories "Prefix" "keep-composer" "ColorPickerID" "composer")}}
+            </div>
+            {{else if eq .KeepView "reminders"}}
+            <p class="trip-keep-view-intro muted">Notes and checklist items with a due date will follow your notification settings.</p>
+            {{else if eq .KeepView "archive"}}
+            <p class="trip-keep-view-intro muted">Archived items are hidden until restored.</p>
+            {{else if eq .KeepView "trash"}}
+            <p class="trip-keep-view-intro muted">Deleted items are permanently removed when purged.</p>
+            {{end}}
+
+            {{template "tripKeepNotesBoardInner" .}}
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  {{if tripMobileFabHasItems .Details.Trip}}
+  <div class="mobile-fab-wrap" data-mobile-fab>
+    <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation"><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
+    <div class="mobile-fab-menu hidden" data-mobile-fab-menu>{{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}</div>
+  </div>
+  {{end}}
+  {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "notes")}}
+  {{template "tripLongPressSheet"}}
+  {{template "appMobileProfileSheet" .}}
+  {{template "tripKeepNoteViewDialog"}}
+  {{template "appConfirmDialog"}}
+</body>
+</html>

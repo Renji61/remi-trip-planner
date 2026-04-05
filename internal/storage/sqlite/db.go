@@ -151,13 +151,37 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN budget_cap REAL NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}
+	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN budget_cap_cents INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE trips SET budget_cap_cents = CAST(ROUND(COALESCE(budget_cap, 0) * 100.0) AS INTEGER) WHERE budget_cap_cents = 0 AND ABS(COALESCE(budget_cap, 0)) > 0`); err != nil {
+		return nil, err
+	}
 	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN ui_show_the_tab INTEGER NOT NULL DEFAULT 1`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN ui_show_documents INTEGER NOT NULL DEFAULT 1`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN ui_collaboration_enabled INTEGER NOT NULL DEFAULT 1`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}
 	if _, err = db.Exec(`ALTER TABLE expenses ADD COLUMN from_tab INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}
 	if _, err = db.Exec(`ALTER TABLE expenses ADD COLUMN receipt_path TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE expenses ADD COLUMN amount_cents INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE expenses ADD COLUMN updated_at DATETIME NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE expenses SET amount_cents = CAST(ROUND(COALESCE(amount, 0) * 100.0) AS INTEGER) WHERE amount_cents = 0 AND ABS(COALESCE(amount, 0)) > 0`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE expenses SET updated_at = created_at WHERE TRIM(COALESCE(updated_at, '')) = ''`); err != nil {
 		return nil, err
 	}
 	if _, err = db.Exec(`UPDATE vehicle_rentals SET pay_at_pick_up = 0`); err != nil {
@@ -206,6 +230,12 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_tab_settlements_trip ON tab_settlements(trip_id)`); err != nil {
 		return nil, err
 	}
+	if _, err = db.Exec(`ALTER TABLE tab_settlements ADD COLUMN amount_cents INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE tab_settlements SET amount_cents = CAST(ROUND(COALESCE(amount, 0) * 100.0) AS INTEGER) WHERE amount_cents = 0 AND ABS(COALESCE(amount, 0)) > 0`); err != nil {
+		return nil, err
+	}
 	if _, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS trip_departed_tab_participants (
 			trip_id TEXT NOT NULL,
@@ -235,10 +265,48 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 		`ALTER TABLE vehicle_rentals ADD COLUMN attachment_path TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE flight_entries ADD COLUMN image_path TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE itinerary_items ADD COLUMN image_path TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE itinerary_items ADD COLUMN est_cost_cents INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE lodging_entries ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE vehicle_rentals ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE vehicle_rentals ADD COLUMN insurance_cost_cents INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE flight_entries ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return nil, err
 		}
+	}
+	if _, err = db.Exec(`UPDATE itinerary_items SET est_cost_cents = CAST(ROUND(COALESCE(est_cost, 0) * 100.0) AS INTEGER) WHERE est_cost_cents = 0 AND ABS(COALESCE(est_cost, 0)) > 0`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE lodging_entries SET cost_cents = CAST(ROUND(COALESCE(cost, 0) * 100.0) AS INTEGER) WHERE cost_cents = 0 AND ABS(COALESCE(cost, 0)) > 0`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE vehicle_rentals SET cost_cents = CAST(ROUND(COALESCE(cost, 0) * 100.0) AS INTEGER) WHERE cost_cents = 0 AND ABS(COALESCE(cost, 0)) > 0`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE vehicle_rentals SET insurance_cost_cents = CAST(ROUND(COALESCE(insurance_cost, 0) * 100.0) AS INTEGER) WHERE insurance_cost_cents = 0 AND ABS(COALESCE(insurance_cost, 0)) > 0`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE flight_entries SET cost_cents = CAST(ROUND(COALESCE(cost, 0) * 100.0) AS INTEGER) WHERE cost_cents = 0 AND ABS(COALESCE(cost, 0)) > 0`); err != nil {
+		return nil, err
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE lodging_entries ADD COLUMN updated_at DATETIME NOT NULL DEFAULT ''`,
+		`ALTER TABLE vehicle_rentals ADD COLUMN updated_at DATETIME NOT NULL DEFAULT ''`,
+		`ALTER TABLE flight_entries ADD COLUMN updated_at DATETIME NOT NULL DEFAULT ''`,
+	} {
+		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+	}
+	if _, err = db.Exec(`UPDATE lodging_entries SET updated_at = created_at WHERE TRIM(COALESCE(updated_at, '')) = ''`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE vehicle_rentals SET updated_at = created_at WHERE TRIM(COALESCE(updated_at, '')) = ''`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE flight_entries SET updated_at = created_at WHERE TRIM(COALESCE(updated_at, '')) = ''`); err != nil {
+		return nil, err
 	}
 	if _, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS trip_documents (
@@ -259,6 +327,116 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err = db.Exec(`ALTER TABLE trip_documents ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	// Promote the earliest-created account if no administrator exists (existing databases pre-roles).
+	if _, err = db.Exec(`
+		UPDATE users SET is_admin = 1
+		WHERE id = (SELECT id FROM users ORDER BY datetime(created_at) ASC LIMIT 1)
+		  AND (SELECT COUNT(*) FROM users WHERE is_admin = 1) = 0`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE expenses ADD COLUMN due_at TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE checklist_items ADD COLUMN due_at TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS app_notifications (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			trip_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL DEFAULT '',
+			href TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL DEFAULT '',
+			dedupe_key TEXT NOT NULL,
+			read_at TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			UNIQUE(user_id, dedupe_key),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_app_notifications_user ON app_notifications(user_id, created_at DESC)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_app_notifications_unread ON app_notifications(user_id, read_at)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS itinerary_custom_reminders (
+			id TEXT PRIMARY KEY,
+			trip_id TEXT NOT NULL,
+			itinerary_item_id TEXT NOT NULL,
+			minutes_before_start INTEGER NOT NULL,
+			label TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			UNIQUE(itinerary_item_id, minutes_before_start, label),
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+			FOREIGN KEY (itinerary_item_id) REFERENCES itinerary_items(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_itin_custom_reminders_item ON itinerary_custom_reminders(itinerary_item_id)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS trip_calendar_feed_tokens (
+			trip_id TEXT PRIMARY KEY,
+			token_hash TEXT NOT NULL,
+			created_by_user_id TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE checklist_items ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE checklist_items ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE checklist_items ADD COLUMN updated_at DATETIME`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE checklist_items SET updated_at = created_at WHERE updated_at IS NULL`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS trip_notes (
+			id TEXT PRIMARY KEY,
+			trip_id TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL DEFAULT '',
+			color TEXT NOT NULL DEFAULT '',
+			pinned INTEGER NOT NULL DEFAULT 0,
+			archived INTEGER NOT NULL DEFAULT 0,
+			trashed INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_trip_notes_trip_updated ON trip_notes(trip_id, pinned DESC, updated_at DESC)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE trip_notes ADD COLUMN due_at TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS trip_checklist_category_pins (
+			trip_id TEXT NOT NULL,
+			category TEXT NOT NULL,
+			PRIMARY KEY (trip_id, category),
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
 		return nil, err
 	}
 	return db, nil

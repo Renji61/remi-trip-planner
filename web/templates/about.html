@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=175">
+  <link rel="stylesheet" href="/static/app.css?v=267">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=175"></script>
+  <script defer src="/static/app.js?v=245"></script>
 </head>
 <body class="page-about">
   <main class="app-shell" aria-label="About">
@@ -39,7 +39,7 @@
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
           <h2>About</h2>
-          <p>Version information and what you can do with {{.Settings.AppTitle}}.</p>
+          <p>Version details and features of {{.Settings.AppTitle}}.</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           <a href="/" class="icon-btn" aria-label="Go to dashboard">
@@ -54,7 +54,7 @@
 
       <div class="about-page-stack">
         <section class="card about-version-card" aria-labelledby="about-version-title">
-          <h3 id="about-version-title">This install</h3>
+          <h3 id="about-version-title">Current Version</h3>
           <p class="about-version-line"><strong>Version</strong> <span class="about-version-tag" data-app-version>{{.AppVersion}}</span></p>
           <p class="muted about-version-hint" id="about-update-status" data-about-update-status aria-live="polite">Checking for updates…</p>
           <button type="button" class="secondary-btn about-check-update-btn" id="about-check-update-btn">Check for updates</button>
@@ -77,12 +77,15 @@
             <li>Invite others by email or shareable link and plan together.</li>
             <li>Build a day-by-day itinerary with stops, notes, optional costs, and an interactive map (OpenStreetMap or optional Google Maps) with pins, day filters, and travel hints between stops.</li>
             <li>Turn location lookup on or off when adding places; geocoding and place suggestions can be cached server-side for faster repeat lookups.</li>
-            <li>Track spending against a budget, with categories, Expenses and Group expenses views per trip, and splits that stay consistent when participants leave.</li>
-            <li>Record accommodations, vehicle rentals, and flights with details and attachments.</li>
+            <li>Track spending against a budget, with categories, Expenses and Group expenses views per trip, and splits that stay consistent when participants leave — amounts are stored in <strong>whole minor units</strong> (e.g. cents) for accurate arithmetic.</li>
+            <li>When collaborators edit the same trip, <strong>optimistic concurrency</strong> can return a clear <strong>conflict</strong> instead of silently overwriting another person’s save; refresh and try again with the latest data.</li>
+            <li>Record accommodations, vehicle rentals, and flights with details and attachments; saves that touch itinerary lines use <strong>atomic transactions</strong> so linked data does not end up half-updated.</li>
             <li>Open <strong>Trip Documents</strong> from the trip sidebar to upload files, search and filter every attachment in one place (including documents from stays, rentals, flights, and group expenses), with a configurable max file size in app settings and upload checks for safer file types.</li>
             <li>Use reminder checklists so nothing important is forgotten.</li>
             <li>Customize each trip: which sections appear, labels, layout order, 12h/24h clock, and DD/MM/YYYY or MM/DD/YYYY date display.</li>
             <li>Add custom links in the trip sidebar for quick references.</li>
+            <li>Stay in sync while a trip is open: the app can use a <strong>live event stream</strong> of changes so lists and panels refresh without reloading the whole page.</li>
+            <li>Export a <strong>JSON snapshot</strong> of your visible data from Profile (no password material; app secrets redacted) and use optional <strong>backup scripts</strong> or Compose profile for SQLite snapshots.</li>
             <li>Use the About page to see your installed version and whether a newer release is available (for self-hosted installs).</li>
             <li>Install as an app (PWA) for a more app-like experience on your device.</li>
           </ul>
@@ -110,7 +113,7 @@
       if (data.update_available) {
         setStatus("Update available: latest release is v" + data.latest + ". Ask your server admin to deploy the new version.");
       } else {
-        setStatus("You are up to date with the latest published release (v" + data.latest + ").");
+        setStatus("You're using the latest version (v" + data.latest + ").");
       }
     }
     function run() {

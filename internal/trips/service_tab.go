@@ -101,7 +101,11 @@ func (s *Service) prepareTabSettlementParties(ctx context.Context, tripID string
 }
 
 func (s *Service) AddTabSettlement(ctx context.Context, st TabSettlement) error {
-	if strings.TrimSpace(st.TripID) == "" || st.Amount <= 0 {
+	if st.AmountCents == 0 && st.Amount != 0 {
+		st.AmountCents = MoneyToCentsFloat(st.Amount)
+	}
+	SetTabSettlementAmountCents(&st, st.AmountCents)
+	if strings.TrimSpace(st.TripID) == "" || st.AmountCents <= 0 {
 		return errors.New("invalid settlement")
 	}
 	trip, err := s.repo.GetTrip(ctx, st.TripID)
@@ -121,7 +125,11 @@ func (s *Service) AddTabSettlement(ctx context.Context, st TabSettlement) error 
 }
 
 func (s *Service) UpdateTabSettlement(ctx context.Context, st TabSettlement) error {
-	if strings.TrimSpace(st.ID) == "" || strings.TrimSpace(st.TripID) == "" || st.Amount <= 0 {
+	if st.AmountCents == 0 && st.Amount != 0 {
+		st.AmountCents = MoneyToCentsFloat(st.Amount)
+	}
+	SetTabSettlementAmountCents(&st, st.AmountCents)
+	if strings.TrimSpace(st.ID) == "" || strings.TrimSpace(st.TripID) == "" || st.AmountCents <= 0 {
 		return errors.New("invalid settlement")
 	}
 	trip, err := s.repo.GetTrip(ctx, st.TripID)

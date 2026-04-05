@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=174">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=172"></script>
+  <script defer src="/static/app.js?v=244"></script>
 </head>
 <body class="page-trip-documents">
-  <main class="app-shell" aria-label="Trip Documents" data-long-press-sheet-root>
+  <main class="app-shell" aria-label="Trip Documents" data-long-press-sheet-root data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -33,7 +33,7 @@
       </div>
     </aside>
     <section class="main">
-      <header class="trip-mobile-header">
+      <header class="trip-mobile-header site-settings-mobile-header">
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard"><span class="material-symbols-outlined" aria-hidden="true">home</span></a>
         <h2 class="trip-mobile-header-title">Trip Documents</h2>
         <div class="budget-mobile-header-actions">
@@ -47,24 +47,26 @@
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
           <h2>Trip Documents</h2>
-          <p>Centralize all trip attachments in one searchable view.</p>
+          <p>Keep all your travel documents organized and accessible.</p>
         </div>
         <div class="topbar-right topbar-right--tools">{{template "tripDesktopHeaderTools" .}}</div>
       </header>
 
       <div class="trip-documents-page" data-trip-documents-root>
         <section class="trip-documents-upload card">
-          <h3>Add Attachment</h3>
+          <h3>Add Document</h3>
           <p class="muted">Upload one or more files. Max {{.UploadLimitMB}} MB per file.</p>
           <form method="post" action="/trips/{{.Details.Trip.ID}}/documents/upload" enctype="multipart/form-data" class="trip-documents-upload-form">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <div class="trip-documents-dropzone" data-trip-doc-dropzone>
               <span class="material-symbols-outlined trip-documents-dropzone-icon" aria-hidden="true">cloud_upload</span>
-              <p class="trip-documents-dropzone-hint">Drop files or click to browse</p>
-              <input type="file" name="documents" multiple data-trip-doc-file-input>
+              <p class="trip-documents-dropzone-hint">Drag &amp; drop files or click to upload</p>
+              <input type="file" name="documents" multiple data-trip-doc-file-input aria-label="Choose files to upload">
             </div>
+            <p class="muted trip-documents-selection-status" data-trip-doc-selection-status>No file selected</p>
+            <p class="trip-documents-upload-feedback hidden" role="alert" data-trip-doc-upload-feedback></p>
             <ul class="trip-documents-selected-files muted hidden" data-trip-doc-selected-list aria-live="polite"></ul>
-            <button class="btn trip-documents-upload-submit" type="submit">Upload Document</button>
+            <button class="btn trip-documents-upload-submit" type="submit">Upload</button>
           </form>
           <form method="post" action="/trips/{{.Details.Trip.ID}}/documents/upload" enctype="multipart/form-data" class="trip-documents-mobile-upload">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -77,97 +79,48 @@
                 <small>Up to {{.UploadLimitMB}} MB per file</small>
               </span>
               <span class="material-symbols-outlined trip-documents-mobile-upload-plus" aria-hidden="true">add</span>
-              <input type="file" name="documents" multiple class="sr-only" onchange="this.form.submit()">
+              <input type="file" name="documents" multiple class="sr-only" data-trip-doc-mobile-file-input>
             </label>
+            <p class="trip-documents-upload-feedback trip-documents-upload-feedback--mobile hidden" role="alert" data-trip-doc-upload-feedback></p>
           </form>
         </section>
 
-        <section class="trip-documents-list card">
+        <section class="trip-documents-list card trip-documents-list--decorated" aria-label="Trip documents library">
+          <div class="trip-documents-list-inner">
+            <span class="trip-documents-list-deco material-symbols-outlined" aria-hidden="true">travel_explore</span>
           <div class="trip-documents-list-head trip-documents-list-head--mobile">
             <span class="trip-documents-list-head-title">Recently added</span>
             <span class="trip-documents-list-head-action">Sort by date</span>
           </div>
           <div class="trip-documents-filter-row">
-            <label class="trip-documents-filter-search">Quick search
-              <input type="search" placeholder="Search file, section, item, category..." data-trip-doc-search>
+            <label class="trip-documents-filter-search">Search Documents
+              <input type="search" placeholder="Search files, sections, or categories..." data-trip-doc-search>
             </label>
             <label class="trip-documents-filter-category">Category
               <select data-trip-doc-category>
-                <option value="">All categories</option>
+                <option value="">All Categories</option>
                 {{range .DocumentCategories}}<option value="{{.}}">{{.}}</option>{{end}}
               </select>
             </label>
           </div>
           <ul class="list trip-documents-items">
-            {{range .Documents}}
-            <li class="trip-documents-item" data-trip-doc-item data-doc-search="{{.SearchText}}" data-doc-category="{{.Category}}"{{if eq .Section "general"}} tabindex="0"{{end}}>
-              <div class="trip-documents-item-top">
-                <div class="trip-documents-item-icon" data-doc-file-kind="{{.FileKind}}" aria-hidden="true"><span class="material-symbols-outlined">{{.FileTypeIcon}}</span></div>
-                <div class="trip-documents-item-main">
-                  <div class="trip-documents-item-titleline">
-                    {{if and .ItemName (eq .Section "general")}}<strong class="trip-documents-item-context">{{.ItemName}}</strong><span class="trip-documents-item-sep" aria-hidden="true">·</span>{{end}}
-                    <span class="trip-documents-file-link-wrap">
-                      <a class="trip-documents-file-link" href="{{.FilePath}}" target="_blank" rel="noreferrer" title="{{.FileName}}">{{if eq .Section "general"}}{{if .DisplayName}}{{.DisplayName}}{{else}}{{.FileName}}{{end}}{{else}}{{.FileName}}{{end}}</a>
-                    </span>
-                    <span class="trip-documents-item-sep trip-documents-item-sep--before-tag" aria-hidden="true">·</span>
-                    <span class="trip-documents-tag{{if .TagAccent}} trip-documents-tag--accent{{end}}">{{.Category}}</span>
-                  </div>
-                  <small class="trip-documents-item-meta">{{if .UploadedAt.IsZero}}—{{else}}Uploaded {{.UploadedAt.Format "Jan 2, 2006"}}{{end}} · {{humanFileSize .FileSize}}</small>
-                  {{if eq .Section "accommodation"}}
-                  <p class="itinerary-hint trip-documents-source-hint">From <a href="/trips/{{$.Details.Trip.ID}}/accommodation">{{$.Details.Trip.StaySectionTitle}}</a>; edit the booking there.</p>
-                  {{else if eq .Section "vehicle"}}
-                  <p class="itinerary-hint trip-documents-source-hint">From <a href="/trips/{{$.Details.Trip.ID}}/vehicle-rental">{{$.Details.Trip.VehicleSectionTitle}}</a>; edit the booking there.</p>
-                  {{else if eq .Section "flights"}}
-                  <p class="itinerary-hint trip-documents-source-hint">From <a href="/trips/{{$.Details.Trip.ID}}/flights">{{$.Details.Trip.FlightsSectionTitle}}</a>; edit the booking there.</p>
-                  {{else if eq .Section "group-expenses"}}
-                  <p class="itinerary-hint trip-documents-source-hint">From <a href="/trips/{{$.Details.Trip.ID}}/group-expenses">{{$.Details.Trip.GroupExpensesSectionTitle}}</a>; edit the entry there.</p>
-                  {{end}}
-                </div>
-                <details class="item-actions trip-inline-actions-dropdown trip-documents-item-actions">
-                  <summary class="trip-documents-item-actions-summary">
-                    <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
-                    <span class="visually-hidden">Attachment actions</span>
-                  </summary>
-                  <div class="trip-inline-actions-buttons">
-                    {{if eq .Section "general"}}
-                    <button type="button" class="item-action-btn" data-trip-doc-rename-toggle>Edit</button>
-                    <form method="post" action="/trips/{{$.Details.Trip.ID}}/documents/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this attachment?" data-confirm-body="The file will be removed from trip documents. This cannot be undone." data-confirm-ok="Delete" data-confirm-icon="delete_forever" data-confirm-variant="danger">
-                      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                      <button type="submit" class="item-action-btn danger">Delete</button>
-                    </form>
-                    {{else}}
-                    <button type="button" class="item-action-btn" data-trip-doc-open-url="{{.FilePath}}">Open file</button>
-                    {{end}}
-                  </div>
-                </details>
-              </div>
-              {{if eq .Section "general"}}
-              <form class="trip-documents-rename-form hidden" method="post" action="/trips/{{$.Details.Trip.ID}}/documents/{{.ID}}/update" data-trip-doc-rename-form>
-                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <label class="trip-documents-rename-label">Rename file
-                  <input type="text" name="display_name" value="{{.DisplayName}}" maxlength="512" placeholder="{{.FileName}}" autocomplete="off">
-                </label>
-                <div class="trip-documents-rename-actions">
-                  <button type="submit" class="item-action-btn">Save</button>
-                  <button type="button" class="item-action-btn secondary-btn" data-trip-doc-rename-cancel>Cancel</button>
-                </div>
-              </form>
-              {{end}}
-            </li>
-            {{end}}
+            {{range .Documents}}{{template "trip_document_row" (dict "Details" $.Details "CSRFToken" $.CSRFToken "D" .)}}{{end}}
           </ul>
           <p class="muted hidden" data-trip-doc-empty>No documents match your filters.</p>
+          </div>
         </section>
       </div>
     </section>
   </main>
+  {{if tripMobileFabHasItems .Details.Trip}}
   <div class="mobile-fab-wrap" data-mobile-fab>
     <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation"><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
     <div class="mobile-fab-menu hidden" data-mobile-fab-menu>{{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}</div>
   </div>
+  {{end}}
   {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "documents")}}
   {{template "tripLongPressSheet"}}
-  {{template "tripMobileProfileSheet" .}}
+  {{template "appMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}
 </body>
 </html>

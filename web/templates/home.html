@@ -10,10 +10,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=174">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <link rel="manifest" href="/manifest.webmanifest">
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js?v=173"></script>
+  <script defer src="/static/app.js?v=244"></script>
 </head>
 <body class="page-home">
   <main class="app-shell" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{.HomeDistanceUnit}}">
@@ -30,6 +30,7 @@
         <div class="topbar-right">
           <input type="search" name="trip_search" placeholder="Search trips..." autocomplete="off" aria-label="Search trips" aria-controls="dashboard-trip-lists" data-dashboard-trip-search>
           <div class="avatar-row">
+            {{template "notificationsBell" .}}
             <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
               <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
             </button>
@@ -80,7 +81,7 @@
                       <input type="text" name="currency_name" placeholder="e.g. PHP" value="{{.Settings.DefaultCurrencyName}}">
                     </label>
                     <label class="hero-adventure-label">Currency Symbol
-                      <input type="text" name="currency_symbol" placeholder="e.g. ₱" value="{{.Settings.DefaultCurrencySymbol}}">
+                      <input type="text" name="currency_symbol" placeholder="e.g. £" value="{{.Settings.DefaultCurrencySymbol}}">
                     </label>
                   </div>
                   <button type="submit" class="hero-adventure-submit full">
@@ -275,6 +276,7 @@
                   <div class="trip-list-budget-bar" role="progressbar" aria-valuenow="{{.BudgetPercent}}" aria-valuemin="0" aria-valuemax="100" aria-label="Budget used: {{.BudgetPercent}} percent"><span class="trip-list-budget-bar-fill trip-list-budget-bar-fill--{{.StatusSlug}}" style="width: {{.BudgetPercent}}%"></span></div>
                 </div>
                 <div class="trip-list-col trip-list-col--party">
+                  {{if .UICollaborationEnabled}}
                   {{$memberTotal := add (len .Party) (add (len .PendingInvites) (len .TripGuests))}}
                   {{if gt $memberTotal 0}}
                   <details class="trip-party-popover">
@@ -296,6 +298,7 @@
                   </details>
                   {{else}}
                   <a class="trip-list-party-add" href="/trips/{{.ID}}" title="Open trip" aria-label="Open trip {{.Name}}"><span class="material-symbols-outlined" aria-hidden="true">add</span></a>
+                  {{end}}
                   {{end}}
                 </div>
                 </div>
@@ -325,6 +328,7 @@
                     </div>
                   </a>
                   <div class="trip-list-mobile-party">
+                  {{if .UICollaborationEnabled}}
                   {{$mobTotal := add (len .Party) (add (len .PendingInvites) (len .TripGuests))}}
                   {{if gt $mobTotal 0}}
                   <details class="trip-party-popover">
@@ -346,6 +350,7 @@
                   </details>
                   {{else}}
                   <a class="trip-list-party-add" href="/trips/{{.ID}}" title="Open trip" aria-label="Open trip {{.Name}}"><span class="material-symbols-outlined" aria-hidden="true">add</span></a>
+                  {{end}}
                   {{end}}
                   </div>
                 </div>
@@ -377,6 +382,7 @@
                   {{if .Description}}
                   <p class="muted trip-card-desc">{{.Description}}</p>
                   {{end}}
+                  {{if .UICollaborationEnabled}}
                   {{$gridMemberTotal := add (len .Party) (add (len .PendingInvites) (len .TripGuests))}}
                   {{if gt $gridMemberTotal 0}}
                   <div class="trip-party-stack" style="margin:10px 0 12px;padding-left:2px;" aria-label="Travel party">
@@ -391,6 +397,7 @@
                     {{range .TripGuests}}{{if lt $gshown 4}}<span class="trip-party-avatar trip-party-avatar--guest-chip" title="{{.DisplayName}} (guest)">{{guestInitial .DisplayName}}</span>{{$gshown = add $gshown 1}}{{end}}{{end}}
                     {{if gt $gridMemberTotal 4}}<span class="trip-party-avatar trip-party-avatar--more">+{{sub $gridMemberTotal 4}}</span>{{end}}
                   </div>
+                  {{end}}
                   {{end}}
                   <div class="trip-card-open-wrap">
                     <a class="btn trip-card-open-btn" href="/trips/{{.ID}}" aria-label="Open trip {{.Name}}">Open Trip</a>

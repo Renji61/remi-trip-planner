@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/google/uuid"
 
 	"remi-trip-planner/internal/trips"
@@ -31,12 +31,15 @@ import (
 
 type Dependencies struct {
 	TripService *trips.Service
+	DB          *sql.DB
 }
 
 type app struct {
 	tripService *trips.Service
 	templates   *template.Template
 	staticDir   string
+	db          *sql.DB
+	env         RemiEnv
 }
 
 func tripForbiddenOrMissing(err error) bool {
@@ -248,6 +251,8 @@ type budgetTransactionRowView struct {
 	VehicleLocked bool
 	FlightLocked  bool
 	CanEdit       bool
+	DueAt         string
+	UpdatedAt     time.Time
 }
 
 // noStoreNonStaticGET prevents proxies and browsers from caching HTML/API responses;
@@ -262,14 +267,32 @@ func noStoreNonStaticGET(next http.Handler) http.Handler {
 }
 
 // securityHeaders adds baseline browser hardening headers for all responses.
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-		next.ServeHTTP(w, r)
-	})
+func securityHeaders(env RemiEnv) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+			if env.Production && env.HSTSMaxAge > 0 {
+				w.Header().Set("Strict-Transport-Security", "max-age="+strconv.Itoa(env.HSTSMaxAge))
+			}
+			// Report-only CSP: tune after checking browser reports; allows existing inline scripts/styles and CDNs used by templates.
+			if env.Production {
+				w.Header().Set("Content-Security-Policy-Report-Only",
+					"default-src 'self'; "+
+						"script-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; "+
+						"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
+						"font-src 'self' https://fonts.gstatic.com data:; "+
+						"img-src 'self' data: blob: https:; "+
+						"connect-src 'self' https://api.github.com https://nominatim.openstreetmap.org https://maps.googleapis.com https://*.googleapis.com; "+
+						"frame-ancestors 'self'; "+
+						"base-uri 'self'; "+
+						"form-action 'self'")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // redirectLegacyTripGETPath issues a permanent redirect from /trips/{id}/{from}/… to /trips/{id}/{to}/… (query preserved).
@@ -308,13 +331,16 @@ func NewRouter(deps Dependencies) http.Handler {
 					eff := trips.EffectiveUIDateFormat(trip.UIDateFormat, app.DefaultUIDateFormat)
 					return trips.UIDateIsMDY(eff)
 				},
-				"formatTripMoney":      formatTripMoney,
-				"humanFileSize":        humanFileSize,
-				"expenseCategoryStyle": expenseCategoryStyle,
-				"expenseCategoryIcon":  expenseCategoryIcon,
-				"listContains":         listContainsString,
-				"hasPrefix":            strings.HasPrefix,
-				"trimSpace":            strings.TrimSpace,
+				"formatTripMoney":       formatTripMoney,
+				"humanFileSize":         humanFileSize,
+				"expenseCategoryStyle":  expenseCategoryStyle,
+				"expenseCategoryIcon":   expenseCategoryIcon,
+				"listContains":          listContainsString,
+				"hasPrefix":             strings.HasPrefix,
+				"trimSpace":             strings.TrimSpace,
+				"keepNoteBodyPreview":   keepNoteBodyPreview,
+				"keepNoteColorInPicker": keepNoteColorInPicker,
+				"urlQueryEscape":        func(s string) string { return url.QueryEscape(s) },
 				"mainSectionVisible": func(key string, trip trips.Trip) bool {
 					return trips.MainSectionVisible(key, trip)
 				},
@@ -334,12 +360,20 @@ func NewRouter(deps Dependencies) http.Handler {
 						return trip.UIShowSpends
 					case trips.MainSectionTheTab:
 						return trip.SectionEnabledTheTab()
+					case "documents":
+						return trip.SectionEnabledDocuments()
 					default:
 						return true
 					}
 				},
 				"sidebarWidgetVisible": func(key string, trip trips.Trip) bool {
 					return trips.SidebarWidgetVisible(key, trip)
+				},
+				"tripMobileFabHasItems": func(trip trips.Trip) bool {
+					return trips.TripMobileFabHasItems(trip)
+				},
+				"tripDesktopCalendarFlyoutHasActions": func(trip trips.Trip) bool {
+					return trips.TripDesktopCalendarFlyoutHasActions(trip)
 				},
 				"effectiveDistanceUnit": func(trip trips.Trip, settings trips.AppSettings) string {
 					return trips.EffectiveDistanceUnit(&trip, settings)
@@ -456,22 +490,29 @@ func NewRouter(deps Dependencies) http.Handler {
 			}).
 			ParseGlob("web/templates/*.html"),
 	)
+	env := LoadRemiEnv()
+	trustedNets, trustedSingles := parseTrustedProxyNets(env.TrustedProxies)
+	authRL := newAuthRateLimiter(env.RateLimitAuthRPM, env.RateLimitBurst)
+
 	a := &app{
 		tripService: deps.TripService,
 		templates:   tmpl,
 		staticDir:   filepath.Join("web", "static"),
+		db:          deps.DB,
+		env:         env,
 	}
 
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Heartbeat("/healthz"))
-	r.Use(securityHeaders)
+	r.Use(trustedProxyRealIP(trustedNets, trustedSingles))
+	r.Use(remiRequestID)
+	r.Use(remiRecoverer)
+	r.Use(securityHeaders(env))
+	r.Use(authRateLimitMiddleware(authRL))
 	r.Use(noStoreNonStaticGET)
 	r.Use(a.withSession)
+	r.Use(remiAccessLog)
 
+	r.Get("/healthz", a.healthz)
 	r.Get("/setup", a.setupPage)
 	r.Post("/setup", a.setupSubmit)
 	r.Get("/login", a.loginPage)
@@ -481,13 +522,23 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Post("/logout", a.logout)
 	r.Get("/verify-email", a.verifyEmailPage)
 	r.Get("/invites/accept", a.inviteAcceptPage)
+	r.Get("/calendar/feed/{tripID}.ics", a.calendarFeedICS)
 
 	r.Group(func(r chi.Router) {
 		r.Use(a.requireRegisteredUser)
 		r.Use(a.verifyCSRF)
 		r.Post("/invites/accept", a.inviteAcceptSubmit)
 		r.Get("/", a.homePage)
+		r.Get("/notifications", a.notificationsPage)
+		r.Post("/notifications/read-all", a.notificationsMarkAllRead)
+		r.Post("/notifications/{notificationID}/read", a.notificationsMarkOneRead)
 		r.Get("/profile", a.profilePage)
+		r.Get("/profile/export", a.profileExport)
+		r.Group(func(r chi.Router) {
+			r.Use(a.requireAdmin)
+			r.Get("/admin/users", a.adminUsersPage)
+			r.Post("/admin/users/{userID}/role", a.adminUserSetRole)
+		})
 		r.Post("/profile", a.profileSave)
 		r.Post("/profile/password", a.profilePassword)
 		r.Post("/profile/resend-verify", a.profileResendVerify)
@@ -529,6 +580,13 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Get("/vehicle-rental", a.vehicleRentalPage)
 			r.Get("/flights", a.flightsPage)
 			r.Get("/documents", a.tripDocumentsPage)
+			r.Get("/notes", a.tripNotesPage)
+			r.Post("/notes/note", a.tripNoteCreate)
+			r.Post("/notes/checklist", a.tripKeepChecklistCreate)
+			r.Post("/notes/note/{noteID}/update", a.tripNoteUpdate)
+			r.Post("/notes/note/{noteID}/intent", a.tripNoteIntent)
+			r.Post("/notes/checklist-category/pin", a.tripKeepChecklistCategoryPin)
+			r.Post("/notes/checklist-batch/intent", a.tripKeepChecklistBatchIntent)
 			r.Post("/accommodation/{lodgingID}/update", a.updateLodging)
 			r.Post("/accommodation/{lodgingID}/delete", a.deleteLodging)
 			r.Post("/accommodation", a.addLodging)
@@ -541,6 +599,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/documents/upload", a.uploadTripDocuments)
 			r.Post("/documents/{documentID}/update", a.updateTripDocument)
 			r.Post("/documents/{documentID}/delete", a.deleteTripDocument)
+			r.Post("/calendar/feed/regenerate", a.tripCalendarFeedRegenerate)
 			r.Post("/lodging/{lodgingID}/update", a.updateLodging)
 			r.Post("/lodging/{lodgingID}/delete", a.deleteLodging)
 			r.Post("/lodging", a.addLodging)
@@ -573,6 +632,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Route("/api/v1/trips/{tripID}", func(r chi.Router) {
 			r.Use(a.tripIDAccessMiddleware)
 			r.Get("/changes", a.listChanges)
+			r.Get("/events", a.streamChanges)
+			r.Get("/keep/board-fragment", a.tripKeepBoardFragment)
+			r.Get("/keep/details-preview-fragment", a.tripKeepDetailsPreviewFragment)
 			r.Post("/sync", a.syncChanges)
 		})
 	})
@@ -612,17 +674,17 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	list, err := a.tripService.ListVisibleTrips(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	allTotals, err := a.tripService.SumExpensesByTrip(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	visibleIDs := make(map[string]struct{}, len(list))
@@ -637,7 +699,7 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 	}
 	travelStats, err := a.tripService.ComputeTravelStats(r.Context(), list)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	rollups := a.loadDashboardBudgetRollups(r.Context(), uid, list)
@@ -716,7 +778,7 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 	homeDistanceUnit := trips.EffectiveDistanceUnit(nil, settings)
 
 	inProg := filterDashboardSidebarTrips(list, time.Now(), 2)
-	_ = a.templates.ExecuteTemplate(w, "home.html", map[string]any{
+	homeData := map[string]any{
 		"ActiveTripCards":        activeO,
 		"SharedTripCards":        activeS,
 		"DraftTripCards":         draftMerged,
@@ -738,32 +800,22 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 		"SidebarInProgressTrips": inProg,
 		"SidebarTripID":          "",
 		"TripID":                 "",
-	})
-}
-
-// tripScheduleBounds returns calendar start/end when both dates parse and end is on or after start.
-func tripScheduleBounds(t trips.Trip) (startD, endD time.Time, ok bool) {
-	start, err1 := time.Parse("2006-01-02", strings.TrimSpace(t.StartDate))
-	end, err2 := time.Parse("2006-01-02", strings.TrimSpace(t.EndDate))
-	if err1 != nil || err2 != nil {
-		return time.Time{}, time.Time{}, false
 	}
-	loc := time.Local
-	startD = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, loc)
-	endD = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, loc)
-	if endD.Before(startD) {
-		return time.Time{}, time.Time{}, false
+	if n, err := a.tripService.CountUnreadNotifications(r.Context(), uid); err == nil {
+		homeData["NotificationUnreadCount"] = n
+	} else {
+		homeData["NotificationUnreadCount"] = 0
 	}
-	return startD, endD, true
+	_ = a.templates.ExecuteTemplate(w, "home.html", homeData)
 }
 
 func tripHasValidSchedule(t trips.Trip) bool {
-	_, _, ok := tripScheduleBounds(t)
+	_, _, ok := trips.TripScheduleBounds(t)
 	return ok
 }
 
 func tripInclusiveDayCount(t trips.Trip) int {
-	startD, endD, ok := tripScheduleBounds(t)
+	startD, endD, ok := trips.TripScheduleBounds(t)
 	if !ok {
 		return 0
 	}
@@ -969,7 +1021,7 @@ func tripDashboardStatus(t trips.Trip, now time.Time) (label, slug string) {
 	if t.IsArchived {
 		return "Archived", "archived"
 	}
-	startD, endD, ok := tripScheduleBounds(t)
+	startD, endD, ok := trips.TripScheduleBounds(t)
 	if !ok {
 		return "Draft Trip", "draft"
 	}
@@ -989,7 +1041,7 @@ func (a *app) settingsPage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	tripID := strings.TrimSpace(r.URL.Query().Get("trip_id"))
@@ -1002,7 +1054,7 @@ func (a *app) settingsPage(w http.ResponseWriter, r *http.Request) {
 		"TripID":             tripID,
 	}
 	if err := a.mergeDashboardShell(r.Context(), uid, "settings", tripID, data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	_ = a.templates.ExecuteTemplate(w, "settings.html", data)
@@ -1024,7 +1076,7 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.tripService.EnsureUserSettings(r.Context(), uid); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 
@@ -1052,7 +1104,7 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 
 	app, err := a.tripService.GetAppSettings(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if vals, ok := r.PostForm["clear_google_maps_key"]; ok && len(vals) > 0 && vals[len(vals)-1] == "1" {
@@ -1125,15 +1177,15 @@ func (a *app) resetAllSiteSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.tripService.EnsureUserSettings(r.Context(), uid); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if err := a.tripService.ResetSiteSettingsToDefaults(r.Context()); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if err := a.tripService.ResetUserUISettingsToDefaults(r.Context(), uid); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	returnTo := strings.TrimSpace(r.FormValue("return_to"))
@@ -1164,12 +1216,12 @@ func (a *app) saveThemeQuick(w http.ResponseWriter, r *http.Request) {
 	}
 	pref := strings.TrimSpace(r.FormValue("theme_preference"))
 	if err := a.tripService.EnsureUserSettings(r.Context(), uid); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	merged, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if err := a.tripService.SaveUserUISettings(r.Context(), uid, trips.UserSettings{
@@ -1252,19 +1304,19 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, l := range details.Lodgings {
 		if err := a.tripService.SyncExpenseForLodging(r.Context(), l); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err)
 			return
 		}
 	}
 	for _, v := range details.Vehicles {
 		if err := a.tripService.SyncExpenseForVehicleRental(r.Context(), v); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err)
 			return
 		}
 	}
 	for _, f := range details.Flights {
 		if err := a.tripService.SyncExpenseForFlight(r.Context(), f); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err)
 			return
 		}
 	}
@@ -1282,17 +1334,28 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	flightByExpenseID := trips.FlightByExpenseID(details.Flights)
 	dayLabels, err := a.tripService.GetTripDayLabels(r.Context(), tripID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	dayGroups := buildItineraryDayGroups(details.Trip.StartDate, details.Itinerary, details.Lodgings, details.Vehicles, details.Flights, dayLabels)
 	spendsDisplayExpenses := trips.CollapseVehicleRentalExpenseDuplicates(details.Expenses, details.Vehicles)
 	expenseGroups := buildExpenseDayGroups(details.Trip.StartDate, spendsDisplayExpenses)
 	checklistCategoryGroups := buildChecklistCategoryGroups(details.Checklist, trips.ReminderChecklistCategories)
+	keepNotes, err := a.tripService.ListTripNotesForKeepView(r.Context(), tripID, trips.KeepViewNotes)
+	if err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
+	pinnedChecklistCats, err := a.tripService.ListPinnedChecklistCategories(r.Context(), tripID)
+	if err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
+	tripKeepPreview := buildTripDetailsKeepPreview(keepNotes, checklistCategoryGroups, pinnedChecklistCats)
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	acc, _ := TripAccessFromContext(r.Context())
@@ -1337,6 +1400,12 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	for _, g := range tripGuests {
 		tabGuestIDs = append(tabGuestIDs, g.ID)
 	}
+	crm, _ := a.tripService.ListItineraryCustomRemindersForTrip(r.Context(), tripID)
+	remByItem := map[string][]trips.ItineraryCustomReminder{}
+	for _, row := range crm {
+		remByItem[row.ItineraryItemID] = append(remByItem[row.ItineraryItemID], row)
+	}
+
 	tabMeKey := trips.ParticipantKeyUser(uid)
 	tabYourShareByExpenseID := map[string]float64{}
 	for _, e := range tabExpenses {
@@ -1359,54 +1428,61 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	}
 	tripHeroExtra, tripHeroStyle := tripPageHeroFields(details.Trip.CoverImage)
 	pageData := map[string]any{
-		"Details":                     details,
-		"DayGroups":                   dayGroups,
-		"ExpenseGroups":               expenseGroups,
-		"Settings":                    settings,
-		"CurrencySymbol":              currencySymbol,
-		"CurrencyName":                currencyName,
-		"TotalExpense":                total,
-		"TotalBudgeted":               totalBudgeted,
-		"BudgetProgress":              float64(budgetProgress),
-		"BudgetExceeded":              budgetExceeded,
-		"ExpenseCategories":           trips.QuickExpenseCategories,
-		"ChecklistCategories":         trips.ReminderChecklistCategories,
-		"ChecklistGroups":             checklistCategoryGroups,
-		"VehicleExpenseLocked":        vehicleExpenseLocked,
-		"FlightExpenseLocked":         flightExpenseLocked,
-		"MainSectionOrder":            mainSectionOrder,
-		"SidebarWidgetOrder":          sidebarWidgetOrder,
-		"CustomSidebarLinks":          customSidebarLinks,
-		"TripAccess":                  acc,
-		"Party":                       party,
-		"TripGuests":                  tripGuests,
-		"TabDepartedParticipants":     tabDepartedParticipants,
-		"PendingInvites":              pendingInvites,
-		"CollaboratorCount":           nCollab,
-		"InviteNotice":                inviteNotice,
-		"InviteNoticeEmail":           inviteEmail,
-		"ArchivedHiddenFromDashboard": archivedHidden,
-		"TabExpenses":                 tabExpenses,
-		"TabExpenseGroups":            tabExpenseGroups,
-		"TabExpensesTotal":            tabExpensesTotal,
-		"Trip":                        details.Trip,
-		"TabParticipantLabels":        tabParticipantLabels,
-		"TabYourShareByExpenseID":     tabYourShareByExpenseID,
-		"TabEqualSplitBootstrap":      tabEqualSplitBootstrap,
-		"CSRFToken":                   CSRFToken(r.Context()),
-		"CurrentUserID":               uid,
-		"CurrentUser":                 CurrentUser(r.Context()),
-		"SidebarNavActive":            "trip",
-		"MapViewLatitude":             mapViewLat,
-		"MapViewLongitude":            mapViewLng,
-		"MapViewZoom":                 mapViewZoom,
-		"TripHeroExtraClasses":        tripHeroExtra,
-		"TripHeroInlineStyle":         tripHeroStyle,
+		"Details":                        details,
+		"DayGroups":                      dayGroups,
+		"ExpenseGroups":                  expenseGroups,
+		"Settings":                       settings,
+		"ExpenseFormDefaultDateISO":      time.Now().Format("2006-01-02"),
+		"CurrencySymbol":                 currencySymbol,
+		"CurrencyName":                   currencyName,
+		"TotalExpense":                   total,
+		"TotalBudgeted":                  totalBudgeted,
+		"BudgetProgress":                 float64(budgetProgress),
+		"BudgetExceeded":                 budgetExceeded,
+		"ExpenseCategories":              trips.QuickExpenseCategories,
+		"ChecklistCategories":            trips.ReminderChecklistCategories,
+		"KeepNoteColors":                 keepNotePickerColors,
+		"TripKeepPreview":                tripKeepPreview,
+		"VehicleExpenseLocked":           vehicleExpenseLocked,
+		"FlightExpenseLocked":            flightExpenseLocked,
+		"MainSectionOrder":               mainSectionOrder,
+		"SidebarWidgetOrder":             sidebarWidgetOrder,
+		"CustomSidebarLinks":             customSidebarLinks,
+		"TripAccess":                     acc,
+		"Party":                          party,
+		"TripGuests":                     tripGuests,
+		"TabDepartedParticipants":        tabDepartedParticipants,
+		"PendingInvites":                 pendingInvites,
+		"CollaboratorCount":              nCollab,
+		"InviteNotice":                   inviteNotice,
+		"InviteNoticeEmail":              inviteEmail,
+		"ArchivedHiddenFromDashboard":    archivedHidden,
+		"TabExpenses":                    tabExpenses,
+		"TabExpenseGroups":               tabExpenseGroups,
+		"TabExpensesTotal":               tabExpensesTotal,
+		"Trip":                           details.Trip,
+		"TabParticipantLabels":           tabParticipantLabels,
+		"TabYourShareByExpenseID":        tabYourShareByExpenseID,
+		"TabEqualSplitBootstrap":         tabEqualSplitBootstrap,
+		"CSRFToken":                      CSRFToken(r.Context()),
+		"CurrentUserID":                  uid,
+		"CurrentUser":                    CurrentUser(r.Context()),
+		"SidebarNavActive":               "trip",
+		"MapViewLatitude":                mapViewLat,
+		"MapViewLongitude":               mapViewLng,
+		"MapViewZoom":                    mapViewZoom,
+		"TripHeroExtraClasses":           tripHeroExtra,
+		"TripHeroInlineStyle":            tripHeroStyle,
+		"ItineraryCustomRemindersByItem": remByItem,
+	}
+	if n, err := a.tripService.CountUnreadNotifications(r.Context(), uid); err == nil {
+		pageData["NotificationUnreadCount"] = n
+	} else {
+		pageData["NotificationUnreadCount"] = 0
 	}
 	var buf bytes.Buffer
 	if err := a.templates.ExecuteTemplate(&buf, "trip.html", pageData); err != nil {
-		log.Printf("trip page template: %v", err)
-		http.Error(w, "Could not render trip page.", http.StatusInternalServerError)
+		writeInternalServerError(w, r, fmt.Errorf("trip page template: %w", err))
 		return
 	}
 	_, _ = io.Copy(w, &buf)
@@ -1426,7 +1502,7 @@ func (a *app) tripSettingsPage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	currencySymbol := defaultIfEmpty(t.CurrencySymbol, "$")
@@ -1449,6 +1525,8 @@ func (a *app) tripSettingsPage(w http.ResponseWriter, r *http.Request) {
 		"HideSettingsNavOnMobile":   true,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, trips.TripDetails{Trip: t}, pageData, "settings")
+	hasFeed, _ := a.tripService.HasCalendarFeedToken(r.Context(), tripID)
+	pageData["CalendarFeedEnabled"] = hasFeed
 	guestSeed := template.JS("[]")
 	if gl, ok := pageData["TripGuests"].([]trips.TripGuest); ok && len(gl) > 0 {
 		type guestSeedRow struct {
@@ -1466,8 +1544,7 @@ func (a *app) tripSettingsPage(w http.ResponseWriter, r *http.Request) {
 	pageData["TripGuestsInitialJSON"] = guestSeed
 	var buf bytes.Buffer
 	if err := a.templates.ExecuteTemplate(&buf, "trip_settings.html", pageData); err != nil {
-		log.Printf("trip settings page template: %v", err)
-		http.Error(w, "Could not render trip settings.", http.StatusInternalServerError)
+		writeInternalServerError(w, r, fmt.Errorf("trip settings page template: %w", err))
 		return
 	}
 	_, _ = io.Copy(w, &buf)
@@ -1491,7 +1568,7 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 
@@ -1709,6 +1786,8 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 			VehicleLocked: vLocked,
 			FlightLocked:  fLocked,
 			CanEdit:       canEdit,
+			DueAt:         e.DueAt,
+			UpdatedAt:     e.UpdatedAt,
 		})
 	}
 
@@ -1731,31 +1810,32 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 	canShowAll := totalTx > len(transactions)
 
 	pageData := map[string]any{
-		"Trip":                   details.Trip,
-		"Settings":               settings,
-		"CSRFToken":              CSRFToken(r.Context()),
-		"CurrencySymbol":         currencySymbol,
-		"ExpenseCategories":      trips.QuickExpenseCategories,
-		"TotalSpent":             totalSpent,
-		"TotalBudgeted":          totalBudgeted,
-		"Remaining":              remaining,
-		"BudgetProgress":         budgetProgress,
-		"BudgetExceeded":         budgetExceeded,
-		"DailyAvgSpent":          dailyAvgSpent,
-		"BudgetTargetPerDay":     budgetTargetPerDay,
-		"DailyDeltaPctAbsInt":    dailyDeltaPctAbsInt,
-		"DailyTrendIcon":         dailyTrendIcon,
-		"DailyTrendClass":        dailyTrendClass,
-		"RemainingPercentInt":    remainingPercentInt,
-		"TripDays":               tripDays,
-		"BudgetGroups":           segments,
-		"Transactions":           transactions,
-		"HasTransactions":        len(transactions) > 0,
-		"CanShowAllTransactions": canShowAll,
-		"BudgetInitialLimit":     initialLimit,
-		"VehicleExpenseLocked":   vehicleExpenseLocked,
-		"FlightExpenseLocked":    flightExpenseLocked,
-		"CurrentUserID":          uid,
+		"Trip":                      details.Trip,
+		"Settings":                  settings,
+		"CSRFToken":                 CSRFToken(r.Context()),
+		"ExpenseFormDefaultDateISO": time.Now().Format("2006-01-02"),
+		"CurrencySymbol":            currencySymbol,
+		"ExpenseCategories":         trips.QuickExpenseCategories,
+		"TotalSpent":                totalSpent,
+		"TotalBudgeted":             totalBudgeted,
+		"Remaining":                 remaining,
+		"BudgetProgress":            budgetProgress,
+		"BudgetExceeded":            budgetExceeded,
+		"DailyAvgSpent":             dailyAvgSpent,
+		"BudgetTargetPerDay":        budgetTargetPerDay,
+		"DailyDeltaPctAbsInt":       dailyDeltaPctAbsInt,
+		"DailyTrendIcon":            dailyTrendIcon,
+		"DailyTrendClass":           dailyTrendClass,
+		"RemainingPercentInt":       remainingPercentInt,
+		"TripDays":                  tripDays,
+		"BudgetGroups":              segments,
+		"Transactions":              transactions,
+		"HasTransactions":           len(transactions) > 0,
+		"CanShowAllTransactions":    canShowAll,
+		"BudgetInitialLimit":        initialLimit,
+		"VehicleExpenseLocked":      vehicleExpenseLocked,
+		"FlightExpenseLocked":       flightExpenseLocked,
+		"CurrentUserID":             uid,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "expenses")
 	_ = a.templates.ExecuteTemplate(w, "budget.html", pageData)
@@ -1778,7 +1858,7 @@ func (a *app) theTabPage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
@@ -2000,6 +2080,7 @@ func (a *app) theTabPage(w http.ResponseWriter, r *http.Request) {
 		"CurrentUserID":             uid,
 		"VehicleExpenseLocked":      vehicleExpenseLocked,
 		"FlightExpenseLocked":       flightExpenseLocked,
+		"ExpenseFormDefaultDateISO": time.Now().Format("2006-01-02"),
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "group-expenses")
 	_ = a.templates.ExecuteTemplate(w, "the_tab.html", pageData)
@@ -2020,7 +2101,7 @@ func (a *app) tabExpensesLoadMore(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "trip not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "the_tab") {
@@ -2029,7 +2110,7 @@ func (a *app) tabExpensesLoadMore(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
@@ -2142,7 +2223,7 @@ func (a *app) tabSettlementsLoadMore(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "trip not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "the_tab") {
@@ -2151,7 +2232,7 @@ func (a *app) tabSettlementsLoadMore(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
@@ -2206,7 +2287,7 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "trip not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 
@@ -2283,6 +2364,8 @@ func (a *app) budgetTransactionsRows(w http.ResponseWriter, r *http.Request) {
 			VehicleLocked: vLocked,
 			FlightLocked:  fLocked,
 			CanEdit:       canEdit,
+			DueAt:         e.DueAt,
+			UpdatedAt:     e.UpdatedAt,
 		})
 	}
 
@@ -2318,7 +2401,7 @@ func (a *app) exportBudgetReport(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "trip not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 
@@ -2353,7 +2436,7 @@ func (a *app) exportBudgetReport(w http.ResponseWriter, r *http.Request) {
 
 	writer := csv.NewWriter(w)
 	if err := writer.Write([]string{"Date", "Category", "Description", "Method", "Amount"}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 
@@ -2370,14 +2453,14 @@ func (a *app) exportBudgetReport(w http.ResponseWriter, r *http.Request) {
 		amountStr := currencySymbol + strconv.FormatFloat(e.Amount, 'f', 2, 64)
 
 		if err := writer.Write([]string{dateLabel, e.Category, desc, method, amountStr}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err)
 			return
 		}
 	}
 
 	writer.Flush()
 	if err := writer.Error(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 }
@@ -2621,6 +2704,11 @@ func (a *app) redirectIfTripSectionDisabled(w http.ResponseWriter, r *http.Reque
 			http.Redirect(w, r, "/trips/"+trip.ID, http.StatusSeeOther)
 			return true
 		}
+	case "documents":
+		if !trip.SectionEnabledDocuments() {
+			http.Redirect(w, r, "/trips/"+trip.ID, http.StatusSeeOther)
+			return true
+		}
 	}
 	return false
 }
@@ -2677,6 +2765,9 @@ func (a *app) applyTripGuestPatchFromForm(ctx context.Context, tripID string, r 
 
 func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
+	if !a.requireTripOwner(w, r, tripID) {
+		return
+	}
 	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			http.Error(w, "invalid form", http.StatusBadRequest)
@@ -2722,12 +2813,13 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	existing.DistanceUnit = strings.TrimSpace(r.FormValue("distance_unit"))
 	existing.CurrencyName = defaultIfEmpty(r.FormValue("currency_name"), "USD")
 	existing.CurrencySymbol = defaultIfEmpty(r.FormValue("currency_symbol"), "$")
-	existing.BudgetCap = 0
+	existing.BudgetCapCents = 0
 	if s := strings.TrimSpace(r.FormValue("budget_cap")); s != "" {
-		if v, err := strconv.ParseFloat(s, 64); err == nil && !math.IsNaN(v) && v >= 0 {
-			existing.BudgetCap = v
+		if v, err := trips.ParseMoneyToCents(s); err == nil && v >= 0 {
+			existing.BudgetCapCents = v
 		}
 	}
+	trips.SetTripBudgetCapCents(&existing, existing.BudgetCapCents)
 	latStr := strings.TrimSpace(r.FormValue("home_map_latitude"))
 	lngStr := strings.TrimSpace(r.FormValue("home_map_longitude"))
 	if latStr == "" || lngStr == "" {
@@ -2748,6 +2840,8 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 	}
 	existing.UIShowItinerary = formTriSectionOn(r, "ui_trip_section_itinerary")
 	existing.UIShowChecklist = formTriSectionOn(r, "ui_trip_section_checklist")
+	existing.UIShowDocuments = formTriSectionOn(r, "ui_trip_section_documents")
+	existing.UICollaborationEnabled = formTriSectionOn(r, "ui_trip_section_collaboration")
 	var mainHidden []string
 	for _, k := range trips.DefaultMainSectionOrder {
 		switch k {
@@ -2786,6 +2880,11 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 		spExp = "first"
 	}
 	existing.UISpendsExpand = spExp
+	tabExp := strings.ToLower(strings.TrimSpace(r.FormValue("ui_group_expenses_expand")))
+	if tabExp != "all" && tabExp != "none" {
+		tabExp = "first"
+	}
+	existing.UITabExpand = tabExp
 	tf := strings.ToLower(strings.TrimSpace(r.FormValue("ui_time_format")))
 	if tf != "24h" {
 		tf = "12h"
@@ -2834,6 +2933,9 @@ func (a *app) updateTrip(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) resetTripUIPresets(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
+	if !a.requireTripOwner(w, r, tripID) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
@@ -2903,6 +3005,23 @@ func (a *app) deleteTrip(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+func parseItineraryReminderRows(r *http.Request) []trips.ItineraryCustomReminder {
+	var out []trips.ItineraryCustomReminder
+	for _, p := range []string{"a", "b", "c"} {
+		ms := strings.TrimSpace(r.FormValue("reminder_" + p + "_minutes"))
+		if ms == "" {
+			continue
+		}
+		m, err := strconv.Atoi(ms)
+		if err != nil || m < 0 || m > 365*24*60 {
+			continue
+		}
+		label := strings.TrimSpace(r.FormValue("reminder_" + p + "_label"))
+		out = append(out, trips.ItineraryCustomReminder{MinutesBeforeStart: m, Label: label})
+	}
+	return out
+}
+
 func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
@@ -2935,24 +3054,30 @@ func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	estCost, _ := strconv.ParseFloat(r.FormValue("est_cost"), 64)
+	estCostCents, err := trips.ParseMoneyToCents(r.FormValue("est_cost"))
+	if err != nil {
+		http.Error(w, "invalid estimated cost", http.StatusBadRequest)
+		return
+	}
 	imagePath, imgErr := storeVehicleImage(r, "stop_image", a.maxUploadFileSizeBytes(r.Context()))
 	if imgErr != nil {
 		http.Error(w, imgErr.Error(), http.StatusBadRequest)
 		return
 	}
+	itemID := uuid.NewString()
 	err = a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
-		TripID:    tripID,
-		DayNumber: day,
-		Title:     r.FormValue("title"),
-		Notes:     r.FormValue("notes"),
-		Location:  location,
-		ImagePath: imagePath,
-		Latitude:  lat,
-		Longitude: lng,
-		EstCost:   estCost,
-		StartTime: r.FormValue("start_time"),
-		EndTime:   r.FormValue("end_time"),
+		ID:           itemID,
+		TripID:       tripID,
+		DayNumber:    day,
+		Title:        r.FormValue("title"),
+		Notes:        r.FormValue("notes"),
+		Location:     location,
+		ImagePath:    imagePath,
+		Latitude:     lat,
+		Longitude:    lng,
+		EstCostCents: estCostCents,
+		StartTime:    r.FormValue("start_time"),
+		EndTime:      r.FormValue("end_time"),
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -2962,6 +3087,7 @@ func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	_ = a.tripService.ReplaceItineraryCustomReminders(r.Context(), tripID, itemID, parseItineraryReminderRows(r))
 	if isAsyncRequest(r) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -3022,7 +3148,11 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 	if a.redirectIfTripSectionDisabled(w, r, trip, "spends") {
 		return
 	}
-	amount, _ := strconv.ParseFloat(r.FormValue("amount"), 64)
+	amountCents, err := trips.ParseMoneyToCents(r.FormValue("amount"))
+	if err != nil {
+		http.Error(w, "invalid amount", http.StatusBadRequest)
+		return
+	}
 	paymentMethod := strings.TrimSpace(r.FormValue("payment_method"))
 	if paymentMethod == "" {
 		paymentMethod = "Cash"
@@ -3037,7 +3167,7 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 	title, paidBy, splitMode, splitJSON := "", "", "", ""
 	if fromTab {
 		var tabErr error
-		title, paidBy, splitMode, splitJSON, tabErr = a.parseTabExpenseFields(r.Context(), tripID, trip, amount, true, r)
+		title, paidBy, splitMode, splitJSON, tabErr = a.parseTabExpenseFields(r.Context(), tripID, trip, trips.MoneyFromCents(amountCents), true, r)
 		if tabErr != nil {
 			http.Error(w, tabErr.Error(), http.StatusBadRequest)
 			return
@@ -3055,7 +3185,7 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 	err = a.tripService.AddExpense(r.Context(), trips.Expense{
 		TripID:        tripID,
 		Category:      r.FormValue("category"),
-		Amount:        amount,
+		AmountCents:   amountCents,
 		Notes:         r.FormValue("notes"),
 		SpentOn:       r.FormValue("spent_on"),
 		PaymentMethod: paymentMethod,
@@ -3065,6 +3195,7 @@ func (a *app) addExpense(w http.ResponseWriter, r *http.Request) {
 		PaidBy:        paidBy,
 		SplitMode:     splitMode,
 		SplitJSON:     splitJSON,
+		DueAt:         strings.TrimSpace(r.FormValue("due_at")),
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -3122,11 +3253,24 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	estCost, _ := strconv.ParseFloat(r.FormValue("est_cost"), 64)
+	estCostCents, err := trips.ParseMoneyToCents(r.FormValue("est_cost"))
+	if err != nil {
+		http.Error(w, "invalid estimated cost", http.StatusBadRequest)
+		return
+	}
 	location := strings.TrimSpace(r.FormValue("location"))
 	lat, lng := a.geocodeForApp(r.Context(), location)
 	if current, ok := findItineraryItemByID(details.Itinerary, itemID); ok {
 		lat, lng = fallbackItineraryCoordsOnGeocodeMiss(lat, lng, current)
+	}
+	var expectedUpdatedAt time.Time
+	expectedRaw := strings.TrimSpace(r.FormValue("expected_updated_at"))
+	if expectedRaw != "" {
+		expectedUpdatedAt, err = time.Parse(time.RFC3339Nano, expectedRaw)
+		if err != nil {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", "This itinerary stop changed since you opened it. Reopen it to review the latest values, then try again.")
+			return
+		}
 	}
 	imagePath, imgErr := storeVehicleImage(r, "stop_image", a.maxUploadFileSizeBytes(r.Context()))
 	if imgErr != nil {
@@ -3143,27 +3287,34 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		imagePath = ""
 	}
 	err = a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        itemID,
-		TripID:    tripID,
-		DayNumber: day,
-		Title:     r.FormValue("title"),
-		Location:  location,
-		ImagePath: imagePath,
-		Latitude:  lat,
-		Longitude: lng,
-		Notes:     r.FormValue("notes"),
-		EstCost:   estCost,
-		StartTime: r.FormValue("start_time"),
-		EndTime:   r.FormValue("end_time"),
+		ID:                    itemID,
+		TripID:                tripID,
+		DayNumber:             day,
+		Title:                 r.FormValue("title"),
+		Location:              location,
+		ImagePath:             imagePath,
+		Latitude:              lat,
+		Longitude:             lng,
+		Notes:                 r.FormValue("notes"),
+		EstCostCents:          estCostCents,
+		StartTime:             r.FormValue("start_time"),
+		EndTime:               r.FormValue("end_time"),
+		ExpectedUpdatedAt:     expectedUpdatedAt,
+		EnforceOptimisticLock: true,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
+		if trips.IsConflictError(err) {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", err.Error())
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	_ = a.tripService.ReplaceItineraryCustomReminders(r.Context(), tripID, itemID, parseItineraryReminderRows(r))
 	if isAsyncRequest(r) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -3224,7 +3375,11 @@ func (a *app) updateExpense(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	amount, _ := strconv.ParseFloat(r.FormValue("amount"), 64)
+	amountCents, err := trips.ParseMoneyToCents(r.FormValue("amount"))
+	if err != nil {
+		http.Error(w, "invalid amount", http.StatusBadRequest)
+		return
+	}
 	paymentMethod := strings.TrimSpace(r.FormValue("payment_method"))
 	if paymentMethod == "" {
 		paymentMethod = "Cash"
@@ -3260,15 +3415,29 @@ func (a *app) updateExpense(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "only the trip owner can edit expenses", http.StatusForbidden)
 		return
 	}
+	var expectedUpdatedAt time.Time
+	expectedRaw := strings.TrimSpace(r.FormValue("expected_updated_at"))
+	if expectedRaw != "" {
+		expectedUpdatedAt, err = time.Parse(time.RFC3339Nano, expectedRaw)
+		if err != nil {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", "This expense changed since you opened it. Reopen it to review the latest values, then try again.")
+			return
+		}
+	}
 	exp := trips.Expense{
-		ID:            expenseID,
-		TripID:        tripID,
-		Category:      r.FormValue("category"),
-		Amount:        amount,
-		Notes:         r.FormValue("notes"),
-		SpentOn:       r.FormValue("spent_on"),
-		PaymentMethod: paymentMethod,
-		ReceiptPath:   receiptPath,
+		ID:                    expenseID,
+		TripID:                tripID,
+		Category:              r.FormValue("category"),
+		AmountCents:           amountCents,
+		Notes:                 r.FormValue("notes"),
+		SpentOn:               r.FormValue("spent_on"),
+		PaymentMethod:         paymentMethod,
+		ReceiptPath:           receiptPath,
+		FromTab:               prev.FromTab,
+		LodgingID:             prev.LodgingID,
+		DueAt:                 strings.TrimSpace(r.FormValue("due_at")),
+		ExpectedUpdatedAt:     expectedUpdatedAt,
+		EnforceOptimisticLock: true,
 	}
 	tabMeta := strings.TrimSpace(r.FormValue("tab_meta_submitted")) == "1"
 	if prev.FromTab && !tabMeta {
@@ -3278,7 +3447,7 @@ func (a *app) updateExpense(w http.ResponseWriter, r *http.Request) {
 		exp.SplitJSON = prev.SplitJSON
 	} else if prev.FromTab && tabMeta {
 		var tabFieldErr error
-		exp.Title, exp.PaidBy, exp.SplitMode, exp.SplitJSON, tabFieldErr = a.parseTabExpenseFields(r.Context(), tripID, tripRow, amount, true, r)
+		exp.Title, exp.PaidBy, exp.SplitMode, exp.SplitJSON, tabFieldErr = a.parseTabExpenseFields(r.Context(), tripID, tripRow, trips.MoneyFromCents(amountCents), true, r)
 		if tabFieldErr != nil {
 			http.Error(w, tabFieldErr.Error(), http.StatusBadRequest)
 			return
@@ -3295,6 +3464,10 @@ func (a *app) updateExpense(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		if trips.IsConflictError(err) {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", err.Error())
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -3389,6 +3562,7 @@ func (a *app) addChecklistItem(w http.ResponseWriter, r *http.Request) {
 				TripID:   tripID,
 				Category: category,
 				Text:     trimmed,
+				DueAt:    strings.TrimSpace(r.FormValue("due_at")),
 			})
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -3404,6 +3578,7 @@ func (a *app) addChecklistItem(w http.ResponseWriter, r *http.Request) {
 			TripID:   tripID,
 			Category: category,
 			Text:     strings.TrimSpace(r.FormValue("text")),
+			DueAt:    strings.TrimSpace(r.FormValue("due_at")),
 		})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -3439,7 +3614,7 @@ func (a *app) accommodationPage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
@@ -3497,7 +3672,11 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
+	costCents, err := trips.ParseMoneyToCents(r.FormValue("cost"))
+	if err != nil {
+		http.Error(w, "invalid cost", http.StatusBadRequest)
+		return
+	}
 	attachmentPath, err := storeBookingAttachment(r, "booking_attachment", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -3525,40 +3704,7 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        checkInItemID,
-		TripID:    tripID,
-		DayNumber: checkInDay,
-		Title:     trips.AccommodationItineraryCheckInTitle(name),
-		Location:  address,
-		Latitude:  addrLat,
-		Longitude: addrLng,
-		Notes:     checkInNotes,
-		EstCost:   cost,
-		StartTime: checkInTime,
-		EndTime:   checkInTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        checkOutItemID,
-		TripID:    tripID,
-		DayNumber: checkOutDay,
-		Title:     trips.AccommodationItineraryCheckOutTitle(name),
-		Location:  address,
-		Latitude:  addrLat,
-		Longitude: addrLng,
-		Notes:     defaultIfEmpty(notes, ""),
-		EstCost:   cost,
-		StartTime: checkOutTime,
-		EndTime:   checkOutTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	err = a.tripService.AddLodging(r.Context(), trips.Lodging{
+	err = a.tripService.AddLodgingWithItinerary(r.Context(), trips.Lodging{
 		ID:                  lodgingID,
 		TripID:              tripID,
 		Name:                name,
@@ -3566,12 +3712,34 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 		CheckInAt:           checkInAt.Format("2006-01-02T15:04"),
 		CheckOutAt:          checkOutAt.Format("2006-01-02T15:04"),
 		BookingConfirmation: bookingNo,
-		Cost:                cost,
+		CostCents:           costCents,
 		Notes:               notes,
 		AttachmentPath:      attachmentPath,
 		ImagePath:           imagePath,
-		CheckInItineraryID:  checkInItemID,
-		CheckOutItineraryID: checkOutItemID,
+	}, trips.ItineraryItem{
+		ID:           checkInItemID,
+		TripID:       tripID,
+		DayNumber:    checkInDay,
+		Title:        trips.AccommodationItineraryCheckInTitle(name),
+		Location:     address,
+		Latitude:     addrLat,
+		Longitude:    addrLng,
+		Notes:        checkInNotes,
+		EstCostCents: costCents,
+		StartTime:    checkInTime,
+		EndTime:      checkInTime,
+	}, trips.ItineraryItem{
+		ID:           checkOutItemID,
+		TripID:       tripID,
+		DayNumber:    checkOutDay,
+		Title:        trips.AccommodationItineraryCheckOutTitle(name),
+		Location:     address,
+		Latitude:     addrLat,
+		Longitude:    addrLng,
+		Notes:        defaultIfEmpty(notes, ""),
+		EstCostCents: costCents,
+		StartTime:    checkOutTime,
+		EndTime:      checkOutTime,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -3609,6 +3777,15 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	var expectedUpdatedAt time.Time
+	expectedRaw := strings.TrimSpace(r.FormValue("expected_updated_at"))
+	if expectedRaw != "" {
+		expectedUpdatedAt, err = time.Parse(time.RFC3339Nano, expectedRaw)
+		if err != nil {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", "This accommodation changed since you opened it. Reopen it to review the latest values, then try again.")
+			return
+		}
 	}
 
 	checkInAt, checkInDate, checkInTime, err := parseDateTimeLocal(r.FormValue("check_in_at"))
@@ -3668,7 +3845,11 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 	if imagePath != "" && r.FormValue("current_image_path") != "" && imagePath != r.FormValue("current_image_path") {
 		_ = deleteUploadedFileByWebPath(r.FormValue("current_image_path"))
 	}
-	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
+	costCents, err := trips.ParseMoneyToCents(r.FormValue("cost"))
+	if err != nil {
+		http.Error(w, "invalid cost", http.StatusBadRequest)
+		return
+	}
 	name := r.FormValue("name")
 	address := r.FormValue("address")
 	bookingNo := r.FormValue("booking_confirmation")
@@ -3681,30 +3862,31 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 
 	checkInNotes := buildLodgingCheckInNotes(notes, bookingNo, attachmentPath)
 	lodging := trips.Lodging{
-		ID:                  lodgingID,
-		TripID:              tripID,
-		Name:                name,
-		Address:             address,
-		Latitude:            addrLat,
-		Longitude:           addrLng,
-		CheckInAt:           checkInAt.Format("2006-01-02T15:04"),
-		CheckOutAt:          checkOutAt.Format("2006-01-02T15:04"),
-		BookingConfirmation: bookingNo,
-		Cost:                cost,
-		Notes:               notes,
-		AttachmentPath:      attachmentPath,
-		ImagePath:           imagePath,
-		CheckInItineraryID:  existing.CheckInItineraryID,
-		CheckOutItineraryID: existing.CheckOutItineraryID,
+		ID:                    lodgingID,
+		TripID:                tripID,
+		Name:                  name,
+		Address:               address,
+		Latitude:              addrLat,
+		Longitude:             addrLng,
+		CheckInAt:             checkInAt.Format("2006-01-02T15:04"),
+		CheckOutAt:            checkOutAt.Format("2006-01-02T15:04"),
+		BookingConfirmation:   bookingNo,
+		CostCents:             costCents,
+		Notes:                 notes,
+		AttachmentPath:        attachmentPath,
+		ImagePath:             imagePath,
+		CheckInItineraryID:    existing.CheckInItineraryID,
+		CheckOutItineraryID:   existing.CheckOutItineraryID,
+		ExpectedUpdatedAt:     expectedUpdatedAt,
+		EnforceOptimisticLock: true,
 	}
-	lodging, err = a.tripService.SyncLodgingItinerary(r.Context(), trip, lodging, existing.Name,
+	err = a.tripService.UpdateLodgingWithItinerary(r.Context(), lodging, existing.Name,
 		checkInDay, checkInTime, checkOutDay, checkOutTime, checkInNotes, defaultIfEmpty(notes, ""))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	err = a.tripService.UpdateLodging(r.Context(), lodging)
-	if err != nil {
+		if trips.IsConflictError(err) {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", err.Error())
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -3760,7 +3942,7 @@ func (a *app) vehicleRentalPage(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, v := range details.Vehicles {
 		if err := a.tripService.SyncExpenseForVehicleRental(r.Context(), v); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err)
 			return
 		}
 	}
@@ -3779,7 +3961,7 @@ func (a *app) vehicleRentalPage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
@@ -3835,9 +4017,17 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "drop off must be after pick up", http.StatusBadRequest)
 		return
 	}
-	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
-	insuranceCost, _ := strconv.ParseFloat(r.FormValue("insurance_cost"), 64)
-	totalCost := cost + insuranceCost
+	costCents, err := trips.ParseMoneyToCents(r.FormValue("cost"))
+	if err != nil {
+		http.Error(w, "invalid cost", http.StatusBadRequest)
+		return
+	}
+	insuranceCostCents, err := trips.ParseMoneyToCents(r.FormValue("insurance_cost"))
+	if err != nil {
+		http.Error(w, "invalid insurance cost", http.StatusBadRequest)
+		return
+	}
+	totalCostCents := costCents + insuranceCostCents
 	location := r.FormValue("pick_up_location")
 	vehicleDetail := r.FormValue("vehicle_detail")
 	vehicleTitle := vehicleRentalTitleValue(vehicleDetail, location)
@@ -3887,40 +4077,7 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        pickUpItineraryID,
-		TripID:    tripID,
-		DayNumber: pickUpDay,
-		Title:     trips.VehicleRentalItineraryPickUpTitle(vehicleTitle),
-		Location:  location,
-		Latitude:  locLat,
-		Longitude: locLng,
-		Notes:     pickUpNotes,
-		EstCost:   totalCost,
-		StartTime: pickUpTime,
-		EndTime:   pickUpTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        dropOffItineraryID,
-		TripID:    tripID,
-		DayNumber: dropOffDay,
-		Title:     trips.VehicleRentalItineraryDropOffTitle(dropVehicleTitle),
-		Location:  dropLocationStr,
-		Latitude:  dropLat,
-		Longitude: dropLng,
-		Notes:     dropOffNotes,
-		EstCost:   totalCost,
-		StartTime: dropOffTime,
-		EndTime:   dropOffTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	err = a.tripService.AddVehicleRental(r.Context(), trips.VehicleRental{
+	err = a.tripService.AddVehicleRentalWithItinerary(r.Context(), trips.VehicleRental{
 		ID:                  rentalID,
 		TripID:              tripID,
 		PickUpLocation:      location,
@@ -3932,11 +4089,35 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 		Notes:               notes,
 		AttachmentPath:      attachmentPath,
 		VehicleImagePath:    vehicleImagePath,
-		Cost:                cost,
-		InsuranceCost:       insuranceCost,
+		CostCents:           costCents,
+		InsuranceCostCents:  insuranceCostCents,
 		PayAtPickUp:         false,
 		PickUpItineraryID:   pickUpItineraryID,
 		DropOffItineraryID:  dropOffItineraryID,
+	}, trips.ItineraryItem{
+		ID:           pickUpItineraryID,
+		TripID:       tripID,
+		DayNumber:    pickUpDay,
+		Title:        trips.VehicleRentalItineraryPickUpTitle(vehicleTitle),
+		Location:     location,
+		Latitude:     locLat,
+		Longitude:    locLng,
+		Notes:        pickUpNotes,
+		EstCostCents: totalCostCents,
+		StartTime:    pickUpTime,
+		EndTime:      pickUpTime,
+	}, trips.ItineraryItem{
+		ID:           dropOffItineraryID,
+		TripID:       tripID,
+		DayNumber:    dropOffDay,
+		Title:        trips.VehicleRentalItineraryDropOffTitle(dropVehicleTitle),
+		Location:     dropLocationStr,
+		Latitude:     dropLat,
+		Longitude:    dropLng,
+		Notes:        dropOffNotes,
+		EstCostCents: totalCostCents,
+		StartTime:    dropOffTime,
+		EndTime:      dropOffTime,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -3964,6 +4145,15 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	var expectedUpdatedAt time.Time
+	expectedRaw := strings.TrimSpace(r.FormValue("expected_updated_at"))
+	if expectedRaw != "" {
+		expectedUpdatedAt, err = time.Parse(time.RFC3339Nano, expectedRaw)
+		if err != nil {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", "This vehicle rental changed since you opened it. Reopen it to review the latest values, then try again.")
+			return
+		}
 	}
 	trip, err := a.tripService.GetTrip(r.Context(), tripID)
 	if err != nil {
@@ -4003,9 +4193,17 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "drop off must be after pick up", http.StatusBadRequest)
 		return
 	}
-	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
-	insuranceCost, _ := strconv.ParseFloat(r.FormValue("insurance_cost"), 64)
-	totalCost := cost + insuranceCost
+	costCents, err := trips.ParseMoneyToCents(r.FormValue("cost"))
+	if err != nil {
+		http.Error(w, "invalid cost", http.StatusBadRequest)
+		return
+	}
+	insuranceCostCents, err := trips.ParseMoneyToCents(r.FormValue("insurance_cost"))
+	if err != nil {
+		http.Error(w, "invalid insurance cost", http.StatusBadRequest)
+		return
+	}
+	totalCostCents := costCents + insuranceCostCents
 	location := r.FormValue("pick_up_location")
 	vehicleDetail := r.FormValue("vehicle_detail")
 	vehicleTitle := vehicleRentalTitleValue(vehicleDetail, location)
@@ -4065,60 +4263,57 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		dropLat, dropLng = fallbackItineraryCoordsOnGeocodeMiss(dropLat, dropLng, currentDropOff)
 	}
 
-	if err := a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        existing.PickUpItineraryID,
-		TripID:    tripID,
-		DayNumber: pickUpDay,
-		Title:     trips.VehicleRentalItineraryPickUpTitle(vehicleTitle),
-		Location:  location,
-		Latitude:  locLat,
-		Longitude: locLng,
-		Notes:     buildVehicleItineraryNotes(notes, booking, false),
-		EstCost:   totalCost,
-		StartTime: pickUpTime,
-		EndTime:   pickUpTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        existing.DropOffItineraryID,
-		TripID:    tripID,
-		DayNumber: dropOffDay,
-		Title:     trips.VehicleRentalItineraryDropOffTitle(dropVehicleTitle),
-		Location:  dropLocationStr,
-		Latitude:  dropLat,
-		Longitude: dropLng,
-		Notes:     defaultIfEmpty(notes, ""),
-		EstCost:   totalCost,
-		StartTime: dropOffTime,
-		EndTime:   dropOffTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	err = a.tripService.UpdateVehicleRental(r.Context(), trips.VehicleRental{
-		ID:                  rentalID,
-		TripID:              tripID,
-		PickUpLocation:      location,
-		DropOffLocation:     dropOffLocStored,
-		VehicleDetail:       vehicleDetail,
-		PickUpAt:            pickUpAt.Format("2006-01-02T15:04"),
-		DropOffAt:           dropOffAt.Format("2006-01-02T15:04"),
-		BookingConfirmation: booking,
-		Notes:               notes,
-		AttachmentPath:      attachmentPath,
-		VehicleImagePath:    vehicleImagePath,
-		Cost:                cost,
-		InsuranceCost:       insuranceCost,
-		PayAtPickUp:         false,
-		PickUpItineraryID:   existing.PickUpItineraryID,
-		DropOffItineraryID:  existing.DropOffItineraryID,
-		RentalExpenseID:     existing.RentalExpenseID,
-		InsuranceExpenseID:  existing.InsuranceExpenseID,
+	err = a.tripService.UpdateVehicleRentalWithItinerary(r.Context(), trips.VehicleRental{
+		ID:                    rentalID,
+		TripID:                tripID,
+		PickUpLocation:        location,
+		DropOffLocation:       dropOffLocStored,
+		VehicleDetail:         vehicleDetail,
+		PickUpAt:              pickUpAt.Format("2006-01-02T15:04"),
+		DropOffAt:             dropOffAt.Format("2006-01-02T15:04"),
+		BookingConfirmation:   booking,
+		Notes:                 notes,
+		AttachmentPath:        attachmentPath,
+		VehicleImagePath:      vehicleImagePath,
+		CostCents:             costCents,
+		InsuranceCostCents:    insuranceCostCents,
+		PayAtPickUp:           false,
+		PickUpItineraryID:     existing.PickUpItineraryID,
+		DropOffItineraryID:    existing.DropOffItineraryID,
+		RentalExpenseID:       existing.RentalExpenseID,
+		InsuranceExpenseID:    existing.InsuranceExpenseID,
+		ExpectedUpdatedAt:     expectedUpdatedAt,
+		EnforceOptimisticLock: true,
+	}, trips.ItineraryItem{
+		ID:           existing.PickUpItineraryID,
+		TripID:       tripID,
+		DayNumber:    pickUpDay,
+		Title:        trips.VehicleRentalItineraryPickUpTitle(vehicleTitle),
+		Location:     location,
+		Latitude:     locLat,
+		Longitude:    locLng,
+		Notes:        buildVehicleItineraryNotes(notes, booking, false),
+		EstCostCents: totalCostCents,
+		StartTime:    pickUpTime,
+		EndTime:      pickUpTime,
+	}, trips.ItineraryItem{
+		ID:           existing.DropOffItineraryID,
+		TripID:       tripID,
+		DayNumber:    dropOffDay,
+		Title:        trips.VehicleRentalItineraryDropOffTitle(dropVehicleTitle),
+		Location:     dropLocationStr,
+		Latitude:     dropLat,
+		Longitude:    dropLng,
+		Notes:        defaultIfEmpty(notes, ""),
+		EstCostCents: totalCostCents,
+		StartTime:    dropOffTime,
+		EndTime:      dropOffTime,
 	})
 	if err != nil {
+		if trips.IsConflictError(err) {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", err.Error())
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -4172,15 +4367,18 @@ func (a *app) tripDocumentsPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	if a.redirectIfTripSectionDisabled(w, r, details.Trip, "documents") {
+		return
+	}
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	savedDocs, err := a.tripService.ListTripDocuments(r.Context(), tripID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	rows := collectTripDocumentRows(details, savedDocs)
@@ -4196,34 +4394,67 @@ func (a *app) tripDocumentsPage(w http.ResponseWriter, r *http.Request) {
 	_ = a.templates.ExecuteTemplate(w, "trip_documents.html", pageData)
 }
 
+func (a *app) renderTripDocumentRowHTML(w io.Writer, details trips.TripDetails, csrf string, row tripDocumentRow) error {
+	return a.templates.ExecuteTemplate(w, "trip_document_row", map[string]any{
+		"Details":   details,
+		"CSRFToken": csrf,
+		"D":         row,
+	})
+}
+
 func (a *app) uploadTripDocuments(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
+	wantsJSON := tripDocumentsRequestWantsJSON(r)
 	trip, err := a.tripService.GetTrip(r.Context(), tripID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if wantsJSON {
+				writeTripDocumentJSONError(w, http.StatusNotFound, "Trip not found.")
+				return
+			}
 			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "documents") {
+		return
+	}
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusBadRequest, "Invalid upload form.")
+			return
+		}
 		http.Error(w, "invalid upload form", http.StatusBadRequest)
 		return
 	}
 	maxBytes := a.maxUploadFileSizeBytes(r.Context())
 	files := r.MultipartForm.File["documents"]
 	if len(files) == 0 {
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusBadRequest, "Please select at least one file.")
+			return
+		}
 		http.Error(w, "please select at least one file", http.StatusBadRequest)
 		return
 	}
+	var inserted []trips.TripDocument
 	for _, fh := range files {
 		webPath, fileSize, fileName, storeErr := storeTripDocumentUpload(r, tripID, fh, maxBytes)
 		if storeErr != nil {
+			if wantsJSON {
+				writeTripDocumentJSONError(w, http.StatusBadRequest, storeErr.Error())
+				return
+			}
 			http.Error(w, storeErr.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := a.tripService.AddTripDocument(r.Context(), trips.TripDocument{
+		doc := trips.TripDocument{
 			ID:         uuid.NewString(),
 			TripID:     tripID,
 			Section:    "general",
@@ -4233,10 +4464,38 @@ func (a *app) uploadTripDocuments(w http.ResponseWriter, r *http.Request) {
 			FilePath:   webPath,
 			FileSize:   fileSize,
 			UploadedAt: time.Now().UTC(),
-		}); err != nil {
+		}
+		if err := a.tripService.AddTripDocument(r.Context(), doc); err != nil {
+			if wantsJSON {
+				writeTripDocumentJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		inserted = append(inserted, doc)
+	}
+	if wantsJSON {
+		details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
+		if err != nil {
+			if tripForbiddenOrMissing(err) {
+				writeTripDocumentJSONError(w, http.StatusForbidden, "You don't have access to this trip.")
+				return
+			}
+			writeTripDocumentJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var buf bytes.Buffer
+		csrf := CSRFToken(r.Context())
+		for i := len(inserted) - 1; i >= 0; i-- {
+			row := tripDocumentRowFromTripDocument(inserted[i])
+			if err := a.renderTripDocumentRowHTML(&buf, details, csrf, row); err != nil {
+				writeTripDocumentJSONError(w, http.StatusInternalServerError, "Could not render document row.")
+				return
+			}
+		}
+		writeTripDocumentsJSONPayload(w, map[string]any{"appendHtml": buf.String()})
+		return
 	}
 	http.Redirect(w, r, "/trips/"+tripID+"/documents", http.StatusSeeOther)
 }
@@ -4244,17 +4503,90 @@ func (a *app) uploadTripDocuments(w http.ResponseWriter, r *http.Request) {
 func (a *app) updateTripDocument(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	documentID := chi.URLParam(r, "documentID")
+	wantsJSON := tripDocumentsRequestWantsJSON(r)
+	trip, err := a.tripService.GetTrip(r.Context(), tripID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			if wantsJSON {
+				writeTripDocumentJSONError(w, http.StatusNotFound, "Trip not found.")
+				return
+			}
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "documents") {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusBadRequest, "Invalid form.")
+			return
+		}
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
 	displayName := strings.TrimSpace(r.FormValue("display_name"))
 	if err := a.tripService.UpdateTripDocumentDisplayName(r.Context(), tripID, documentID, displayName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if wantsJSON {
+				writeTripDocumentJSONError(w, http.StatusNotFound, "Document not found.")
+				return
+			}
 			http.Error(w, "document not found", http.StatusNotFound)
 			return
 		}
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if wantsJSON {
+		details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, CurrentUserID(r.Context()))
+		if err != nil {
+			if tripForbiddenOrMissing(err) {
+				writeTripDocumentJSONError(w, http.StatusForbidden, "You don't have access to this trip.")
+				return
+			}
+			writeTripDocumentJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		docs, err := a.tripService.ListTripDocuments(r.Context(), tripID)
+		if err != nil {
+			writeTripDocumentJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var found trips.TripDocument
+		ok := false
+		for _, d := range docs {
+			if d.ID == documentID {
+				found = d
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			writeTripDocumentJSONError(w, http.StatusNotFound, "Document not found.")
+			return
+		}
+		row := tripDocumentRowFromTripDocument(found)
+		var buf bytes.Buffer
+		if err := a.renderTripDocumentRowHTML(&buf, details, CSRFToken(r.Context()), row); err != nil {
+			writeTripDocumentJSONError(w, http.StatusInternalServerError, "Could not render document row.")
+			return
+		}
+		writeTripDocumentsJSONPayload(w, map[string]any{
+			"replaceHtml": buf.String(),
+			"documentId":  documentID,
+		})
 		return
 	}
 	http.Redirect(w, r, "/trips/"+tripID+"/documents", http.StatusSeeOther)
@@ -4263,9 +4595,34 @@ func (a *app) updateTripDocument(w http.ResponseWriter, r *http.Request) {
 func (a *app) deleteTripDocument(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	documentID := chi.URLParam(r, "documentID")
+	wantsJSON := tripDocumentsRequestWantsJSON(r)
+	trip, err := a.tripService.GetTrip(r.Context(), tripID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			if wantsJSON {
+				writeTripDocumentJSONError(w, http.StatusNotFound, "Trip not found.")
+				return
+			}
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if a.redirectIfTripSectionDisabled(w, r, trip, "documents") {
+		return
+	}
 	docs, err := a.tripService.ListTripDocuments(r.Context(), tripID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeInternalServerError(w, r, err)
 		return
 	}
 	var path string
@@ -4276,11 +4633,19 @@ func (a *app) deleteTripDocument(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := a.tripService.DeleteTripDocument(r.Context(), tripID, documentID); err != nil {
+		if wantsJSON {
+			writeTripDocumentJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if strings.TrimSpace(path) != "" {
 		_ = deleteUploadedFileByWebPath(path)
+	}
+	if wantsJSON {
+		writeTripDocumentsJSONPayload(w, map[string]any{"removeId": documentID})
+		return
 	}
 	http.Redirect(w, r, "/trips/"+tripID+"/documents", http.StatusSeeOther)
 }
@@ -4298,7 +4663,7 @@ func (a *app) flightsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, f := range details.Flights {
 		if err := a.tripService.SyncExpenseForFlight(r.Context(), f); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err)
 			return
 		}
 	}
@@ -4317,7 +4682,7 @@ func (a *app) flightsPage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
@@ -4375,7 +4740,11 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
+	costCents, err := trips.ParseMoneyToCents(r.FormValue("cost"))
+	if err != nil {
+		http.Error(w, "invalid cost", http.StatusBadRequest)
+		return
+	}
 	documentPath, err := storeFlightDocument(r, "flight_document", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
 		http.Error(w, "failed to save flight document", http.StatusBadRequest)
@@ -4414,40 +4783,7 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        departItineraryID,
-		TripID:    tripID,
-		DayNumber: departDay,
-		Title:     trips.FlightItineraryDepartTitle(label),
-		Location:  departAirport,
-		Latitude:  departLat,
-		Longitude: departLng,
-		Notes:     departNotes,
-		EstCost:   cost,
-		StartTime: departTime,
-		EndTime:   departTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        arriveItineraryID,
-		TripID:    tripID,
-		DayNumber: arriveDay,
-		Title:     trips.FlightItineraryArriveTitle(label),
-		Location:  arriveAirport,
-		Latitude:  arriveLat,
-		Longitude: arriveLng,
-		Notes:     arriveNotes,
-		EstCost:   cost,
-		StartTime: arriveTime,
-		EndTime:   arriveTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if err := a.tripService.AddFlight(r.Context(), trips.Flight{
+	if err := a.tripService.AddFlightWithItinerary(r.Context(), trips.Flight{
 		ID:                  flightID,
 		TripID:              tripID,
 		FlightName:          flightName,
@@ -4460,9 +4796,33 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 		Notes:               notes,
 		DocumentPath:        documentPath,
 		ImagePath:           imagePath,
-		Cost:                cost,
+		CostCents:           costCents,
 		DepartItineraryID:   departItineraryID,
 		ArriveItineraryID:   arriveItineraryID,
+	}, trips.ItineraryItem{
+		ID:           departItineraryID,
+		TripID:       tripID,
+		DayNumber:    departDay,
+		Title:        trips.FlightItineraryDepartTitle(label),
+		Location:     departAirport,
+		Latitude:     departLat,
+		Longitude:    departLng,
+		Notes:        departNotes,
+		EstCostCents: costCents,
+		StartTime:    departTime,
+		EndTime:      departTime,
+	}, trips.ItineraryItem{
+		ID:           arriveItineraryID,
+		TripID:       tripID,
+		DayNumber:    arriveDay,
+		Title:        trips.FlightItineraryArriveTitle(label),
+		Location:     arriveAirport,
+		Latitude:     arriveLat,
+		Longitude:    arriveLng,
+		Notes:        arriveNotes,
+		EstCostCents: costCents,
+		StartTime:    arriveTime,
+		EndTime:      arriveTime,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -4489,6 +4849,15 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	var expectedUpdatedAt time.Time
+	expectedRaw := strings.TrimSpace(r.FormValue("expected_updated_at"))
+	if expectedRaw != "" {
+		expectedUpdatedAt, err = time.Parse(time.RFC3339Nano, expectedRaw)
+		if err != nil {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", "This flight changed since you opened it. Reopen it to review the latest values, then try again.")
+			return
+		}
 	}
 	trip, err := a.tripService.GetTrip(r.Context(), tripID)
 	if err != nil {
@@ -4562,7 +4931,11 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 	if imagePath != "" && r.FormValue("current_image_path") != "" && imagePath != r.FormValue("current_image_path") {
 		_ = deleteUploadedFileByWebPath(r.FormValue("current_image_path"))
 	}
-	cost, _ := strconv.ParseFloat(r.FormValue("cost"), 64)
+	costCents, err := trips.ParseMoneyToCents(r.FormValue("cost"))
+	if err != nil {
+		http.Error(w, "invalid cost", http.StatusBadRequest)
+		return
+	}
 	flightName := r.FormValue("flight_name")
 	flightNumber := r.FormValue("flight_number")
 	departAirport := r.FormValue("depart_airport")
@@ -4579,58 +4952,55 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 		arriveLat, arriveLng = fallbackItineraryCoordsOnGeocodeMiss(arriveLat, arriveLng, currentArrive)
 	}
 
-	if err := a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        existing.DepartItineraryID,
-		TripID:    tripID,
-		DayNumber: departDay,
-		Title:     trips.FlightItineraryDepartTitle(label),
-		Location:  departAirport,
-		Latitude:  departLat,
-		Longitude: departLng,
-		Notes:     buildFlightItineraryNotes(notes, booking),
-		EstCost:   cost,
-		StartTime: departTime,
-		EndTime:   departTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:        existing.ArriveItineraryID,
-		TripID:    tripID,
-		DayNumber: arriveDay,
-		Title:     trips.FlightItineraryArriveTitle(label),
-		Location:  arriveAirport,
-		Latitude:  arriveLat,
-		Longitude: arriveLng,
-		Notes:     defaultIfEmpty(notes, ""),
-		EstCost:   cost,
-		StartTime: arriveTime,
-		EndTime:   arriveTime,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	err = a.tripService.UpdateFlight(r.Context(), trips.Flight{
-		ID:                  flightID,
-		TripID:              tripID,
-		FlightName:          flightName,
-		FlightNumber:        flightNumber,
-		DepartAirport:       departAirport,
-		ArriveAirport:       arriveAirport,
-		DepartAt:            departAt.Format("2006-01-02T15:04"),
-		ArriveAt:            arriveAt.Format("2006-01-02T15:04"),
-		BookingConfirmation: booking,
-		Notes:               notes,
-		DocumentPath:        documentPath,
-		ImagePath:           imagePath,
-		Cost:                cost,
-		DepartItineraryID:   existing.DepartItineraryID,
-		ArriveItineraryID:   existing.ArriveItineraryID,
-		ExpenseID:           existing.ExpenseID,
+	err = a.tripService.UpdateFlightWithItinerary(r.Context(), trips.Flight{
+		ID:                    flightID,
+		TripID:                tripID,
+		FlightName:            flightName,
+		FlightNumber:          flightNumber,
+		DepartAirport:         departAirport,
+		ArriveAirport:         arriveAirport,
+		DepartAt:              departAt.Format("2006-01-02T15:04"),
+		ArriveAt:              arriveAt.Format("2006-01-02T15:04"),
+		BookingConfirmation:   booking,
+		Notes:                 notes,
+		DocumentPath:          documentPath,
+		ImagePath:             imagePath,
+		CostCents:             costCents,
+		DepartItineraryID:     existing.DepartItineraryID,
+		ArriveItineraryID:     existing.ArriveItineraryID,
+		ExpenseID:             existing.ExpenseID,
+		ExpectedUpdatedAt:     expectedUpdatedAt,
+		EnforceOptimisticLock: true,
+	}, trips.ItineraryItem{
+		ID:           existing.DepartItineraryID,
+		TripID:       tripID,
+		DayNumber:    departDay,
+		Title:        trips.FlightItineraryDepartTitle(label),
+		Location:     departAirport,
+		Latitude:     departLat,
+		Longitude:    departLng,
+		Notes:        buildFlightItineraryNotes(notes, booking),
+		EstCostCents: costCents,
+		StartTime:    departTime,
+		EndTime:      departTime,
+	}, trips.ItineraryItem{
+		ID:           existing.ArriveItineraryID,
+		TripID:       tripID,
+		DayNumber:    arriveDay,
+		Title:        trips.FlightItineraryArriveTitle(label),
+		Location:     arriveAirport,
+		Latitude:     arriveLat,
+		Longitude:    arriveLng,
+		Notes:        defaultIfEmpty(notes, ""),
+		EstCostCents: costCents,
+		StartTime:    arriveTime,
+		EndTime:      arriveTime,
 	})
 	if err != nil {
+		if trips.IsConflictError(err) {
+			writeAsyncFormError(w, r, http.StatusConflict, "conflict", err.Error())
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -4703,6 +5073,10 @@ func (a *app) toggleChecklistItem(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if next := strings.TrimSpace(r.FormValue("return_to")); next != "" && isSafeReturnForTrip(next, trip.ID) {
+		http.Redirect(w, r, next, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/trips/"+trip.ID+"?open=checklist", http.StatusSeeOther)
 }
 
@@ -4739,14 +5113,22 @@ func (a *app) updateChecklistItem(w http.ResponseWriter, r *http.Request) {
 	}
 	if err = a.tripService.UpdateChecklistItem(r.Context(), trips.ChecklistItem{
 		ID:       itemID,
+		TripID:   existing.TripID,
 		Category: category,
 		Text:     strings.TrimSpace(r.FormValue("text")),
+		DueAt:    strings.TrimSpace(r.FormValue("due_at")),
+		Archived: existing.Archived,
+		Trashed:  existing.Trashed,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if isAsyncRequest(r) {
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if next := strings.TrimSpace(r.FormValue("return_to")); next != "" && isSafeReturnForTrip(next, trip.ID) {
+		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/trips/"+trip.ID+"?open=checklist", http.StatusSeeOther)
@@ -4786,38 +5168,185 @@ func (a *app) deleteChecklistItem(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if next := strings.TrimSpace(r.FormValue("return_to")); next != "" && isSafeReturnForTrip(next, trip.ID) {
+		http.Redirect(w, r, next, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/trips/"+trip.ID+"?open=checklist", http.StatusSeeOther)
 }
 
 func (a *app) listChanges(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	since := r.URL.Query().Get("since")
-	changes, err := a.tripService.ListChanges(r.Context(), tripID, since)
+	afterID, useAfterID, err := parseChangeCursorQuery(r)
+	if err != nil {
+		http.Error(w, "invalid after_id", http.StatusBadRequest)
+		return
+	}
+	var changes []trips.Change
+	if useAfterID {
+		changes, err = a.tripService.ListChangesAfterID(r.Context(), tripID, afterID)
+	} else {
+		changes, err = a.tripService.ListChanges(r.Context(), tripID, since)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "trip not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusNotFound)
+		writeInternalServerError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+	latestID := afterID
+	if len(changes) > 0 {
+		latestID = changes[len(changes)-1].ID
+	} else if currentID, currentErr := a.tripService.LatestChangeLogID(r.Context(), tripID); currentErr == nil {
+		latestID = currentID
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"changes": changes,
+		"changes":          changes,
+		"latest_change_id": latestID,
 	})
+}
+
+func parseChangeCursorQuery(r *http.Request) (int64, bool, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("after_id"))
+	if raw == "" {
+		raw = strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	}
+	if raw == "" {
+		return 0, false, nil
+	}
+	if strings.EqualFold(raw, "latest") {
+		return 0, true, nil
+	}
+	afterID, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false, err
+	}
+	if afterID < 0 {
+		afterID = 0
+	}
+	return afterID, true, nil
+}
+
+func flushResponseWriter(w http.ResponseWriter) {
+	type unwrapper interface {
+		Unwrap() http.ResponseWriter
+	}
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+		return
+	}
+	if u, ok := w.(unwrapper); ok {
+		flushResponseWriter(u.Unwrap())
+		return
+	}
+	_ = http.NewResponseController(w).Flush()
+}
+
+func (a *app) streamChanges(w http.ResponseWriter, r *http.Request) {
+	tripID := chi.URLParam(r, "tripID")
+	afterID, useAfterID, err := parseChangeCursorQuery(r)
+	if err != nil {
+		http.Error(w, "invalid after_id", http.StatusBadRequest)
+		return
+	}
+	if useAfterID && strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("after_id")), "latest") {
+		afterID, err = a.tripService.LatestChangeLogID(r.Context(), tripID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeInternalServerError(w, r, err)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	_, _ = fmt.Fprint(w, "retry: 1000\n\n")
+	flushResponseWriter(w)
+
+	writeEvent := func(changes []trips.Change, latestID int64) error {
+		payload, err := json.Marshal(map[string]any{
+			"changes":          changes,
+			"latest_change_id": latestID,
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "id: %d\nevent: change\ndata: %s\n\n", latestID, payload); err != nil {
+			return err
+		}
+		flushResponseWriter(w)
+		return nil
+	}
+
+	tick := time.NewTicker(300 * time.Millisecond)
+	defer tick.Stop()
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+
+	for {
+		latestID, err := a.tripService.LatestChangeLogID(r.Context(), tripID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "trip not found", http.StatusNotFound)
+				return
+			}
+			writeInternalServerError(w, r, err)
+			return
+		}
+		if latestID > afterID {
+			changes, err := a.tripService.ListChangesAfterID(r.Context(), tripID, afterID)
+			if err != nil {
+				writeInternalServerError(w, r, err)
+				return
+			}
+			if len(changes) > 0 {
+				afterID = changes[len(changes)-1].ID
+				if err := writeEvent(changes, afterID); err != nil {
+					return
+				}
+			}
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-tick.C:
+		case <-ping.C:
+			if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
+				return
+			}
+			flushResponseWriter(w)
+		}
+	}
 }
 
 func (a *app) syncChanges(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	changes, _ := a.tripService.ListChanges(r.Context(), tripID, "")
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":         "accepted",
-		"trip_id":        tripID,
-		"applied_count":  0,
-		"server_changes": changes,
-		"message":        "prototype sync endpoint; client writes can be queued and replayed using last-write-wins",
-	})
+	acc, ok := TripAccessFromContext(r.Context())
+	if !ok {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req trips.SyncApplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	res, err := a.tripService.ApplyTripSyncOps(r.Context(), tripID, acc, req)
+	if err != nil {
+		if strings.Contains(err.Error(), "too many ops") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeInternalServerError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 // mergeTripSidebarContext adds Details, CustomSidebarLinks, TripAccess, Party, PendingInvites, and SidebarNavActive
@@ -4839,6 +5368,11 @@ func (a *app) mergeTripSidebarContext(ctx context.Context, r *http.Request, trip
 	into["PendingInvites"] = pendingInvites
 	into["SidebarNavActive"] = sidebarNavActive
 	into["CurrentUser"] = CurrentUser(ctx)
+	if n, err := a.tripService.CountUnreadNotifications(ctx, uid); err == nil {
+		into["NotificationUnreadCount"] = n
+	} else {
+		into["NotificationUnreadCount"] = 0
+	}
 }
 
 func defaultIfEmpty(value, fallback string) string {
@@ -4893,7 +5427,17 @@ func parseDateTimeLocal(raw string) (time.Time, string, string, error) {
 	return t, t.Format("2006-01-02"), t.Format("15:04"), nil
 }
 
+// requestHasMultipartFormData is true when the body may contain multipart file fields.
+// Call before r.FormFile to avoid net/http's "request Content-Type isn't multipart/form-data"
+// when the client sent application/x-www-form-urlencoded (e.g. AJAX without multipart).
+func requestHasMultipartFormData(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
+}
+
 func storeBookingAttachment(r *http.Request, field string, maxBytes int64) (string, error) {
+	if !requestHasMultipartFormData(r) {
+		return "", nil
+	}
 	file, header, err := r.FormFile(field)
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
@@ -5021,6 +5565,77 @@ func tripDocumentFileTypeVisual(extDotless, category, fileName string) (kind, ic
 		return "pass", "qr_code_2"
 	}
 	return "other", "draft"
+}
+
+func tripDocumentsRequestWantsJSON(r *http.Request) bool {
+	if strings.TrimSpace(r.Header.Get("X-Requested-With")) != "XMLHttpRequest" {
+		return false
+	}
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return strings.Contains(accept, "application/json")
+}
+
+func writeTripDocumentJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": strings.TrimSpace(msg)})
+}
+
+func writeTripDocumentsJSONPayload(w http.ResponseWriter, payload map[string]any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{"tripDocuments": payload})
+}
+
+func writeAsyncFormError(w http.ResponseWriter, r *http.Request, status int, code, msg string) {
+	if isAsyncRequest(r) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": strings.TrimSpace(msg),
+			"code":  strings.TrimSpace(code),
+		})
+		return
+	}
+	http.Error(w, strings.TrimSpace(msg), status)
+}
+
+func tripDocumentRowFromTripDocument(d trips.TripDocument) tripDocumentRow {
+	if strings.TrimSpace(d.FilePath) == "" {
+		return tripDocumentRow{}
+	}
+	fileName := d.FileName
+	if strings.TrimSpace(fileName) == "" {
+		fileName = filepath.Base(d.FilePath)
+	}
+	uploadedAt := d.UploadedAt
+	if uploadedAt.IsZero() {
+		_, uploadedAt = fileInfoFromWebPath(d.FilePath)
+	}
+	dn := strings.TrimSpace(d.DisplayName)
+	extShort := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+	fileExt := ""
+	if extShort != "" {
+		fileExt = strings.ToUpper(extShort)
+	}
+	kind, typeIcon := tripDocumentFileTypeVisual(extShort, d.Category, fileName)
+	tagAccent := strings.Contains(strings.ToLower(d.Category), "ticket")
+	search := strings.ToLower(strings.TrimSpace(d.ItemName + " " + fileName + " " + dn + " " + d.Category + " " + d.Section))
+	return tripDocumentRow{
+		ID:           d.ID,
+		Section:      d.Section,
+		FileKind:     kind,
+		FileTypeIcon: typeIcon,
+		TagAccent:    tagAccent,
+		Category:     d.Category,
+		ItemName:     d.ItemName,
+		FileName:     fileName,
+		DisplayName:  dn,
+		FileExt:      fileExt,
+		FilePath:     d.FilePath,
+		FileSize:     d.FileSize,
+		UploadedAt:   uploadedAt,
+		SearchText:   search,
+	}
 }
 
 func collectTripDocumentRows(details trips.TripDetails, saved []trips.TripDocument) []tripDocumentRow {
@@ -5278,6 +5893,9 @@ func storeDashboardHeroUpload(r *http.Request, userID string, maxBytes int64) (s
 	if !expenseUploadTripIDOK(userID) {
 		return "", errors.New("invalid user id")
 	}
+	if !requestHasMultipartFormData(r) {
+		return "", nil
+	}
 	file, header, err := r.FormFile("dashboard_hero_upload")
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
@@ -5293,6 +5911,9 @@ func storeTripCoverUpload(r *http.Request, tripID string, maxBytes int64) (strin
 	if !expenseUploadTripIDOK(tripID) {
 		return "", errors.New("invalid trip id")
 	}
+	if !requestHasMultipartFormData(r) {
+		return "", nil
+	}
 	file, header, err := r.FormFile("cover_image_upload")
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
@@ -5305,6 +5926,9 @@ func storeTripCoverUpload(r *http.Request, tripID string, maxBytes int64) (strin
 }
 
 func storeVehicleImage(r *http.Request, field string, maxBytes int64) (string, error) {
+	if !requestHasMultipartFormData(r) {
+		return "", nil
+	}
 	file, header, err := r.FormFile(field)
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
@@ -5317,6 +5941,9 @@ func storeVehicleImage(r *http.Request, field string, maxBytes int64) (string, e
 }
 
 func storeFlightDocument(r *http.Request, field string, maxBytes int64) (string, error) {
+	if !requestHasMultipartFormData(r) {
+		return "", nil
+	}
 	file, header, err := r.FormFile(field)
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
@@ -5366,7 +5993,7 @@ func storeExpenseReceipt(r *http.Request, tripID, field string, maxBytes int64) 
 	if !expenseUploadTripIDOK(tripID) {
 		return "", errors.New("invalid trip id")
 	}
-	if !strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+	if !requestHasMultipartFormData(r) {
 		return "", nil
 	}
 	file, header, err := r.FormFile(field)

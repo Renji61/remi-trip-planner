@@ -42,6 +42,24 @@ func TestNormalizeSidebarWidgetOrder(t *testing.T) {
 	}
 }
 
+func TestNormalizeSidebarWidgetOrder_tabTotalBeforeAddTab(t *testing.T) {
+	got := NormalizeSidebarWidgetOrder("add_tab,checklist")
+	var idxTab, idxAdd int
+	idxTab = -1
+	idxAdd = -1
+	for i, k := range got {
+		if k == SidebarTabTotal {
+			idxTab = i
+		}
+		if k == SidebarAddTab {
+			idxAdd = i
+		}
+	}
+	if idxTab < 0 || idxAdd < 0 || idxTab != idxAdd-1 {
+		t.Fatalf("want tab_total immediately before add_tab, got %v", got)
+	}
+}
+
 func TestJoinMainSectionOrder(t *testing.T) {
 	s := JoinMainSectionOrder([]string{"map", "itinerary"})
 	if s != "map,itinerary" {
@@ -102,6 +120,94 @@ func TestSidebarWidgetVisible(t *testing.T) {
 	}
 	if SidebarWidgetVisible(SidebarAddTab, Trip{UIShowSpends: true, UIShowTheTab: false, UIShowItinerary: true, UIShowChecklist: true}) {
 		t.Fatal("add_tab hidden when Group Expenses section off")
+	}
+	if !SidebarWidgetVisible(SidebarTabTotal, trTab) {
+		t.Fatal("tab_total visible when spends+tab on")
+	}
+	if SidebarWidgetVisible(SidebarTabTotal, Trip{UIShowSpends: true, UIShowTheTab: false, UIShowItinerary: true, UIShowChecklist: true}) {
+		t.Fatal("tab_total hidden when Group Expenses section off")
+	}
+	if SidebarWidgetVisible(SidebarTabTotal, Trip{UIShowSpends: false, UIShowTheTab: true, UIShowItinerary: true, UIShowChecklist: true}) {
+		t.Fatal("tab_total hidden when spends off")
+	}
+}
+
+func TestTripMobileFabHasItems(t *testing.T) {
+	allOff := Trip{}
+	if TripMobileFabHasItems(allOff) {
+		t.Fatal("expected no FAB items when all sections off")
+	}
+	notesOnly := Trip{UIShowChecklist: true}
+	if !TripMobileFabHasItems(notesOnly) {
+		t.Fatal("notes section alone should show FAB")
+	}
+	stayOnly := Trip{UIShowStay: true}
+	if !TripMobileFabHasItems(stayOnly) {
+		t.Fatal("stay alone should show FAB")
+	}
+	docsOnly := Trip{UIShowDocuments: true}
+	if !TripMobileFabHasItems(docsOnly) {
+		t.Fatal("trip documents alone should show FAB")
+	}
+	itinHiddenStop := Trip{UIShowItinerary: true, UISidebarWidgetHidden: "add_stop"}
+	if TripMobileFabHasItems(itinHiddenStop) {
+		t.Fatal("add_stop widget hidden: no stop link, and nothing else on")
+	}
+	checklistWidgetHidden := Trip{UIShowChecklist: true, UISidebarWidgetHidden: "checklist"}
+	if TripMobileFabHasItems(checklistWidgetHidden) {
+		t.Fatal("checklist widget hidden and no Notes FAB link: expect no FAB")
+	}
+}
+
+func TestTripDesktopCalendarFlyoutHasActions(t *testing.T) {
+	if TripDesktopCalendarFlyoutHasActions(Trip{}) {
+		t.Fatal("expected no flyout actions")
+	}
+	tr := Trip{UIShowItinerary: true, UIShowStay: true}
+	if !TripDesktopCalendarFlyoutHasActions(tr) {
+		t.Fatal("itinerary+stay should enable flyout")
+	}
+	spendsOnly := Trip{UIShowItinerary: false, UIShowSpends: true}
+	if TripDesktopCalendarFlyoutHasActions(spendsOnly) {
+		t.Fatal("quick spends alone should not enable calendar flyout (no flyout buttons)")
+	}
+	tabOnly := Trip{UIShowItinerary: false, UIShowSpends: true, UIShowTheTab: true}
+	if TripDesktopCalendarFlyoutHasActions(tabOnly) {
+		t.Fatal("the tab + spends without itinerary sections should not enable calendar flyout")
+	}
+	checklistOnly := Trip{UIShowChecklist: true, UIShowItinerary: false}
+	if TripDesktopCalendarFlyoutHasActions(checklistOnly) {
+		t.Fatal("checklist-only visibility should not enable calendar flyout")
+	}
+}
+
+func TestDefaultMainSectionOrder_tripDetailsSequence(t *testing.T) {
+	wantPrefix := []string{
+		MainSectionMap,
+		MainSectionItinerary,
+		MainSectionFlights,
+		MainSectionStay,
+		MainSectionVehicle,
+		MainSectionChecklist,
+		MainSectionSpends,
+		MainSectionTheTab,
+	}
+	if len(DefaultMainSectionOrder) != len(wantPrefix) {
+		t.Fatalf("len %d want %d", len(DefaultMainSectionOrder), len(wantPrefix))
+	}
+	for i := range wantPrefix {
+		if DefaultMainSectionOrder[i] != wantPrefix[i] {
+			t.Fatalf("idx %d: %q want %q", i, DefaultMainSectionOrder[i], wantPrefix[i])
+		}
+	}
+}
+
+func TestSidebarWidgetLabel_renames(t *testing.T) {
+	if got := SidebarWidgetLabel(SidebarAddStop); got != "Add Stop" {
+		t.Fatalf("add_stop: %q", got)
+	}
+	if got := SidebarWidgetLabel(SidebarAddChecklist); got != "Add Note / Checklist" {
+		t.Fatalf("checklist: %q", got)
 	}
 }
 

@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=174">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=172"></script>
+  <script defer src="/static/app.js?v=244"></script>
 </head>
 <body>
   <main class="app-shell" aria-label="{{.Details.Trip.StaySectionTitle}}" data-long-press-sheet-root data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
@@ -37,7 +37,7 @@
     </aside>
 
     <section class="main accommodation-redesign">
-      <header class="trip-mobile-header">
+      <header class="trip-mobile-header site-settings-mobile-header">
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
           <span class="material-symbols-outlined" aria-hidden="true">home</span>
         </a>
@@ -54,7 +54,7 @@
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
           <h2>{{.Details.Trip.StaySectionTitle}}</h2>
-          <p>Manage your {{.Details.Trip.StaySectionTitle}} bookings.</p>
+          <p>Manage your accommodation bookings.</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           {{template "tripDesktopHeaderTools" .}}
@@ -67,24 +67,24 @@
             <div class="accommodation-form-icon" aria-hidden="true"><span class="material-symbols-outlined">add_business</span></div>
             <div class="accommodation-form-head-text">
               <h3 id="stay-form-title">New {{.Details.Trip.StaySectionTitle}} booking</h3>
-              <p class="trip-resource-form-subtitle">Details sync to your itinerary and expenses.</p>
+              <p class="trip-resource-form-subtitle">Details sync with your itinerary and expenses.</p>
             </div>
           </div>
           {{if .Details.Trip.IsArchived}}
           <p class="muted">Trip is archived. New accommodation entries are disabled.</p>
           {{else}}
           <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form data-ajax-submit data-ajax-reload-on-success data-toast-message="{{.Details.Trip.StaySectionTitle}} booking saved.">
-            <label class="full">Hotel or Residence Name<input type="text" name="name" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
+            <label class="full">Property Name<input type="text" name="name" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
             <label class="full">Address<input type="text" name="address" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
-            <p class="full location-hint" data-accommodation-status>We will try to auto-fill address from the name you enter.</p>
+            <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
             <label>Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
             <label>Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
-            <label>Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
-            <label>Booking Confirmation<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
+            <label>Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+            <label>Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
             <label>Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
             <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
             <label class="full">Notes<input type="text" name="notes" placeholder="Breakfast included, high floor requested..."></label>
-            <button class="full accommodation-save-btn" type="submit">Save {{.Details.Trip.StaySectionTitle}} booking</button>
+            <button class="full accommodation-save-btn" type="submit">Save Accommodation</button>
           </form>
           {{end}}
         </section>
@@ -105,7 +105,7 @@
                     </summary>
                     <div class="trip-inline-actions-buttons">
                       <button type="button" class="item-action-btn" data-inline-edit-open="accommodation-edit-{{.ID}}" aria-label="Edit accommodation: {{.Name}}" title="Edit this accommodation">Edit</button>
-                      <form method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/delete" data-app-confirm data-confirm-title="Delete this accommodation?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete accommodation" data-confirm-icon="hotel" data-confirm-variant="danger">
+                      <form method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/delete" data-app-confirm data-ajax-submit data-toast-message="Accommodation deleted." data-confirm-title="Delete this accommodation?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete accommodation" data-confirm-icon="hotel" data-confirm-variant="danger">
                         <button type="submit" class="item-action-btn danger" aria-label="Delete accommodation: {{.Name}}" title="Delete this accommodation">Delete</button>
                       </form>
                     </div>
@@ -144,7 +144,7 @@
                           <div><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><div><strong>{{formatTripDateTime $.Details.Trip $.Settings .CheckInAt}}</strong><small>Check-in Date &amp; Time</small></div></div>
                           <div><span class="material-symbols-outlined" aria-hidden="true">event</span><div><strong>{{formatTripDateTime $.Details.Trip $.Settings .CheckOutAt}}</strong><small>Check-out Date &amp; Time</small></div></div>
                           {{if .BookingConfirmation}}
-                          <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Confirmation</small></div></div>
+                          <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Reference</small></div></div>
                           {{end}}
                           {{if .AttachmentPath}}
                           <div><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><a class="flight-doc-link" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">Open Attachment</a><small>Booking Document</small></div></div>
@@ -158,21 +158,22 @@
                   </div>
 
                   {{if not $.Details.Trip.IsArchived}}
-                  <form id="accommodation-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/update" class="form-grid item-edit hidden full accommodation-edit-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form>
+                  <form id="accommodation-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/update" class="form-grid item-edit hidden full accommodation-edit-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form data-ajax-submit data-toast-message="Accommodation updated.">
+                    <input type="hidden" name="expected_updated_at" value="{{.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
                     <div class="full accommodation-form-head accommodation-edit-form-head">
                       <div class="accommodation-form-icon" aria-hidden="true"><span class="material-symbols-outlined">edit_square</span></div>
                       <div class="accommodation-form-head-text">
-                        <h3>Edit {{$.Details.Trip.StaySectionTitle}}</h3>
-                        <p class="accommodation-edit-subtitle muted">Update details here and it will sync to itinerary and expenses.</p>
+                        <h3>Edit Accommodation</h3>
+                        <p class="accommodation-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.</p>
                       </div>
                     </div>
-                    <label class="full">Hotel or Residence Name<input type="text" name="name" value="{{.Name}}" required data-accommodation-name></label>
-                    <label class="full">Address<input type="text" name="address" value="{{.Address}}" required data-accommodation-address data-location-autocomplete></label>
-                    <p class="full location-hint" data-accommodation-status>We will try to auto-fill address from the name you enter.</p>
+                    <label class="full">Property Name<input type="text" name="name" value="{{.Name}}" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
+                    <label class="full">Address<input type="text" name="address" value="{{.Address}}" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
+                    <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
                     <label>Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" .CheckInAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
                     <label>Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" .CheckOutAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                    <label>Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
-                    <label>Booking Confirmation<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
+                    <label>Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
+                    <label>Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
                     <input type="hidden" name="current_attachment_path" value="{{.AttachmentPath}}">
                     <input type="hidden" name="current_image_path" value="{{.ImagePath}}">
                     {{if .AttachmentPath}}
@@ -195,14 +196,15 @@
           {{else}}
           <div class="accommodation-empty">
             <div aria-hidden="true"><span class="material-symbols-outlined">hotel</span></div>
-            <h4>Add Next Destination</h4>
-            <p>Keep your journey organized by adding another accommodation.</p>
+            <h4>No accommodations yet.</h4>
+            <p>Add your first accommodation to keep your itinerary and budget in sync.</p>
           </div>
           {{end}}
         </section>
       </div>
     </section>
   </main>
+  {{if tripMobileFabHasItems .Details.Trip}}
   <div class="mobile-fab-wrap" data-mobile-fab>
     <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation">
       <span class="material-symbols-outlined" aria-hidden="true">add</span>
@@ -211,9 +213,10 @@
       {{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}
     </div>
   </div>
+  {{end}}
   {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "stay")}}
   {{template "tripLongPressSheet"}}
-  {{template "tripMobileProfileSheet" .}}
+  {{template "appMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}
 </body>
 </html>

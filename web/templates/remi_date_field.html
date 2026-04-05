@@ -6,8 +6,16 @@
 {{- $mdy := index . "mdy" -}}
 {{- $inputClass := index . "input_class" -}}
 {{- $ph := "DD-MM-YYYY" -}}{{if $mdy}}{{$ph = "MM-DD-YYYY"}}{{end}}
-<span class="remi-date-field" data-remi-date data-mdy="{{if $mdy}}1{{else}}0{{end}}"{{if $min}} data-min="{{$min}}"{{end}}{{if $max}} data-max="{{$max}}"{{end}}>
+<span class="remi-date-field{{if index . "clearable"}} remi-date-field--clearable{{end}}" data-remi-date data-mdy="{{if $mdy}}1{{else}}0{{end}}"{{if $min}} data-min="{{$min}}"{{end}}{{if $max}} data-max="{{$max}}"{{end}}{{if index . "clearable"}} data-clearable="1"{{end}}>
   <input type="hidden" name="{{$name}}" value="{{$value}}" class="remi-date-iso" autocomplete="off">
-  <input type="text" class="remi-date-visible{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$ph}}" spellcheck="false" readonly{{if index . "required"}} required{{end}} aria-label="Date">
+  <input type="text" class="remi-date-visible{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$ph}}" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Date">
+  <button type="button" class="remi-date-calendar-btn" aria-label="Open calendar" tabindex="-1">
+    <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
+  </button>
+  {{if index . "clearable"}}
+  <button type="button" class="remi-date-clear-btn" data-remi-date-clear aria-label="Clear date" hidden>
+    <span class="material-symbols-outlined" aria-hidden="true">close</span>
+  </button>
+  {{end}}
 </span>
 {{end}}

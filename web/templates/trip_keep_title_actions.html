@@ -1,0 +1,124 @@
+{{/* Args: TripID, CSRFToken, Items (slice with .ID), View, Category, CategoryPinned, ReturnTo */}}
+{{define "tripKeepChecklistBatchTitleActions"}}
+<div class="trip-keep-card-title-actions">
+  {{if or (eq .View "notes") (eq .View "reminders")}}
+  <div class="trip-keep-card-title-actions-pin">
+    <form method="post" action="/trips/{{.TripID}}/notes/checklist-category/pin">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="category" value="{{.Category}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="{{if .CategoryPinned}}unpin{{else}}pin{{end}}">
+      <button type="submit" class="trip-keep-title-icon-btn{{if .CategoryPinned}} trip-keep-title-icon-btn--pinned{{end}}" title="{{if .CategoryPinned}}Unpin from top{{else}}Pin to top{{end}}" aria-label="{{if .CategoryPinned}}Unpin category from top{{else}}Pin category to top{{end}}"><span class="material-symbols-outlined" aria-hidden="true">push_pin</span></button>
+    </form>
+  </div>
+  <div class="trip-keep-card-title-actions-rest">
+    <form method="post" action="/trips/{{.TripID}}/notes/checklist-batch/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="archive">
+      {{range .Items}}<input type="hidden" name="item_id" value="{{.ID}}">{{end}}
+      <button type="submit" class="trip-keep-title-icon-btn" title="Archive list" aria-label="Archive list"><span class="material-symbols-outlined" aria-hidden="true">archive</span></button>
+    </form>
+    <form method="post" action="/trips/{{.TripID}}/notes/checklist-batch/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="trash">
+      {{range .Items}}<input type="hidden" name="item_id" value="{{.ID}}">{{end}}
+      <button type="submit" class="trip-keep-title-icon-btn" title="Trash list" aria-label="Trash list"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button>
+    </form>
+  </div>
+  {{else if eq .View "archive"}}
+  <div class="trip-keep-card-title-actions-rest">
+    <form method="post" action="/trips/{{.TripID}}/notes/checklist-batch/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="restore">
+      {{range .Items}}<input type="hidden" name="item_id" value="{{.ID}}">{{end}}
+      <button type="submit" class="trip-keep-title-icon-btn" title="Restore list" aria-label="Restore list"><span class="material-symbols-outlined" aria-hidden="true">unarchive</span></button>
+    </form>
+    <form method="post" action="/trips/{{.TripID}}/notes/checklist-batch/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="trash">
+      {{range .Items}}<input type="hidden" name="item_id" value="{{.ID}}">{{end}}
+      <button type="submit" class="trip-keep-title-icon-btn" title="Move list to trash" aria-label="Move list to trash"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button>
+    </form>
+  </div>
+  {{else if eq .View "trash"}}
+  <div class="trip-keep-card-title-actions-rest">
+    <form method="post" action="/trips/{{.TripID}}/notes/checklist-batch/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="restore">
+      {{range .Items}}<input type="hidden" name="item_id" value="{{.ID}}">{{end}}
+      <button type="submit" class="trip-keep-title-icon-btn" title="Restore list" aria-label="Restore list"><span class="material-symbols-outlined" aria-hidden="true">restore_from_trash</span></button>
+    </form>
+    <form method="post" action="/trips/{{.TripID}}/notes/checklist-batch/intent" data-app-confirm data-confirm-title="Delete checklist items?" data-confirm-body="This cannot be undone." data-confirm-ok="Delete" data-confirm-variant="danger">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="purge">
+      {{range .Items}}<input type="hidden" name="item_id" value="{{.ID}}">{{end}}
+      <button type="submit" class="trip-keep-title-icon-btn trip-keep-title-icon-btn--danger" title="Delete forever" aria-label="Delete checklist items forever"><span class="material-symbols-outlined" aria-hidden="true">delete_forever</span></button>
+    </form>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{/* Args: TripID, NoteID, CSRFToken, View, NotePinned, ReturnTo */}}
+{{define "tripKeepNoteTitleActions"}}
+<div class="trip-keep-card-title-actions">
+  {{if or (eq .View "notes") (eq .View "reminders")}}
+  <div class="trip-keep-card-title-actions-pin">
+    <form method="post" action="/trips/{{.TripID}}/notes/note/{{.NoteID}}/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="{{if .NotePinned}}unpin{{else}}pin{{end}}">
+      <button type="submit" class="trip-keep-title-icon-btn{{if .NotePinned}} trip-keep-title-icon-btn--pinned{{end}}" title="{{if .NotePinned}}Unpin from top{{else}}Pin to top{{end}}" aria-label="{{if .NotePinned}}Unpin note from top{{else}}Pin note to top{{end}}"><span class="material-symbols-outlined" aria-hidden="true">push_pin</span></button>
+    </form>
+  </div>
+  <div class="trip-keep-card-title-actions-rest">
+    <form method="post" action="/trips/{{.TripID}}/notes/note/{{.NoteID}}/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="intent" value="archive">
+      <button type="submit" class="trip-keep-title-icon-btn" title="Archive note" aria-label="Archive note"><span class="material-symbols-outlined" aria-hidden="true">archive</span></button>
+    </form>
+    <form method="post" action="/trips/{{.TripID}}/notes/note/{{.NoteID}}/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="intent" value="trash">
+      <button type="submit" class="trip-keep-title-icon-btn" title="Trash note" aria-label="Trash note"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button>
+    </form>
+  </div>
+  {{else if eq .View "archive"}}
+  <div class="trip-keep-card-title-actions-rest">
+    <form method="post" action="/trips/{{.TripID}}/notes/note/{{.NoteID}}/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="restore">
+      <button type="submit" class="trip-keep-title-icon-btn" title="Restore note" aria-label="Restore note"><span class="material-symbols-outlined" aria-hidden="true">unarchive</span></button>
+    </form>
+    <form method="post" action="/trips/{{.TripID}}/notes/note/{{.NoteID}}/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="trash">
+      <button type="submit" class="trip-keep-title-icon-btn" title="Move to trash" aria-label="Move note to trash"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button>
+    </form>
+  </div>
+  {{else if eq .View "trash"}}
+  <div class="trip-keep-card-title-actions-rest">
+    <form method="post" action="/trips/{{.TripID}}/notes/note/{{.NoteID}}/intent">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="restore">
+      <button type="submit" class="trip-keep-title-icon-btn" title="Restore note" aria-label="Restore note"><span class="material-symbols-outlined" aria-hidden="true">restore_from_trash</span></button>
+    </form>
+    <form method="post" action="/trips/{{.TripID}}/notes/note/{{.NoteID}}/intent" data-app-confirm data-confirm-title="Delete note?" data-confirm-body="This cannot be undone." data-confirm-ok="Delete" data-confirm-variant="danger">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="hidden" name="intent" value="purge">
+      <button type="submit" class="trip-keep-title-icon-btn trip-keep-title-icon-btn--danger" title="Delete forever" aria-label="Delete note forever"><span class="material-symbols-outlined" aria-hidden="true">delete_forever</span></button>
+    </form>
+  </div>
+  {{end}}
+</div>
+{{end}}

@@ -2,11 +2,11 @@
 {{- $t := index . "Trip" -}}
 {{- $active := index . "Active" -}}
 <nav class="bottom-nav" aria-label="Trip sections">
-  <a href="/trips/{{$t.ID}}"{{if eq $active "trip"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">map</span><span>My Trip</span></a>
-  {{- if $t.UIShowStay}}<a href="/trips/{{$t.ID}}/accommodation"{{if eq $active "stay"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">hotel</span><span>{{$t.StaySectionTitle}}</span></a>{{end -}}
-  {{- if $t.UIShowVehicle}}<a href="/trips/{{$t.ID}}/vehicle-rental"{{if eq $active "vehicle"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">car_rental</span><span>{{$t.VehicleSectionTitle}}</span></a>{{end -}}
-  {{- if $t.UIShowFlights}}<a href="/trips/{{$t.ID}}/flights"{{if eq $active "flights"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">flight</span><span>{{$t.FlightsSectionTitle}}</span></a>{{end -}}
-  {{- if $t.SectionEnabledTheTab}}<a href="/trips/{{$t.ID}}/group-expenses"{{if eq $active "group-expenses"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">post_add</span><span>{{$t.GroupExpensesSectionTitle}}</span></a>
-  {{- else if $t.UIShowSpends}}<a href="/trips/{{$t.ID}}/expenses"{{if eq $active "expenses"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>{{$t.SpendsSectionTitle}}</span></a>{{end -}}
+  <a href="/trips/{{$t.ID}}"{{if eq $active "trip"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">map</span><span>Trip</span></a>
+  {{- if $t.UIShowStay}}<a href="/trips/{{$t.ID}}/accommodation"{{if eq $active "stay"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">hotel</span><span>{{if trimSpace $t.UILabelStay}}{{$t.StaySectionTitle}}{{else}}Stays{{end}}</span></a>{{end -}}
+  {{- if $t.UIShowFlights}}<a href="/trips/{{$t.ID}}/flights"{{if eq $active "flights"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">flight</span><span>{{if trimSpace $t.UILabelFlights}}{{$t.FlightsSectionTitle}}{{else}}Flights{{end}}</span></a>{{end -}}
+  {{- if $t.UIShowVehicle}}<a href="/trips/{{$t.ID}}/vehicle-rental"{{if eq $active "vehicle"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">car_rental</span><span>{{if trimSpace $t.UILabelVehicle}}{{$t.VehicleSectionTitle}}{{else}}Rentals{{end}}</span></a>{{end -}}
+  {{- if $t.UIShowSpends}}<a href="/trips/{{$t.ID}}/{{if $t.SectionEnabledTheTab}}group-expenses{{else}}expenses{{end}}"{{if or (eq $active "expenses") (eq $active "group-expenses")}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">payments</span><span>{{if $t.SectionEnabledTheTab}}{{if trimSpace $t.UILabelGroupExpenses}}{{$t.GroupExpensesSectionTitle}}{{else}}Splits{{end}}{{else}}{{if trimSpace $t.UILabelSpends}}{{$t.SpendsSectionTitle}}{{else}}Splits{{end}}{{end}}</span></a>{{end -}}
+  {{- if $t.UIShowChecklist}}<a href="/trips/{{$t.ID}}/notes"{{if eq $active "notes"}} class="active"{{end}}><span class="material-symbols-outlined" aria-hidden="true">note_alt</span><span>Notes</span></a>{{end -}}
 </nav>
 {{end}}

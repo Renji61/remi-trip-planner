@@ -63,6 +63,227 @@ if ("serviceWorker" in navigator) {
     "This file type is not allowed — executables and scripts cannot be uploaded.";
 })();
 
+(function remiBookingAttachmentValidate() {
+  const SNIFF_LEN = 512;
+  const MSG_CONTENT = "Unsupported file type selected. Please upload an image or PDF document.";
+  const MSG_EMPTY = "the selected file is empty";
+  const MSG_BLOCKED =
+    "this file type is not allowed — executables and scripts (.exe, .sh, .bat, .msi, .js, .py, .php, etc.) cannot be uploaded";
+
+  function extFromDeclared(filename) {
+    const base = String(filename || "")
+      .trim()
+      .replace(/^[\\/]+/, "")
+      .split(/[/\\]/)
+      .pop();
+    if (!base) return "";
+    const dot = base.lastIndexOf(".");
+    return dot >= 0 ? base.slice(dot).toLowerCase() : "";
+  }
+
+  function trimBOM(u8) {
+    if (u8.length >= 3 && u8[0] === 0xef && u8[1] === 0xbb && u8[2] === 0xbf) return u8.subarray(3);
+    if (u8.length >= 2 && u8[0] === 0xfe && u8[1] === 0xff) return u8.subarray(2);
+    if (u8.length >= 2 && u8[0] === 0xff && u8[1] === 0xfe) return u8.subarray(2);
+    return u8;
+  }
+
+  function asciiLowerText(u8, max) {
+    const n = Math.min(u8.length, max);
+    let s = "";
+    for (let i = 0; i < n; i++) {
+      let c = u8[i];
+      if (c >= 0x41 && c <= 0x5a) c += 0x20;
+      s += String.fromCharCode(c);
+    }
+    return s;
+  }
+
+  function looksDangerous(head) {
+    if (head.length >= 2 && head[0] === 0x4d && head[1] === 0x5a) return MSG_BLOCKED;
+    if (head.length >= 4 && head[0] === 0x7f && head[1] === 0x45 && head[2] === 0x4c && head[3] === 0x46)
+      return MSG_BLOCKED;
+    if (head.length >= 2 && head[0] === 0x23 && head[1] === 0x21) return MSG_BLOCKED;
+    const t = trimBOM(head);
+    if (t.length >= 5 && asciiLowerText(t, 5) === "<?php") return MSG_BLOCKED;
+    if (t.length >= 4 && asciiLowerText(t, 4) === "<?=") return MSG_BLOCKED;
+    if (t.length >= 7 && asciiLowerText(t, 7) === "<script") return MSG_BLOCKED;
+    return null;
+  }
+
+  function detectKind(u8, filename) {
+    if (!u8.length) return "unknown";
+    if (u8.length >= 4 && u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46) return "pdf";
+    if (u8.length >= 3 && u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return "jpeg";
+    if (
+      u8.length >= 8 &&
+      u8[0] === 0x89 &&
+      u8[1] === 0x50 &&
+      u8[2] === 0x4e &&
+      u8[3] === 0x47 &&
+      u8[4] === 0x0d &&
+      u8[5] === 0x0a &&
+      u8[6] === 0x1a &&
+      u8[7] === 0x0a
+    )
+      return "png";
+    if (
+      u8.length >= 6 &&
+      ((u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x38 && u8[4] === 0x37 && u8[5] === 0x61) ||
+        (u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x38 && u8[4] === 0x39 && u8[5] === 0x61))
+    )
+      return "gif";
+    if (
+      u8.length >= 12 &&
+      u8[0] === 0x52 &&
+      u8[1] === 0x49 &&
+      u8[2] === 0x46 &&
+      u8[3] === 0x46 &&
+      u8[8] === 0x57 &&
+      u8[9] === 0x45 &&
+      u8[10] === 0x42 &&
+      u8[11] === 0x50
+    )
+      return "webp";
+    if (u8.length >= 2 && u8[0] === 0x42 && u8[1] === 0x4d) return "bmp";
+    if (
+      u8.length >= 4 &&
+      ((u8[0] === 0x49 && u8[1] === 0x49 && u8[2] === 0x2a && u8[3] === 0x00) ||
+        (u8[0] === 0x4d && u8[1] === 0x4d && u8[2] === 0x00 && u8[3] === 0x2a))
+    )
+      return "tiff";
+    if (u8.length >= 12 && u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
+      const b = asciiLowerText(u8.subarray(8, 12), 4);
+      if (b === "heic" || b === "heix" || b === "mif1" || b === "msf1") return "heic";
+    }
+    if (u8.length >= 4 && u8[0] === 0xd0 && u8[1] === 0xcf && u8[2] === 0x11 && u8[3] === 0xe0) return "ole";
+    if (u8.length >= 4 && u8[0] === 0x50 && u8[1] === 0x4b) {
+      const th = u8[2];
+      const fo = u8[3];
+      if ([3, 5, 7].indexOf(th) !== -1 && [4, 6, 8].indexOf(fo) !== -1) return "zip";
+    }
+    let i = 0;
+    while (i < u8.length && (u8[i] === 9 || u8[i] === 10 || u8[i] === 13 || u8[i] === 32)) i++;
+    if (i < u8.length && u8[i] === 0x3c) {
+      const slice = u8.subarray(i, Math.min(u8.length, i + 256));
+      let lt = "";
+      try {
+        lt = new TextDecoder("utf-8", { fatal: false }).decode(slice).toLowerCase();
+      } catch (e) {
+        lt = asciiLowerText(slice, slice.length);
+      }
+      const de = extFromDeclared(filename);
+      if (de === ".svg" && (lt.startsWith("<?xml") || lt.startsWith("<!doctype") || lt.startsWith("<svg")))
+        return "svg";
+    }
+    return "unknown";
+  }
+
+  function canonicalExt(kind, declaredExt) {
+    const d = declaredExt.toLowerCase();
+    switch (kind) {
+      case "pdf":
+        return ".pdf";
+      case "jpeg":
+        return d === ".jpeg" ? ".jpeg" : ".jpg";
+      case "png":
+        return ".png";
+      case "gif":
+        return ".gif";
+      case "webp":
+        return ".webp";
+      case "bmp":
+        return ".bmp";
+      case "tiff":
+        return d === ".tif" ? ".tif" : ".tiff";
+      case "heic":
+        return d === ".heif" ? ".heif" : ".heic";
+      case "ole":
+        return ".doc";
+      case "zip":
+        if (d === ".docx" || d === ".xlsx" || d === ".pptx") return d;
+        return "";
+      case "svg":
+        return ".svg";
+      default:
+        return "";
+    }
+  }
+
+  function bookingAttachmentOk(kind, declaredExt) {
+    const de = declaredExt.toLowerCase();
+    switch (kind) {
+      case "pdf":
+      case "jpeg":
+      case "png":
+      case "gif":
+      case "webp":
+      case "bmp":
+      case "tiff":
+      case "heic":
+      case "ole":
+        return true;
+      case "zip":
+        return de === ".docx" || de === ".xlsx" || de === ".pptx";
+      case "svg":
+        return de === ".svg";
+      default:
+        return false;
+    }
+  }
+
+  window.remiValidateBookingAttachmentFile = (file, maxBytes) => {
+    return new Promise((resolve) => {
+      if (!(file instanceof File)) {
+        resolve({ ok: false, message: MSG_CONTENT });
+        return;
+      }
+      const name = file.name || "";
+      if (typeof window.remiIsBlockedUploadFilename === "function" && window.remiIsBlockedUploadFilename(name)) {
+        resolve({
+          ok: false,
+          message: window.remiBlockedUploadFilenameMessage || MSG_BLOCKED
+        });
+        return;
+      }
+      if (file.size === 0) {
+        resolve({ ok: false, message: MSG_EMPTY });
+        return;
+      }
+      if (typeof maxBytes === "number" && maxBytes > 0 && file.size > maxBytes) {
+        const mb = Math.max(1, Math.floor(maxBytes / (1024 * 1024)));
+        resolve({ ok: false, message: `file exceeds upload limit (${mb} MB)` });
+        return;
+      }
+      const chunk = file.slice(0, SNIFF_LEN);
+      const reader = new FileReader();
+      reader.onerror = () => resolve({ ok: false, message: "Could not read the selected file." });
+      reader.onload = () => {
+        const ab = reader.result;
+        if (!(ab instanceof ArrayBuffer)) {
+          resolve({ ok: false, message: MSG_CONTENT });
+          return;
+        }
+        const u8 = new Uint8Array(ab);
+        const danger = looksDangerous(u8);
+        if (danger) {
+          resolve({ ok: false, message: danger });
+          return;
+        }
+        const kind = detectKind(u8, name);
+        const de = extFromDeclared(name);
+        const ext = canonicalExt(kind, de);
+        if (!ext || !bookingAttachmentOk(kind, de)) {
+          resolve({ ok: false, message: MSG_CONTENT });
+          return;
+        }
+        resolve({ ok: true });
+      };
+      reader.readAsArrayBuffer(chunk);
+    });
+  };
+})();
+
 (function remiDateFields() {
   const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
   const ISO_DT_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
@@ -91,9 +312,9 @@ if ("serviceWorker" in navigator) {
   }
 
   function normalizeTimeHM(raw) {
-    const src = String(raw || "").trim();
+    const src = String(raw || "").trim().replace(/\s+/g, " ");
     if (!src) return "";
-    const m12 = src.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+    const m12 = src.match(/^(\d{1,2}):(\d{1,2})\s*(am|pm)$/i);
     if (m12) {
       let h = parseInt(m12[1], 10);
       const mm = parseInt(m12[2], 10);
@@ -103,12 +324,74 @@ if ("serviceWorker" in navigator) {
       else h = h === 12 ? 12 : h + 12;
       return `${pad2(h)}:${pad2(mm)}`;
     }
+    const monly = src.match(/^(\d{1,2})\s*(am|pm)$/i);
+    if (monly) {
+      let h = parseInt(monly[1], 10);
+      const ap = monly[2].toLowerCase();
+      if (!Number.isFinite(h) || h < 1 || h > 12) return "";
+      if (ap === "am") h = h === 12 ? 0 : h;
+      else h = h === 12 ? 12 : h + 12;
+      return `${pad2(h)}:00`;
+    }
     const p = src.split(":");
     if (p.length < 2) return "";
     const h = parseInt(p[0], 10);
     const mm = parseInt(p[1], 10);
     if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 0 || h > 23 || mm < 0 || mm > 59) return "";
     return `${pad2(h)}:${pad2(mm)}`;
+  }
+
+  function snapMinuteToPickerStep(mm) {
+    if (!Number.isFinite(mm) || mm < 0 || mm > 59) return 0;
+    return Math.min(55, Math.max(0, Math.round(mm / 5) * 5));
+  }
+
+  function hmToPickerParts(hm) {
+    const t = normalizeTimeHM(hm);
+    if (!t) return null;
+    const h24 = parseInt(t.slice(0, 2), 10);
+    const mm = parseInt(t.slice(3, 5), 10);
+    const period = h24 >= 12 ? "pm" : "am";
+    let hour12 = h24 % 12;
+    if (hour12 === 0) hour12 = 12;
+    return { hour12, minute: snapMinuteToPickerStep(mm), period };
+  }
+
+  /** Partial typed values: move lists while the time picker is open (5-minute steps for minutes). */
+  function parseDisplayForTimePickerView(t, st) {
+    const s = String(t || "").trim().replace(/\s+/g, " ");
+    if (!s) return false;
+    const m = s.match(/^(\d{1,2})(?::(\d{0,2}))?\s*(am|pm)?$/i);
+    if (!m) return false;
+    const h = parseInt(m[1], 10);
+    const minStr = m[2];
+    const mm = minStr === undefined || minStr === "" ? null : parseInt(minStr, 10);
+    const ap = m[3] ? m[3].toLowerCase() : null;
+    if (!Number.isFinite(h)) return false;
+    if (h >= 13 && h <= 23) {
+      st.period = "pm";
+      let h12 = h % 12;
+      if (h12 === 0) h12 = 12;
+      st.hour12 = h12;
+      if (Number.isFinite(mm) && mm >= 0 && mm <= 59) st.minute = snapMinuteToPickerStep(mm);
+      return true;
+    }
+    if (h === 0) {
+      if (ap === "am") {
+        st.hour12 = 12;
+        st.period = "am";
+        if (Number.isFinite(mm) && mm >= 0 && mm <= 59) st.minute = snapMinuteToPickerStep(mm);
+        return true;
+      }
+      return false;
+    }
+    if (h >= 1 && h <= 12) {
+      st.hour12 = h;
+      if (ap) st.period = ap;
+      if (Number.isFinite(mm) && mm >= 0 && mm <= 59) st.minute = snapMinuteToPickerStep(mm);
+      return true;
+    }
+    return false;
   }
 
   function timeHMToDisplay(raw) {
@@ -135,6 +418,44 @@ if ("serviceWorker" in navigator) {
     return iso;
   }
 
+  function remiSetFormDateIso(form, iso) {
+    if (!(form instanceof HTMLFormElement)) return;
+    const s = String(iso || "").trim();
+    if (!s) return;
+    const wrap = form.querySelector("[data-remi-date]");
+    if (!(wrap instanceof HTMLElement)) return;
+    const mdy = wrap.getAttribute("data-mdy") === "1";
+    const min = wrap.getAttribute("data-min") || "";
+    const max = wrap.getAttribute("data-max") || "";
+    const hidden = wrap.querySelector(".remi-date-iso");
+    const vis = wrap.querySelector(".remi-date-visible");
+    if (!(hidden instanceof HTMLInputElement) || !(vis instanceof HTMLInputElement)) return;
+    const v = clampIso(s, min, max);
+    hidden.value = v;
+    vis.value = isoToDisplay(v, mdy);
+    vis.setCustomValidity("");
+  }
+
+  function remiResetExpenseAddForm(form) {
+    if (!(form instanceof HTMLFormElement)) return;
+    const titleInp = form.querySelector('input[name="title"]');
+    if (titleInp instanceof HTMLInputElement) titleInp.value = "";
+    const notesInp = form.querySelector('input[name="notes"]');
+    if (notesInp instanceof HTMLInputElement) notesInp.value = "";
+    const amtInp = form.querySelector('input[name="amount"]');
+    if (amtInp instanceof HTMLInputElement) amtInp.value = "";
+    form.querySelectorAll('select[name="category"], select[name="payment_method"]').forEach((el) => {
+      if (el instanceof HTMLSelectElement) el.selectedIndex = 0;
+    });
+    const def = (form.dataset.remiDefaultSpentOn || "").trim();
+    if (def) remiSetFormDateIso(form, def);
+    const tabFile = form.querySelector('input[type="file"][name="tab_attachment"]');
+    if (tabFile instanceof HTMLInputElement) tabFile.value = "";
+  }
+
+  window.remiSetFormDateIso = remiSetFormDateIso;
+  window.remiResetExpenseAddForm = remiResetExpenseAddForm;
+
   function clampDateTimeLocal(isoDt, min, max) {
     if (!isoDt) return isoDt;
     let v = isoDt;
@@ -155,6 +476,81 @@ if ("serviceWorker" in navigator) {
 
   function startOfMonth(d) {
     return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
+  /** While the date picker is open, typing in the visible field updates the calendar (see renderDatePicker). */
+  let activeDatePickerSync = null;
+  /** While the time picker is open, typing updates hour/minute/AM-PM lists (see renderTimePicker). */
+  let activeTimePickerSync = null;
+
+  function parseDisplayToIso(trimmed, mdy) {
+    const t = String(trimmed || "").trim();
+    if (!t) return "";
+    const parts = t.split(/[-/.]/).map((p) => p.trim()).filter((p) => p.length > 0);
+    if (parts.length !== 3) return "";
+    const n1 = parseInt(parts[0], 10);
+    const n2 = parseInt(parts[1], 10);
+    const n3 = parseInt(parts[2], 10);
+    if (![n1, n2, n3].every((n) => Number.isFinite(n))) return "";
+    let d;
+    let mo;
+    let y;
+    if (mdy) {
+      mo = n1;
+      d = n2;
+      y = n3;
+    } else {
+      d = n1;
+      mo = n2;
+      y = n3;
+    }
+    if (y < 1000 || y > 9999 || mo < 1 || mo > 12 || d < 1 || d > 31) return "";
+    const dt = new Date(y, mo - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return "";
+    return toISODate(dt);
+  }
+
+  function parseDisplayForCalendarView(trimmed, mdy, viewFallback) {
+    const t = String(trimmed || "").trim();
+    if (!t) return null;
+    const fb = viewFallback instanceof Date ? viewFallback : new Date();
+    const y0 = fb.getFullYear();
+    const full = parseDisplayToIso(t, mdy);
+    if (full) {
+      const d = parseISODate(full);
+      return d ? startOfMonth(d) : null;
+    }
+    const parts = t.split(/[-/.]/).map((p) => p.trim()).filter((p) => p.length > 0);
+    if (parts.length === 0) return null;
+    if (parts.length === 1) {
+      const n = parseInt(parts[0], 10);
+      if (Number.isFinite(n) && n >= 1 && n <= 12) return new Date(y0, n - 1, 1);
+      return null;
+    }
+    if (parts.length === 2) {
+      const n1 = parseInt(parts[0], 10);
+      const n2 = parseInt(parts[1], 10);
+      if (!Number.isFinite(n1) || !Number.isFinite(n2)) return null;
+      if (n2 >= 1000 && n2 <= 9999 && n1 >= 1 && n1 <= 12) return new Date(n2, n1 - 1, 1);
+      if (n1 >= 1000 && n1 <= 9999 && n2 >= 1 && n2 <= 12) return new Date(n1, n2 - 1, 1);
+      if (mdy && n1 >= 1 && n1 <= 12) return new Date(y0, n1 - 1, 1);
+      if (!mdy && n2 >= 1 && n2 <= 12) return new Date(y0, n2 - 1, 1);
+      return null;
+    }
+    if (parts.length >= 3) {
+      const n1 = parseInt(parts[0], 10);
+      const n2 = parseInt(parts[1], 10);
+      const n3 = parseInt(parts[2], 10);
+      if (mdy && Number.isFinite(n1) && n1 >= 1 && n1 <= 12) {
+        const yy = Number.isFinite(n3) && n3 >= 1000 && n3 <= 9999 ? n3 : y0;
+        return new Date(yy, n1 - 1, 1);
+      }
+      if (!mdy && Number.isFinite(n2) && n2 >= 1 && n2 <= 12) {
+        const yy = Number.isFinite(n3) && n3 >= 1000 && n3 <= 9999 ? n3 : y0;
+        return new Date(yy, n2 - 1, 1);
+      }
+    }
+    return null;
   }
 
   function isMobileLayout() {
@@ -203,20 +599,63 @@ if ("serviceWorker" in navigator) {
         return;
       }
       const r = state.anchor.getBoundingClientRect();
-      if (r.bottom < 0 || r.top > window.innerHeight) {
+      const vh = window.innerHeight;
+      if (r.bottom < 0 || r.top > vh) {
         close("anchor-out-of-view");
         return;
       }
-      const panelWidth = Math.max(280, Math.round(r.width));
+      const PICKER_PANEL_MAX = 360;
+      const PICKER_PANEL_MIN = 280;
+      const vwCap = Math.max(200, window.innerWidth - 24);
+      const panelWidth = Math.min(
+        PICKER_PANEL_MAX,
+        vwCap,
+        Math.max(PICKER_PANEL_MIN, Math.round(r.width))
+      );
       const maxLeft = Math.max(12, window.innerWidth - panelWidth - 12);
       const left = Math.min(maxLeft, Math.max(12, Math.round(r.left)));
       panel.style.left = `${left}px`;
-      panel.style.top = `${Math.round(r.bottom + 10)}px`;
       panel.style.width = `${panelWidth}px`;
+      panel.style.maxHeight = "";
+
+      const margin = 12;
+      const gap = 10;
+      const finalize = () => {
+        const h = panel.getBoundingClientRect().height;
+        const roomBelow = vh - margin - (r.bottom + gap);
+        const roomAbove = r.top - gap - margin;
+        let top = r.bottom + gap;
+
+        if (h <= roomBelow) {
+          /* below anchor */
+        } else if (h <= roomAbove) {
+          top = r.top - gap - h;
+        } else {
+          const preferBelow = roomBelow >= roomAbove;
+          const cap = Math.max(160, preferBelow ? roomBelow : roomAbove);
+          panel.style.maxHeight = `${Math.floor(cap)}px`;
+          const h2 = panel.getBoundingClientRect().height;
+          top = preferBelow ? r.bottom + gap : r.top - gap - h2;
+          if (top < margin) top = margin;
+          if (top + h2 > vh - margin) top = Math.max(margin, vh - margin - h2);
+        }
+
+        if (!panel.style.maxHeight && top + h > vh - margin) {
+          top = Math.max(margin, vh - margin - h);
+        }
+        panel.style.top = `${Math.round(top)}px`;
+      };
+
+      requestAnimationFrame(() => {
+        finalize();
+        requestAnimationFrame(finalize);
+      });
     };
 
     const close = (reason) => {
       if (!host || !state) return;
+      activeDatePickerSync = null;
+      activeTimePickerSync = null;
       if (escHandler) document.removeEventListener("keydown", escHandler, true);
       if (outsideHandler) document.removeEventListener("pointerdown", outsideHandler, true);
       if (repositionHandler) {
@@ -274,6 +713,8 @@ if ("serviceWorker" in navigator) {
   function renderDatePicker(root, close, opts) {
     const min = opts.min || "";
     const max = opts.max || "";
+    const clearable = Boolean(opts.clearable);
+    const mdyPicker = Boolean(opts.mdy);
     let selectedIso = opts.value || "";
     let viewMonth = startOfMonth(parseISODate(selectedIso) || parseISODate(min) || new Date());
     const weekdays = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
@@ -291,12 +732,34 @@ if ("serviceWorker" in navigator) {
       "  </button>",
       "</div>",
       '<div class="remi-cal-weekdays"></div>',
-      '<div class="remi-cal-grid"></div>',
-      '<div class="remi-picker-actions">',
-      '  <button type="button" class="secondary-btn" data-cal-cancel>Cancel</button>',
-      '  <button type="button" class="primary-btn" data-cal-confirm>Confirm Date</button>',
-      "</div>"
+      '<div class="remi-cal-grid"></div>'
     ].join("");
+    const actions = document.createElement("div");
+    actions.className = "remi-picker-actions";
+    if (clearable) {
+      const bClear = document.createElement("button");
+      bClear.type = "button";
+      bClear.className = "secondary-btn remi-picker-clear-date";
+      bClear.textContent = "Clear date";
+      bClear.addEventListener("click", () => {
+        opts.onConfirm("");
+        close("clear");
+      });
+      actions.appendChild(bClear);
+    }
+    const bCancel = document.createElement("button");
+    bCancel.type = "button";
+    bCancel.className = "secondary-btn";
+    bCancel.setAttribute("data-cal-cancel", "");
+    bCancel.textContent = "Cancel";
+    actions.appendChild(bCancel);
+    const bConfirm = document.createElement("button");
+    bConfirm.type = "button";
+    bConfirm.className = "primary-btn";
+    bConfirm.setAttribute("data-cal-confirm", "");
+    bConfirm.textContent = "Confirm Date";
+    actions.appendChild(bConfirm);
+    wrap.appendChild(actions);
     root.appendChild(wrap);
     const weekRow = wrap.querySelector(".remi-cal-weekdays");
     const grid = wrap.querySelector(".remi-cal-grid");
@@ -354,6 +817,23 @@ if ("serviceWorker" in navigator) {
       opts.onConfirm(clampIso(selectedIso, min, max));
       close("confirm");
     });
+
+    activeDatePickerSync = (rawDisplay) => {
+      const t = String(rawDisplay || "").trim();
+      const iso = parseDisplayToIso(t, mdyPicker);
+      if (iso) {
+        selectedIso = clampIso(iso, min, max);
+        const parsed = parseISODate(selectedIso);
+        if (parsed) viewMonth = startOfMonth(parsed);
+        draw();
+        return;
+      }
+      const vm = parseDisplayForCalendarView(t, mdyPicker, viewMonth);
+      if (vm) {
+        viewMonth = vm;
+        draw();
+      }
+    };
   }
 
   function renderTimePicker(root, close, opts) {
@@ -428,6 +908,10 @@ if ("serviceWorker" in navigator) {
       wrap.querySelectorAll("[data-ap]").forEach((b) => {
         b.classList.toggle("is-selected", b.getAttribute("data-ap") === period);
       });
+      requestAnimationFrame(() => {
+        hourList.querySelector(".is-selected")?.scrollIntoView({ block: "nearest" });
+        minuteList.querySelector(".is-selected")?.scrollIntoView({ block: "nearest" });
+      });
     };
 
     draw();
@@ -442,6 +926,28 @@ if ("serviceWorker" in navigator) {
       opts.onConfirm(compute());
       close("confirm");
     });
+
+    activeTimePickerSync = (rawDisplay) => {
+      const t = String(rawDisplay || "").trim();
+      const full = normalizeTimeHM(t);
+      if (full) {
+        const p = hmToPickerParts(full);
+        if (p) {
+          hour12 = p.hour12;
+          minute = p.minute;
+          period = p.period;
+          draw();
+        }
+        return;
+      }
+      const st = { hour12, minute, period };
+      if (parseDisplayForTimePickerView(t, st)) {
+        hour12 = st.hour12;
+        minute = st.minute;
+        period = st.period;
+        draw();
+      }
+    };
   }
 
   function openDatePicker(anchor, options) {
@@ -451,6 +957,8 @@ if ("serviceWorker" in navigator) {
       value: options.value || "",
       min: options.min || "",
       max: options.max || "",
+      mdy: Boolean(options.mdy),
+      clearable: Boolean(options.clearable),
       onConfirm: options.onConfirm,
       onClose: options.onClose,
       render: renderDatePicker
@@ -507,13 +1015,22 @@ if ("serviceWorker" in navigator) {
     const mdy = wrap.getAttribute("data-mdy") === "1";
     const min = wrap.getAttribute("data-min") || "";
     const max = wrap.getAttribute("data-max") || "";
+    const clearable = wrap.getAttribute("data-clearable") === "1";
     const hidden = wrap.querySelector(".remi-date-iso");
     const vis = wrap.querySelector(".remi-date-visible");
+    const calBtn = wrap.querySelector(".remi-date-calendar-btn");
+    const clearBtn = wrap.querySelector("[data-remi-date-clear]");
     if (!(hidden instanceof HTMLInputElement) || !(vis instanceof HTMLInputElement)) return;
+    if (!(calBtn instanceof HTMLButtonElement)) return;
     const required = vis.required;
     const sync = () => {
       vis.value = isoToDisplay(hidden.value, mdy);
       vis.setCustomValidity("");
+      if (clearBtn instanceof HTMLButtonElement) {
+        const has = Boolean((hidden.value || "").trim());
+        clearBtn.hidden = !clearable || !has;
+        clearBtn.setAttribute("aria-hidden", has ? "false" : "true");
+      }
     };
     const validate = () => {
       vis.setCustomValidity("");
@@ -524,17 +1041,49 @@ if ("serviceWorker" in navigator) {
       return true;
     };
     sync();
-    makeFieldOpenable(vis, () => {
+    hidden.addEventListener("change", () => sync());
+    if (clearBtn instanceof HTMLButtonElement && clearable) {
+      clearBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        hidden.value = "";
+        sync();
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+    vis.readOnly = false;
+    const openCal = () => {
       openDatePicker(vis, {
         value: hidden.value || "",
         min,
         max,
+        mdy,
+        clearable,
         onConfirm: (iso) => {
           hidden.value = clampIso(iso, min, max);
           sync();
           hidden.dispatchEvent(new Event("change", { bubbles: true }));
         }
       });
+    };
+    calBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openCal();
+    });
+    vis.addEventListener("input", () => {
+      const iso = parseDisplayToIso(vis.value.trim(), mdy);
+      if (iso) {
+        hidden.value = clampIso(iso, min, max);
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (typeof activeDatePickerSync === "function") activeDatePickerSync(vis.value);
+    });
+    vis.addEventListener("blur", () => {
+      const iso = parseDisplayToIso(vis.value.trim(), mdy);
+      if (iso) hidden.value = clampIso(iso, min, max);
+      else if (!(vis.value || "").trim()) hidden.value = "";
+      sync();
     });
     const form = wrap.closest("form");
     if (form) {
@@ -572,7 +1121,10 @@ if ("serviceWorker" in navigator) {
       return true;
     };
     sync();
-    makeFieldOpenable(vis, () => {
+    hidden.addEventListener("change", () => sync());
+    const clockBtn = wrap.querySelector(".remi-time-clock-btn");
+    vis.readOnly = false;
+    const openTime = () => {
       openTimePicker(vis, {
         title: inferPickerTitle(vis, "Set Time"),
         value: hidden.value || "08:30",
@@ -582,6 +1134,29 @@ if ("serviceWorker" in navigator) {
           hidden.dispatchEvent(new Event("change", { bubbles: true }));
         }
       });
+    };
+    if (clockBtn instanceof HTMLButtonElement) {
+      clockBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openTime();
+      });
+    } else {
+      makeFieldOpenable(vis, openTime);
+    }
+    vis.addEventListener("input", () => {
+      const hm = normalizeTimeHM(vis.value.trim());
+      if (hm) {
+        hidden.value = hm;
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (typeof activeTimePickerSync === "function") activeTimePickerSync(vis.value);
+    });
+    vis.addEventListener("blur", () => {
+      const hm = normalizeTimeHM(vis.value.trim());
+      if (hm) hidden.value = hm;
+      else if (!(vis.value || "").trim()) hidden.value = "";
+      sync();
     });
     const form = wrap.closest("form");
     if (form) {
@@ -652,22 +1227,77 @@ if ("serviceWorker" in navigator) {
       return !!(sp.dateIso && sp.time);
     };
     sync();
-    makeFieldOpenable(dateVis, () => {
+    const dateCalBtn = wrap.querySelector(".remi-datetime-date-wrap .remi-date-calendar-btn");
+    dateVis.readOnly = false;
+    const openDateCal = () => {
       const sp = splitIsoLocalDateTime(hidden.value);
       openDatePicker(dateVis, {
         value: sp.dateIso,
         min: min ? min.slice(0, 10) : "",
         max: max ? max.slice(0, 10) : "",
+        mdy,
         onConfirm: (iso) => updateDate(iso)
       });
+    };
+    if (dateCalBtn instanceof HTMLButtonElement) {
+      dateCalBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openDateCal();
+      });
+    } else {
+      makeFieldOpenable(dateVis, openDateCal);
+    }
+    hidden.addEventListener("change", () => sync());
+    dateVis.addEventListener("input", () => {
+      const iso = parseDisplayToIso(dateVis.value.trim(), mdy);
+      if (iso) {
+        const sp = splitIsoLocalDateTime(hidden.value);
+        const tPart = normalizeTimeHM(sp.time || "08:30");
+        hidden.value = clampDateTimeLocal(`${iso}T${tPart}`, min, max);
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (typeof activeDatePickerSync === "function") activeDatePickerSync(dateVis.value);
     });
-    makeFieldOpenable(timeVis, () => {
+    dateVis.addEventListener("blur", () => {
+      const iso = parseDisplayToIso(dateVis.value.trim(), mdy);
+      if (iso) {
+        const sp = splitIsoLocalDateTime(hidden.value);
+        const tPart = normalizeTimeHM(sp.time || "08:30");
+        hidden.value = clampDateTimeLocal(`${iso}T${tPart}`, min, max);
+      } else if (!(dateVis.value || "").trim()) {
+        updateDate("");
+      }
+      sync();
+    });
+    const timeClockBtn = wrap.querySelector(".remi-datetime-time-wrap .remi-time-clock-btn");
+    timeVis.readOnly = false;
+    const openTimeCal = () => {
       const sp = splitIsoLocalDateTime(hidden.value);
       openTimePicker(timeVis, {
         value: sp.time || "08:30",
         title: inferPickerTitle(timeVis, "Set Time"),
         onConfirm: (hm) => updateTime(hm)
       });
+    };
+    if (timeClockBtn instanceof HTMLButtonElement) {
+      timeClockBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openTimeCal();
+      });
+    } else {
+      makeFieldOpenable(timeVis, openTimeCal);
+    }
+    timeVis.addEventListener("input", () => {
+      const hm = normalizeTimeHM(timeVis.value.trim());
+      if (hm) updateTime(hm);
+      if (typeof activeTimePickerSync === "function") activeTimePickerSync(timeVis.value);
+    });
+    timeVis.addEventListener("blur", () => {
+      const hm = normalizeTimeHM(timeVis.value.trim());
+      if (hm) updateTime(hm);
+      else sync();
     });
     const form = wrap.closest("form");
     if (form) {
@@ -1057,6 +1687,14 @@ window.addEventListener("load", () => {
       sessionStorage.removeItem(TOAST_KEY);
       showToast(pendingToast);
     }
+    if (sessionStorage.getItem("remi_focus_budget_expense_title")) {
+      sessionStorage.removeItem("remi_focus_budget_expense_title");
+      window.requestAnimationFrame(() => {
+        document.getElementById("add-expense")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        const el = document.querySelector("#add-expense input[name='title']");
+        if (el instanceof HTMLElement) el.focus();
+      });
+    }
   } catch (e) {
     /* ignore */
   }
@@ -1104,131 +1742,203 @@ window.addEventListener("load", () => {
 
   /** One fetch per trip (sidebar + mobile each render tripMembersPanel; parallel POSTs broke SQLite / raced). */
   const inviteLinkPromiseByTrip = new Map();
-  const inviteRootsByTrip = new Map();
-  document.querySelectorAll("[data-trip-invite-methods]").forEach((root) => {
-    const tripId = root.getAttribute("data-trip-id");
-    if (!tripId) return;
-    if (!inviteRootsByTrip.has(tripId)) inviteRootsByTrip.set(tripId, []);
-    inviteRootsByTrip.get(tripId).push(root);
-  });
-
-  inviteRootsByTrip.forEach((roots, tripId) => {
-    const csrf = roots[0].getAttribute("data-csrf");
-    if (!csrf) return;
-
-    const allLinkInputs = () =>
-      roots.map((r) => r.querySelector(".sidebar-invite-link-url")).filter(Boolean);
-
-    const requestInviteLink = () => {
-      let p = inviteLinkPromiseByTrip.get(tripId);
-      if (p) return p;
-      const fd = new FormData();
-      fd.set("csrf_token", csrf);
-      p = fetch(`/trips/${encodeURIComponent(tripId)}/invite-link`, {
-        method: "POST",
-        body: fd,
-        headers: {
-          "X-Requested-With": "XMLHttpRequest",
-          Accept: "application/json"
-        }
-      })
-        .then((res) => {
-          if (!res.ok) {
-            return res.text().then((txt) => {
-              throw new Error(txt || res.statusText);
-            });
-          }
-          return res.json();
-        })
-        .then((data) => {
-          if (data && data.url) {
-            allLinkInputs().forEach((input) => {
-              input.value = data.url;
-            });
-          }
-        })
-        .catch(() => {
-          inviteLinkPromiseByTrip.delete(tripId);
-          if (typeof window.remiShowToast === "function") {
-            window.remiShowToast("Could not create invite link. Try again.");
-          }
-        });
-      inviteLinkPromiseByTrip.set(tripId, p);
-      return p;
-    };
-
-    roots.forEach((root) => {
-      const tabs = root.querySelectorAll("[data-invite-tab]");
-      const panels = root.querySelectorAll("[data-invite-panel]");
-      const linkInput = root.querySelector(".sidebar-invite-link-url");
-
-      const showPanel = (name) => {
-        panels.forEach((p) => {
-          const on = p.getAttribute("data-invite-panel") === name;
-          p.classList.toggle("hidden", !on);
-          if (on) {
-            p.removeAttribute("hidden");
-          } else {
-            p.setAttribute("hidden", "true");
-          }
-        });
-        tabs.forEach((t) => {
-          const sel = t.getAttribute("data-invite-tab") === name;
-          t.setAttribute("aria-selected", sel ? "true" : "false");
-          t.classList.toggle("sidebar-invite-tab--active", sel);
-        });
-        if (name === "link") {
-          requestInviteLink();
-        }
-      };
-
-      tabs.forEach((tab) => {
-        tab.addEventListener("click", () => {
-          showPanel(tab.getAttribute("data-invite-tab") || "email");
-        });
-      });
-
-      if (tabs.length === 0) {
-        showPanel("link");
-      }
-
-      const copyInviteLink = () => {
-        if (!(linkInput instanceof HTMLInputElement)) return;
-        const v = (linkInput.value || "").trim();
-        if (!v) {
-          if (typeof window.remiShowToast === "function") {
-            window.remiShowToast("Wait for the invite link to load, then try again.");
-          }
-          return;
-        }
-        navigator.clipboard.writeText(v).then(
-          () => {
-            if (typeof window.remiShowToast === "function") {
-              window.remiShowToast("Invite link copied.");
-            }
-          },
-          () => {
-            if (typeof window.remiShowToast === "function") {
-              window.remiShowToast("Could not copy. Select the URL and copy manually.");
-            }
-          }
-        );
-      };
-
-      const linkFieldWrap = root.querySelector(".sidebar-invite-link-field");
-      if (linkFieldWrap && linkInput) {
-        linkFieldWrap.addEventListener("click", () => {
-          copyInviteLink();
-        });
-        if (linkInput instanceof HTMLInputElement) {
-          linkInput.addEventListener("click", (e) => {
-            e.preventDefault();
-            copyInviteLink();
-          });
-        }
-      }
+  const inviteLinkValueByTrip = new Map();
+  const inviteLinkStorageKey = (tripId) => `remiInviteLink:${String(tripId || "").trim()}`;
+  const readInviteLinkCache = (tripId) => {
+    const key = inviteLinkStorageKey(tripId);
+    if (!key || typeof window.sessionStorage === "undefined") return "";
+    try {
+      return String(window.sessionStorage.getItem(key) || "").trim();
+    } catch (e) {
+      return "";
+    }
+  };
+  const writeInviteLinkCache = (tripId, url) => {
+    const key = inviteLinkStorageKey(tripId);
+    const value = String(url || "").trim();
+    if (!key || !value || typeof window.sessionStorage === "undefined") return;
+    try {
+      window.sessionStorage.setItem(key, value);
+    } catch (e) {
+      /* ignore cache failures */
+    }
+  };
+  const collectInviteRootsByTrip = (scope) => {
+    const rootMap = new Map();
+    const base =
+      scope instanceof HTMLElement || scope instanceof Document ? scope : document;
+    base.querySelectorAll("[data-trip-invite-methods]").forEach((root) => {
+      const tripId = String(root.getAttribute("data-trip-id") || "").trim();
+      if (!tripId) return;
+      if (!rootMap.has(tripId)) rootMap.set(tripId, []);
+      rootMap.get(tripId).push(root);
     });
-  });
+    return rootMap;
+  };
+  const initTripInviteMethodsIn = (scope = document) => {
+    const inviteRootsByTrip = collectInviteRootsByTrip(scope);
+    inviteRootsByTrip.forEach((roots, tripId) => {
+      const csrf = String(roots[0]?.getAttribute("data-csrf") || "").trim();
+      if (!csrf) return;
+      const allLinkInputs = () =>
+        roots
+          .map((r) => r.querySelector(".sidebar-invite-link-url"))
+          .filter((input) => input instanceof HTMLInputElement);
+      const applyInviteLinkValue = (url) => {
+        const value = String(url || "").trim();
+        if (!value) return;
+        inviteLinkValueByTrip.set(tripId, value);
+        writeInviteLinkCache(tripId, value);
+        allLinkInputs().forEach((input) => {
+          input.value = value;
+        });
+      };
+      const cachedUrl =
+        inviteLinkValueByTrip.get(tripId) || readInviteLinkCache(tripId);
+      if (cachedUrl) {
+        applyInviteLinkValue(cachedUrl);
+      }
+      const requestInviteLink = () => {
+        const existingUrl =
+          inviteLinkValueByTrip.get(tripId) || readInviteLinkCache(tripId);
+        if (existingUrl) {
+          applyInviteLinkValue(existingUrl);
+          return Promise.resolve(existingUrl);
+        }
+        let p = inviteLinkPromiseByTrip.get(tripId);
+        if (p) return p;
+        const fd = new FormData();
+        fd.set("csrf_token", csrf);
+        p = fetch(`/trips/${encodeURIComponent(tripId)}/invite-link`, {
+          method: "POST",
+          body: fd,
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+            Accept: "application/json"
+          }
+        })
+          .then((res) => {
+            if (!res.ok) {
+              return res.text().then((txt) => {
+                throw new Error(txt || res.statusText);
+              });
+            }
+            return res.json();
+          })
+          .then((data) => {
+            const url = String(data?.url || "").trim();
+            if (url) {
+              applyInviteLinkValue(url);
+            }
+            return url;
+          })
+          .catch(() => {
+            inviteLinkPromiseByTrip.delete(tripId);
+            if (typeof window.remiShowToast === "function") {
+              window.remiShowToast("Could not create invite link. Try again.");
+            }
+            return "";
+          });
+        inviteLinkPromiseByTrip.set(tripId, p);
+        return p;
+      };
+
+      roots.forEach((root) => {
+        if (!(root instanceof HTMLElement)) return;
+        const tabs = root.querySelectorAll("[data-invite-tab]");
+        const panels = root.querySelectorAll("[data-invite-panel]");
+        const linkInput = root.querySelector(".sidebar-invite-link-url");
+
+        const showPanel = (name) => {
+          panels.forEach((p) => {
+            const on = p.getAttribute("data-invite-panel") === name;
+            p.classList.toggle("hidden", !on);
+            if (on) {
+              p.removeAttribute("hidden");
+            } else {
+              p.setAttribute("hidden", "true");
+            }
+          });
+          tabs.forEach((t) => {
+            const sel = t.getAttribute("data-invite-tab") === name;
+            t.setAttribute("aria-selected", sel ? "true" : "false");
+            t.classList.toggle("sidebar-invite-tab--active", sel);
+          });
+          if (name === "link") {
+            const knownUrl =
+              inviteLinkValueByTrip.get(tripId) || readInviteLinkCache(tripId);
+            if (knownUrl) {
+              applyInviteLinkValue(knownUrl);
+              return;
+            }
+            requestInviteLink();
+          }
+        };
+
+        if (root.dataset.remiInviteMethodsBound !== "1") {
+          tabs.forEach((tab) => {
+            tab.addEventListener("click", () => {
+              showPanel(tab.getAttribute("data-invite-tab") || "email");
+            });
+          });
+
+          const copyInviteLink = () => {
+            if (!(linkInput instanceof HTMLInputElement)) return;
+            const v = (linkInput.value || "").trim();
+            if (!v) {
+              requestInviteLink().then((freshUrl) => {
+                if (freshUrl) {
+                  try {
+                    navigator.clipboard.writeText(freshUrl);
+                    if (typeof window.remiShowToast === "function") {
+                      window.remiShowToast("Invite link copied.");
+                    }
+                  } catch (e) {
+                    if (typeof window.remiShowToast === "function") {
+                      window.remiShowToast("Could not copy. Select the URL and copy manually.");
+                    }
+                  }
+                }
+              });
+              return;
+            }
+            navigator.clipboard.writeText(v).then(
+              () => {
+                if (typeof window.remiShowToast === "function") {
+                  window.remiShowToast("Invite link copied.");
+                }
+              },
+              () => {
+                if (typeof window.remiShowToast === "function") {
+                  window.remiShowToast("Could not copy. Select the URL and copy manually.");
+                }
+              }
+            );
+          };
+
+          const linkFieldWrap = root.querySelector(".sidebar-invite-link-field");
+          if (linkFieldWrap && linkInput) {
+            linkFieldWrap.addEventListener("click", () => {
+              copyInviteLink();
+            });
+            if (linkInput instanceof HTMLInputElement) {
+              linkInput.addEventListener("click", (e) => {
+                e.preventDefault();
+                copyInviteLink();
+              });
+            }
+          }
+          root.dataset.remiInviteMethodsBound = "1";
+        }
+
+        if (tabs.length === 0) {
+          showPanel("link");
+        }
+      });
+    });
+  };
+  window.remiInitTripInviteMethodsIn = initTripInviteMethodsIn;
+  initTripInviteMethodsIn(document);
 
   document.querySelectorAll("[data-remi-tap-copy]").forEach((root) => {
     if (root.closest("[data-trip-invite-methods]")) return;
@@ -1694,6 +2404,912 @@ window.addEventListener("load", () => {
     itinerarySearchInput.addEventListener("search", applyItinerarySearch);
     // Sync filter state on load (e.g. bfcache restore, autofill) so day groups are not stuck hidden.
     applyItinerarySearch();
+  }
+
+  const tripCalendarRoot = document.querySelector("[data-itinerary-calendar-root]");
+  if (tripCalendarRoot) {
+    const listPanel = tripCalendarRoot.querySelector("[data-itinerary-list-panel]");
+    const calendarPanels = tripCalendarRoot.querySelector("[data-itinerary-calendar-panels]");
+    const dayView = tripCalendarRoot.querySelector("[data-itinerary-day-view]");
+    const weekView = tripCalendarRoot.querySelector("[data-itinerary-week-view]");
+    const toolbar = tripCalendarRoot.querySelector("[data-itinerary-calendar-toolbar]");
+    const rangeLabel = tripCalendarRoot.querySelector("[data-itinerary-range-label]");
+    const tripID = (tripCalendarRoot.getAttribute("data-trip-id") || "").trim();
+    const tripStartRaw = (tripCalendarRoot.getAttribute("data-trip-start") || "").trim();
+    const tripEndRaw = (tripCalendarRoot.getAttribute("data-trip-end") || "").trim();
+    const quickEditModal = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-modal]");
+    const quickEditBody = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-body]");
+    const quickEditTitle = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-title]");
+    const desktopCalFlyout = document.querySelector("[data-desktop-calendar-flyout]");
+    const desktopCalFlyoutLabel = desktopCalFlyout?.querySelector("[data-desktop-calendar-flyout-label]");
+    const quickAddState = { date: "", startMin: 8 * 60 };
+    if (listPanel && calendarPanels && dayView && weekView && toolbar && rangeLabel && tripStartRaw && tripEndRaw) {
+      const PX_PER_MIN = 1.2;
+      const DAY_MINUTES = 24 * 60;
+      const state = {
+        view: "list",
+        weekOffset: 0,
+        overrides: new Map(),
+        dragOverCol: null,
+        dragHintEl: null,
+        dragHintMinute: null,
+        resizeState: null,
+        weekScrollTop: 0,
+        dayScrollTop: 0,
+        since: "",
+        selectedDate: tripStartRaw,
+        lastDragEndAt: 0
+      };
+      const toDate = (iso) => {
+        const p = new Date(`${iso}T00:00:00`);
+        return Number.isNaN(p.getTime()) ? null : p;
+      };
+      const pad2 = (v) => String(v).padStart(2, "0");
+      /** YYYY-MM-DD for the user's local calendar day (not UTC — toISOString would shift columns vs headers). */
+      const fmtDate = (d) => {
+        if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+        return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      };
+      const toTime = (mins) => `${pad2(Math.floor(mins / 60) % 24)}:${pad2(mins % 60)}`;
+      const parseTime = (raw) => {
+        const s = String(raw || "").trim();
+        const m = s.match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
+        if (!m) return null;
+        let h = parseInt(m[1], 10);
+        const min = parseInt(m[2], 10);
+        const ap = (m[3] || "").toUpperCase();
+        if (ap) {
+          if (h === 12) h = 0;
+          if (ap === "PM") h += 12;
+        }
+        if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+        return h * 60 + min;
+      };
+      const parseDateTimeLocal = (raw) => {
+        const d = new Date(raw);
+        return Number.isNaN(d.getTime()) ? null : d;
+      };
+      const toDateTimeLocal = (d) => `${fmtDate(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      const addMinutes = (dt, mins) => new Date(dt.getTime() + mins * 60000);
+      const dateInRange = (iso) => {
+        if (!iso) return false;
+        return iso >= tripStartRaw && iso <= tripEndRaw;
+      };
+      const toDayOffset = (iso) => {
+        const d = toDate(iso);
+        if (!d || !startDate) return 0;
+        return Math.floor((d - startDate) / 86400000);
+      };
+      const clampISO = (iso) => {
+        if (!iso) return tripStartRaw;
+        if (iso < tripStartRaw) return tripStartRaw;
+        if (iso > tripEndRaw) return tripEndRaw;
+        return iso;
+      };
+      const shiftISO = (iso, days) => {
+        const base = toDate(iso) || toDate(tripStartRaw) || new Date();
+        base.setDate(base.getDate() + days);
+        return fmtDate(base);
+      };
+      const syncWeekOffsetFromSelectedDate = () => {
+        const dayOffset = Math.max(0, Math.min(totalTripDays - 1, toDayOffset(state.selectedDate)));
+        state.weekOffset = Math.floor(dayOffset / 7) * 7;
+      };
+      const startDate = toDate(tripStartRaw);
+      const endDate = toDate(tripEndRaw);
+      const totalTripDays = startDate && endDate && startDate <= endDate
+        ? Math.floor((endDate - startDate) / 86400000) + 1
+        : 1;
+      if (!startDate || !endDate || startDate > endDate) {
+        // Skip calendar render only; keep the rest of app.js behavior alive.
+      } else {
+      const todayISO = fmtDate(new Date());
+      if (todayISO >= tripStartRaw && todayISO <= tripEndRaw) {
+        state.selectedDate = todayISO;
+      }
+      syncWeekOffsetFromSelectedDate();
+      const inferRole = (entry) => {
+        const t = (entry.title || "").toLowerCase();
+        if (t.includes("depart")) return "depart";
+        if (t.includes("arrive")) return "arrive";
+        if (t.includes("check-out")) return "checkout";
+        if (t.includes("check in") || t.includes("check-in")) return "checkin";
+        if (t.includes("drop-off")) return "dropoff";
+        if (t.includes("pick-up") || t.includes("pickup")) return "pickup";
+        return "single";
+      };
+      const bookingPairFields = (category) => {
+        if (category === "flight") return { startField: "depart_at", endField: "arrive_at", primaryRole: "depart", secondaryRole: "arrive" };
+        if (category === "vehicle") return { startField: "pick_up_at", endField: "drop_off_at", primaryRole: "pickup", secondaryRole: "dropoff" };
+        if (category === "accommodation") return { startField: "check_in_at", endField: "check_out_at", primaryRole: "checkin", secondaryRole: "checkout" };
+        return null;
+      };
+      const parseBookingWindow = (form, category) => {
+        const pair = bookingPairFields(category);
+        if (!form || !pair) return null;
+        const startAt = parseDateTimeLocal(form.querySelector(`input[name='${pair.startField}']`)?.value || "");
+        const endAt = parseDateTimeLocal(form.querySelector(`input[name='${pair.endField}']`)?.value || "");
+        if (!startAt || !endAt) return null;
+        let s = startAt;
+        let e = endAt;
+        if (e <= s) {
+          const fallback = new Date(s.getTime() + 60 * 60000);
+          e = fallback;
+        }
+        return { ...pair, startAt: s, endAt: e };
+      };
+      const parseEventRows = () =>
+        Array.from(listPanel.querySelectorAll(".timeline-item[data-itinerary-item-id]")).map((row) => {
+          const itemID = (row.getAttribute("data-itinerary-item-id") || "").trim();
+          const dayGroup = row.closest(".day-group");
+          const date = (dayGroup?.getAttribute("data-date") || "").trim();
+          const view = row.querySelector(".itinerary-item-view");
+          const title = (view?.querySelector("strong")?.textContent || "Stop").trim();
+          const markerKind = (row.getAttribute("data-marker-kind") || "stop").trim() || "stop";
+          let form = row.querySelector(`form#itinerary-edit-${CSS.escape(itemID)}`);
+          let category = "stop";
+          if (!form) {
+            form = row.querySelector(`form#accommodation-itinerary-edit-${CSS.escape(itemID)}`);
+            if (form) category = "accommodation";
+          }
+          if (!form) {
+            form = row.querySelector(`form#vehicle-rental-itinerary-edit-${CSS.escape(itemID)}`);
+            if (form) category = "vehicle";
+          }
+          if (!form) {
+            form = row.querySelector(`form#flight-itinerary-edit-${CSS.escape(itemID)}`);
+            if (form) category = "flight";
+          }
+          let startMin = 8 * 60;
+          let endMin = 9 * 60;
+          if (form && category === "stop") {
+            const s = parseTime(form.querySelector("input[name='start_time']")?.value || "");
+            const e = parseTime(form.querySelector("input[name='end_time']")?.value || "");
+            if (s !== null) startMin = s;
+            endMin = e !== null ? e : startMin + 60;
+          } else {
+            const meta = (view?.querySelector(".meta")?.textContent || "").trim();
+            const bits = meta.split("-").map((s) => s.trim()).filter(Boolean);
+            const first = parseTime(bits[0] || "");
+            const second = parseTime(bits[1] || "");
+            if (first !== null) startMin = first;
+            endMin = second !== null ? second : startMin + 60;
+          }
+          if (endMin <= startMin) endMin = Math.min(DAY_MINUTES, startMin + 60);
+          const role = inferRole({ title });
+          const bookingWindow = parseBookingWindow(form, category);
+          if (bookingWindow && role === bookingWindow.secondaryRole) {
+            // Secondary leg is rendered through the primary card as a spanning duration.
+            return null;
+          }
+          return {
+            itemID, date, startMin, endMin, form, category, markerKind, title,
+            role, row,
+            pairedSpan: Boolean(bookingWindow),
+            pairedStartField: bookingWindow?.startField || "",
+            pairedEndField: bookingWindow?.endField || "",
+            pairedStartAt: bookingWindow?.startAt || null,
+            pairedEndAt: bookingWindow?.endAt || null
+          };
+        }).filter((e) => e && e.itemID && e.date && e.form);
+      const expandRenderableEntries = (baseEntries) => {
+        const out = [];
+        baseEntries.forEach((e) => {
+          if (!e.pairedSpan || !e.pairedStartAt || !e.pairedEndAt) {
+            out.push({ ...e, sourceItemID: e.itemID, segmentStartAt: new Date(`${e.date}T${toTime(e.startMin)}`) });
+            return;
+          }
+          const clipStart = new Date(Math.max(e.pairedStartAt.getTime(), startDate.getTime()));
+          const clipEnd = new Date(Math.min(e.pairedEndAt.getTime(), endDate.getTime() + 24 * 60 * 60000));
+          const cur = new Date(`${fmtDate(clipStart)}T00:00:00`);
+          const last = new Date(`${fmtDate(clipEnd)}T00:00:00`);
+          while (cur <= last) {
+            const key = fmtDate(cur);
+            const dayStart = new Date(`${key}T00:00:00`);
+            const dayEnd = new Date(dayStart);
+            dayEnd.setDate(dayEnd.getDate() + 1);
+            const segStart = new Date(Math.max(e.pairedStartAt.getTime(), dayStart.getTime()));
+            const segEnd = new Date(Math.min(e.pairedEndAt.getTime(), dayEnd.getTime()));
+            if (segEnd > segStart && key >= tripStartRaw && key <= tripEndRaw) {
+              const startMin = segStart.getHours() * 60 + segStart.getMinutes();
+              let endMin = segEnd.getHours() * 60 + segEnd.getMinutes();
+              if (endMin <= startMin) endMin = DAY_MINUTES;
+              out.push({
+                ...e,
+                itemID: `${e.itemID}::${key}`,
+                sourceItemID: e.itemID,
+                date: key,
+                startMin,
+                endMin: Math.max(startMin + 15, endMin),
+                segmentStartAt: segStart
+              });
+            }
+            cur.setDate(cur.getDate() + 1);
+          }
+        });
+        return out;
+      };
+      const getRenderableEntries = () =>
+        expandRenderableEntries(parseEventRows()).map((e) => ({ ...e, ...(state.overrides.get(e.itemID) || {}) }));
+      const weekDates = () => {
+        const out = [];
+        const weekStart = new Date(startDate);
+        weekStart.setDate(weekStart.getDate() + state.weekOffset);
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(weekStart);
+          d.setDate(weekStart.getDate() + i);
+          if (d > endDate) break;
+          out.push(d);
+        }
+        return out;
+      };
+      const applyCollisionOffsets = (entries) => {
+        const sorted = [...entries].sort((a, b) => (a.startMin - b.startMin) || (a.endMin - b.endMin));
+        const groups = [];
+        let group = [];
+        let groupEnd = -1;
+        sorted.forEach((e) => {
+          if (!group.length || e.startMin < groupEnd) {
+            group.push(e);
+            groupEnd = Math.max(groupEnd, e.endMin);
+          } else {
+            groups.push(group);
+            group = [e];
+            groupEnd = e.endMin;
+          }
+        });
+        if (group.length) groups.push(group);
+        groups.forEach((g) => {
+          const lanes = [];
+          g.forEach((e) => {
+            let lane = 0;
+            while (lane < lanes.length && lanes[lane] > e.startMin) lane++;
+            lanes[lane] = e.endMin;
+            e.lane = lane;
+            e.laneCount = Math.max(1, lanes.length);
+          });
+          const count = Math.max(1, lanes.length);
+          g.forEach((e) => { e.laneCount = count; });
+        });
+      };
+      const submitFormAjax = async (form) => {
+        const formData = new FormData(form);
+        const hasFileInput = Boolean(form.querySelector("input[type='file']"));
+        const isMultipart = (form.enctype || "").toLowerCase().includes("multipart/form-data") || hasFileInput;
+        const body = isMultipart ? formData : new URLSearchParams(formData);
+        const headers = { "X-Requested-With": "XMLHttpRequest", Accept: "application/json" };
+        if (!isMultipart) headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
+        const res = await fetch(form.action, { method: (form.method || "POST").toUpperCase(), headers, body });
+        if (!res.ok) throw new Error((await res.text()).trim() || "Unable to save right now.");
+      };
+      const setField = (form, name, value) => {
+        const target = form.querySelector(`input.remi-datetime-iso[name='${name}'], input.remi-date-iso[name='${name}'], input.remi-time-iso[name='${name}'], input[name='${name}']`);
+        if (!target) return;
+        target.value = value;
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      const linkedFieldForEntry = (entry) => {
+        if (!entry) return "";
+        if (entry.category === "flight") {
+          if (entry.role === "depart") return "depart_at";
+          if (entry.role === "arrive") return "arrive_at";
+        }
+        if (entry.category === "vehicle") {
+          if (entry.role === "pickup") return "pick_up_at";
+          if (entry.role === "dropoff") return "drop_off_at";
+        }
+        if (entry.category === "accommodation") {
+          if (entry.role === "checkin") return "check_in_at";
+          if (entry.role === "checkout") return "check_out_at";
+        }
+        return "";
+      };
+      const applyResizeToForm = (entry, nextDate, nextStart, nextEnd, edge) => {
+        if (entry.category === "stop") {
+          setField(entry.form, "itinerary_date", nextDate);
+          setField(entry.form, "start_time", toTime(nextStart));
+          setField(entry.form, "end_time", toTime(nextEnd));
+          return;
+        }
+        if (entry.pairedSpan && entry.pairedStartField && entry.pairedEndField) {
+          const nextDT = toDateTimeLocal(new Date(`${nextDate}T${toTime(edge === "start" ? nextStart : nextEnd)}`));
+          if (edge === "start") setField(entry.form, entry.pairedStartField, nextDT);
+          else setField(entry.form, entry.pairedEndField, nextDT);
+          return;
+        }
+        const singleField = linkedFieldForEntry(entry);
+        if (singleField) {
+          setField(entry.form, singleField, toDateTimeLocal(new Date(`${nextDate}T${toTime(edge === "start" ? nextStart : nextEnd)}`)));
+        }
+      };
+      const closeDesktopFlyout = () => {
+        if (!desktopCalFlyout) return;
+        desktopCalFlyout.classList.add("hidden");
+        desktopCalFlyout.setAttribute("aria-hidden", "true");
+        desktopCalFlyout.classList.remove("is-expanded");
+      };
+      const setDesktopFlyoutExpanded = (expanded) => {
+        if (!desktopCalFlyout) return;
+        desktopCalFlyout.classList.toggle("is-expanded", expanded);
+      };
+      const openDesktopFlyout = (date, startMin, clientX, clientY) => {
+        if (!desktopCalFlyout) return;
+        quickAddState.date = date;
+        quickAddState.startMin = startMin;
+        setDesktopFlyoutExpanded(true);
+        if (desktopCalFlyoutLabel) {
+          const d = new Date(`${date}T00:00:00`);
+          desktopCalFlyoutLabel.textContent = `Quick add: ${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} at ${toTime(startMin)}`;
+        }
+        desktopCalFlyout.classList.remove("hidden");
+        desktopCalFlyout.setAttribute("aria-hidden", "false");
+        if (typeof clientX === "number" && typeof clientY === "number") {
+          const placeNearPointer = () => {
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const pad = 12;
+            const rect = desktopCalFlyout.getBoundingClientRect();
+            const width = rect.width || 300;
+            const height = rect.height || 200;
+            const left = Math.max(pad, Math.min(vw - width - pad, clientX + 12));
+            const top = Math.max(pad, Math.min(vh - height - pad, clientY + 12));
+            desktopCalFlyout.style.left = `${left}px`;
+            desktopCalFlyout.style.top = `${top}px`;
+            desktopCalFlyout.style.right = "auto";
+            desktopCalFlyout.style.bottom = "auto";
+          };
+          placeNearPointer();
+          requestAnimationFrame(placeNearPointer);
+        }
+      };
+      const focusFormField = (form) => {
+        if (!form) return;
+        const first = form.querySelector("input[type='text'], input[type='search'], input:not([type='hidden']), textarea, select");
+        first?.focus?.();
+      };
+      const findAddForm = (kind) => {
+        const forms = Array.from(document.querySelectorAll("form[action]"));
+        const matches = forms.filter((f) => {
+          const action = (f.getAttribute("action") || "");
+          if (action.includes("/update")) return false;
+          if (kind === "stop") return action.includes("/itinerary");
+          if (kind === "accommodation") return action.includes("/accommodation");
+          if (kind === "vehicle") return action.includes("/vehicle-rental");
+          if (kind === "flight") return action.includes("/flights");
+          return false;
+        });
+        return matches.find((f) => !f.closest(".mobile-sheet")) || matches[0] || null;
+      };
+      const sheetFormForKindOnDesktop = (kind) => {
+        if (window.innerWidth <= 920 || !document.querySelector("main.trip-details-page")) return null;
+        const id =
+          kind === "stop"
+            ? "mobile-sheet-stop"
+            : kind === "accommodation"
+              ? "mobile-sheet-accommodation"
+              : kind === "vehicle"
+                ? "mobile-sheet-vehicle"
+                : kind === "flight"
+                  ? "mobile-sheet-flight"
+                  : "";
+        if (!id) return null;
+        const sheet = document.getElementById(id);
+        return sheet?.querySelector("form[action]") || null;
+      };
+      const showTripQuickSheetPanel = (sheetEl) => {
+        if (!sheetEl) return;
+        document.querySelectorAll(".mobile-sheet").forEach((s) => {
+          s.classList.add("hidden");
+          s.setAttribute("aria-hidden", "true");
+        });
+        const bd = document.querySelector("[data-mobile-sheet-backdrop]");
+        sheetEl.classList.remove("hidden");
+        sheetEl.setAttribute("aria-hidden", "false");
+        if (bd) bd.classList.remove("hidden");
+      };
+      const prefillAddForm = (kind) => {
+        const date = quickAddState.date || tripStartRaw;
+        const startMin = quickAddState.startMin ?? (8 * 60);
+        const startDT = new Date(`${date}T${toTime(startMin)}`);
+        const form = sheetFormForKindOnDesktop(kind) || findAddForm(kind);
+        if (!form) return;
+        if (kind === "stop") {
+          setField(form, "itinerary_date", date);
+          setField(form, "start_time", toTime(startMin));
+          setField(form, "end_time", toTime(Math.min(DAY_MINUTES, startMin + 60)));
+        } else if (kind === "flight") {
+          setField(form, "depart_at", toDateTimeLocal(startDT));
+          setField(form, "arrive_at", toDateTimeLocal(addMinutes(startDT, 90)));
+        } else if (kind === "vehicle") {
+          setField(form, "pick_up_at", toDateTimeLocal(startDT));
+          setField(form, "drop_off_at", toDateTimeLocal(addMinutes(startDT, 120)));
+        } else if (kind === "accommodation") {
+          const out = new Date(startDT);
+          out.setDate(out.getDate() + 1);
+          setField(form, "check_in_at", toDateTimeLocal(startDT));
+          setField(form, "check_out_at", toDateTimeLocal(out));
+        }
+        const mobileSheet = form.closest(".mobile-sheet");
+        const onTripDesktop =
+          !!document.querySelector("main.trip-details-page") && window.innerWidth > 920 && mobileSheet;
+        if (mobileSheet) {
+          if (onTripDesktop) {
+            showTripQuickSheetPanel(mobileSheet);
+            window.setTimeout(() => focusFormField(form), 60);
+          } else {
+            const sheetId = mobileSheet.getAttribute("id");
+            if (sheetId) {
+              const opener = document.querySelector(`[data-mobile-sheet-open="${sheetId}"]`);
+              if (opener instanceof HTMLElement) opener.click();
+            }
+            window.setTimeout(() => {
+              mobileSheet.classList.remove("hidden");
+              mobileSheet.setAttribute("aria-hidden", "false");
+              focusFormField(form);
+            }, 40);
+          }
+        } else {
+          form.scrollIntoView({ behavior: "smooth", block: "center" });
+          window.setTimeout(() => focusFormField(form), 260);
+        }
+      };
+      const syncWeekHeaderAlignment = () => {
+        const head = weekView.querySelector(".trip-itinerary-week-head");
+        const body = weekView.querySelector(".trip-itinerary-week-body");
+        if (!head || !body) return;
+        const gutter = Math.max(0, body.offsetWidth - body.clientWidth);
+        head.style.paddingRight = `${gutter}px`;
+      };
+      const renderCalendar = () => {
+        const prevWeekSurface = weekView.querySelector("[data-itinerary-scroll-surface]");
+        const prevDaySurface = dayView.querySelector("[data-itinerary-scroll-surface]");
+        if (prevWeekSurface) state.weekScrollTop = prevWeekSurface.scrollTop;
+        if (prevDaySurface) state.dayScrollTop = prevDaySurface.scrollTop;
+        // Day view navigates by calendar day; weekOffset must include selectedDate or render snaps
+        // selectedDate back to the first column and Prev/Next appear broken.
+        if (state.view === "day") {
+          syncWeekOffsetFromSelectedDate();
+        }
+        const entries = getRenderableEntries();
+        const wDates = weekDates();
+        const visibleCols = Math.max(1, wDates.length);
+        const compactCols = visibleCols > 1 && visibleCols < 7;
+        const colDef = compactCols ? "minmax(0, 1fr)" : "minmax(120px, 1fr)";
+        const wf = wDates[0];
+        const wl = wDates[wDates.length - 1];
+        const selected = toDate(state.selectedDate);
+        rangeLabel.textContent = state.view === "day"
+          ? (selected
+            ? selected.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })
+            : "Today")
+          : (wf && wl
+            ? `${wf.toLocaleDateString(undefined, { month: "short", day: "numeric" })} - ${wl.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+            : "Week");
+        const hourLines = Array.from({ length: 25 }, (_, h) =>
+          `<div class="trip-itinerary-hour-line" style="top:${h * 60 * PX_PER_MIN}px"></div>`
+        ).join("");
+        const timeTicks = Array.from({ length: 24 }, (_, h) =>
+          `<span style="top:${h * 60 * PX_PER_MIN}px">${pad2(h)}:00</span>`
+        ).join("");
+        const weekCols = wDates.map((d) => {
+          const key = fmtDate(d);
+          const dayEntries = entries.filter((e) => e.date === key);
+          applyCollisionOffsets(dayEntries);
+          const cards = dayEntries.map((e) => {
+            const top = Math.max(0, e.startMin * PX_PER_MIN);
+            const h = Math.max(40, (e.endMin - e.startMin) * PX_PER_MIN);
+            const lane = e.lane || 0;
+            const laneCount = Math.max(1, e.laneCount || 1);
+            let laneStepPct = laneCount <= 5 ? 0.08 : 0.065;
+            if (laneCount > 1) {
+              laneStepPct = Math.min(laneStepPct, 0.52 / (laneCount - 1)); // keep at least ~48% width visible
+            }
+            const leftPct = laneCount > 1 ? lane * laneStepPct * 100 : 0;
+            const rightPct = laneCount > 1 ? (laneCount - lane - 1) * laneStepPct * 100 : 0;
+            const crowdedClass = laneCount >= 6 ? " is-crowded" : "";
+            return `<article class="trip-itinerary-entry${crowdedClass}" data-itinerary-drag-item="${e.itemID}" data-kind="${e.markerKind}" data-lane-count="${laneCount}" style="top:${top}px;height:${h}px;left:calc(6px + ${leftPct.toFixed(2)}%);right:calc(6px + ${rightPct.toFixed(2)}%)">
+              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--start" data-itinerary-resize-handle="start" aria-hidden="true"></span>
+              <strong class="trip-itinerary-entry__title">${e.title}</strong>
+              <span class="trip-itinerary-entry__meta"><span class="material-symbols-outlined" aria-hidden="true">${e.markerKind === "flight" ? "flight" : e.markerKind === "stay" ? "hotel" : e.markerKind === "vehicle" ? "directions_car" : "pin_drop"}</span>${toTime(e.startMin)} - ${toTime(e.endMin)}</span>
+              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--end" data-itinerary-resize-handle="end" aria-hidden="true"></span>
+            </article>`;
+          }).join("");
+          const selectedClass = state.selectedDate === key ? " is-selected" : "";
+          return `<div class="trip-itinerary-day-col${selectedClass}" data-itinerary-drop-date="${key}" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${hourLines}${cards}</div>`;
+        }).join("");
+        weekView.innerHTML = `<section class="trip-itinerary-calendar-grid${compactCols ? " is-compact-cols" : ""}">
+          <header class="trip-itinerary-week-head" style="grid-template-columns:56px repeat(${visibleCols}, ${colDef})"><div></div>${wDates.map((d) => {
+            const key = fmtDate(d);
+            const selected = state.selectedDate === key ? " is-selected" : "";
+            return `<div class="${selected}" data-itinerary-select-date="${key}">${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>`;
+          }).join("")}</header>
+          <div class="trip-itinerary-week-body" style="grid-template-columns:56px repeat(${visibleCols}, ${colDef})" data-itinerary-scroll-surface><aside class="trip-itinerary-time-col" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${timeTicks}</aside>${weekCols}</div>
+        </section>`;
+        let dayDate = state.selectedDate;
+        if (!wDates.some((d) => fmtDate(d) === dayDate)) {
+          dayDate = wDates[0] ? fmtDate(wDates[0]) : tripStartRaw;
+        }
+        state.selectedDate = dayDate;
+        const dayEntries = entries.filter((e) => e.date === dayDate);
+        applyCollisionOffsets(dayEntries);
+        dayView.innerHTML = `<section class="trip-itinerary-day-wrap">
+          <header class="trip-itinerary-day-head"><strong>${new Date(`${dayDate}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</strong><small>Drag handles to adjust duration · tap an entry to edit</small></header>
+          <div class="trip-itinerary-day-body trip-itinerary-day-body--grid" data-itinerary-scroll-surface><aside class="trip-itinerary-time-col" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${timeTicks}</aside><div class="trip-itinerary-day-col trip-itinerary-day-col--single" data-itinerary-drop-date="${dayDate}" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${hourLines}${dayEntries.map((e) => {
+            const top = Math.max(0, e.startMin * PX_PER_MIN);
+            const h = Math.max(40, (e.endMin - e.startMin) * PX_PER_MIN);
+            const lane = e.lane || 0;
+            const laneCount = Math.max(1, e.laneCount || 1);
+            let laneStepPct = laneCount <= 5 ? 0.08 : 0.065;
+            if (laneCount > 1) {
+              laneStepPct = Math.min(laneStepPct, 0.52 / (laneCount - 1)); // keep at least ~48% width visible
+            }
+            const leftPct = laneCount > 1 ? lane * laneStepPct * 100 : 0;
+            const rightPct = laneCount > 1 ? (laneCount - lane - 1) * laneStepPct * 100 : 0;
+            const crowdedClass = laneCount >= 6 ? " is-crowded" : "";
+            return `<article class="trip-itinerary-entry${crowdedClass}" data-itinerary-drag-item="${e.itemID}" data-kind="${e.markerKind}" data-lane-count="${laneCount}" style="top:${top}px;height:${h}px;left:calc(6px + ${leftPct.toFixed(2)}%);right:calc(6px + ${rightPct.toFixed(2)}%)">
+              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--start" data-itinerary-resize-handle="start" aria-hidden="true"></span>
+              <strong class="trip-itinerary-entry__title">${e.title}</strong>
+              <span class="trip-itinerary-entry__meta"><span class="material-symbols-outlined" aria-hidden="true">${e.markerKind === "flight" ? "flight" : e.markerKind === "stay" ? "hotel" : e.markerKind === "vehicle" ? "directions_car" : "pin_drop"}</span>${toTime(e.startMin)} - ${toTime(e.endMin)}</span>
+              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--end" data-itinerary-resize-handle="end" aria-hidden="true"></span>
+            </article>`;
+          }).join("")}</div></div>
+        </section>`;
+        const nextWeekSurface = weekView.querySelector("[data-itinerary-scroll-surface]");
+        const nextDaySurface = dayView.querySelector("[data-itinerary-scroll-surface]");
+        if (nextWeekSurface) nextWeekSurface.scrollTop = state.weekScrollTop;
+        if (nextDaySurface) nextDaySurface.scrollTop = state.dayScrollTop;
+        syncWeekHeaderAlignment();
+      };
+      const toggleView = (view) => {
+        state.view = view;
+        tripCalendarRoot.querySelectorAll("[data-itinerary-view-toggle]").forEach((btn) => {
+          const on = btn.getAttribute("data-itinerary-view-toggle") === view;
+          btn.classList.toggle("is-active", on);
+          btn.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        const showCalendar = view !== "list";
+        listPanel.classList.toggle("hidden", showCalendar);
+        toolbar.classList.toggle("hidden", !showCalendar);
+        calendarPanels.classList.toggle("hidden", !showCalendar);
+        dayView.classList.toggle("hidden", view !== "day");
+        weekView.classList.toggle("hidden", view !== "week");
+        if (showCalendar) renderCalendar();
+      };
+      const onResizeCommit = async (entry, nextStart, nextEnd, edge, colEl) => {
+        const targetDate = entry.date;
+        if (!entry || !targetDate) return;
+        const rollback = { date: entry.date, startMin: entry.startMin, endMin: entry.endMin };
+        state.overrides.set(entry.itemID, { date: targetDate, startMin: nextStart, endMin: nextEnd });
+        renderCalendar();
+        applyResizeToForm(entry, targetDate, nextStart, nextEnd, edge);
+        try {
+          await submitFormAjax(entry.form);
+          await syncAllRenderedItineraryRows();
+          state.overrides.delete(entry.itemID);
+          renderCalendar();
+          showToast("Time updated.");
+        } catch (error) {
+          state.overrides.set(entry.itemID, rollback);
+          renderCalendar();
+          state.overrides.delete(entry.itemID);
+          showToast(error?.message || "Update failed. Reverted.");
+        } finally {
+          if (state.dragOverCol) state.dragOverCol.classList.remove("is-drop-target");
+          state.dragOverCol = null;
+          if (state.dragHintEl) {
+            state.dragHintEl.remove();
+            state.dragHintEl = null;
+          }
+          colEl?.classList.remove("is-drop-target");
+        }
+      };
+      const bindCalendarInteractions = () => {
+        if (desktopCalFlyout) {
+          desktopCalFlyout.querySelectorAll("[data-desktop-calendar-add]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const kind = btn.getAttribute("data-desktop-calendar-add") || "";
+              prefillAddForm(kind);
+              closeDesktopFlyout();
+            });
+          });
+          document.addEventListener("click", (event) => {
+            if (desktopCalFlyout.classList.contains("hidden")) return;
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            if (target.closest("[data-desktop-calendar-flyout]")) return;
+            if (target.closest("[data-itinerary-drop-date]")) return;
+            closeDesktopFlyout();
+          });
+          document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") closeDesktopFlyout();
+          });
+        }
+        const clearDropHint = () => {
+          if (state.dragHintEl) {
+            state.dragHintEl.remove();
+            state.dragHintEl = null;
+          }
+          state.dragHintMinute = null;
+        };
+        const updateDropHint = (col, rawY) => {
+          if (!col) {
+            clearDropHint();
+            return;
+          }
+          const snapped = Math.max(0, Math.min(DAY_MINUTES - 15, Math.round(rawY / PX_PER_MIN / 15) * 15));
+          const top = snapped * PX_PER_MIN;
+          if (!state.dragHintEl || state.dragHintEl.parentElement !== col) {
+            clearDropHint();
+            const hint = document.createElement("div");
+            hint.className = "trip-itinerary-drop-hint";
+            hint.innerHTML = '<span class="trip-itinerary-drop-hint__badge"></span>';
+            col.appendChild(hint);
+            state.dragHintEl = hint;
+          }
+          state.dragHintEl.style.top = `${top}px`;
+          const badge = state.dragHintEl.querySelector(".trip-itinerary-drop-hint__badge");
+          if (badge) badge.textContent = toTime(snapped);
+          if (state.dragHintMinute !== null && state.dragHintMinute !== snapped) {
+            state.dragHintEl.classList.remove("is-snap-pulse");
+            // Restart animation on every 15-min boundary crossing.
+            void state.dragHintEl.offsetWidth;
+            state.dragHintEl.classList.add("is-snap-pulse");
+          }
+          state.dragHintMinute = snapped;
+        };
+        tripCalendarRoot.querySelectorAll("[data-itinerary-view-toggle]").forEach((btn) => {
+          btn.addEventListener("click", () => toggleView(btn.getAttribute("data-itinerary-view-toggle") || "list"));
+        });
+        tripCalendarRoot.querySelectorAll("[data-itinerary-week-nav]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const mode = btn.getAttribute("data-itinerary-week-nav") || "";
+            if (mode === "today") {
+              const t = fmtDate(new Date());
+              state.selectedDate = clampISO(t);
+              syncWeekOffsetFromSelectedDate();
+              renderCalendar();
+              return;
+            }
+            const dir = mode === "next" ? 1 : -1;
+            if (state.view === "day") {
+              state.selectedDate = clampISO(shiftISO(state.selectedDate, dir));
+              syncWeekOffsetFromSelectedDate();
+              renderCalendar();
+              return;
+            }
+            const maxOffset = Math.max(0, Math.ceil(totalTripDays / 7) * 7 - 7);
+            state.weekOffset = Math.max(0, Math.min(maxOffset, state.weekOffset + dir * 7));
+            if (!dateInRange(state.selectedDate)) {
+              state.selectedDate = clampISO(state.selectedDate);
+            }
+            renderCalendar();
+          });
+        });
+        tripCalendarRoot.addEventListener("click", (e) => {
+          const dayBtn = e.target?.closest?.("[data-itinerary-select-date]");
+          if (!dayBtn) return;
+          state.selectedDate = dayBtn.getAttribute("data-itinerary-select-date") || state.selectedDate;
+          if (state.view !== "list") renderCalendar();
+        });
+        tripCalendarRoot.addEventListener("click", (e) => {
+          if (!desktopCalFlyout) return;
+          if (state.view === "list") return;
+          if (e.target?.closest?.("[data-itinerary-drag-item]")) return;
+          const col = e.target?.closest?.("[data-itinerary-drop-date]");
+          if (!col) return;
+          const date = col.getAttribute("data-itinerary-drop-date") || "";
+          if (!date) return;
+          const rect = col.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          const snapped = Math.max(0, Math.min(DAY_MINUTES - 15, Math.round(y / PX_PER_MIN / 15) * 15));
+          openDesktopFlyout(date, snapped, e.clientX, e.clientY);
+        });
+        const autoScrollDragSurface = (surface, clientY) => {
+          if (!surface) return;
+          const r = surface.getBoundingClientRect();
+          const edge = 64;
+          let dy = 0;
+          if (clientY < r.top + edge) dy = -18;
+          else if (clientY > r.bottom - edge) dy = 18;
+          if (dy !== 0) surface.scrollTop += dy;
+        };
+        const clearResizeState = () => {
+          const rs = state.resizeState;
+          if (!rs) return;
+          rs.card?.classList.remove("is-resizing");
+          if (rs.card) {
+            rs.card.style.top = rs.origTop || "";
+            rs.card.style.height = rs.origHeight || "";
+          }
+          state.resizeState = null;
+          clearDropHint();
+          if (state.dragOverCol) state.dragOverCol.classList.remove("is-drop-target");
+          state.dragOverCol = null;
+        };
+        tripCalendarRoot.addEventListener("pointerdown", (e) => {
+          closeDesktopFlyout();
+          const handle = e.target?.closest?.("[data-itinerary-resize-handle]");
+          if (!handle) return;
+          const card = handle.closest("[data-itinerary-drag-item]");
+          if (!card) return;
+          const itemID = card.getAttribute("data-itinerary-drag-item") || "";
+          const entry = getRenderableEntries().find((x) => x.itemID === itemID);
+          if (!entry) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const edge = handle.getAttribute("data-itinerary-resize-handle") === "start" ? "start" : "end";
+          state.resizeState = {
+            pointerId: e.pointerId,
+            card,
+            entry,
+            edge,
+            startY: e.clientY,
+            startMin: entry.startMin,
+            endMin: entry.endMin,
+            origTop: card.style.top,
+            origHeight: card.style.height
+          };
+          card.classList.add("is-resizing");
+          card.setPointerCapture?.(e.pointerId);
+          state.lastDragEndAt = Date.now();
+        }, { passive: false });
+        tripCalendarRoot.addEventListener("pointermove", (e) => {
+          const rs = state.resizeState;
+          if (!rs || rs.pointerId !== e.pointerId) return;
+          e.preventDefault();
+          const col = rs.card.closest("[data-itinerary-drop-date]");
+          if (!col) return;
+          const surface = col.closest("[data-itinerary-scroll-surface]");
+          autoScrollDragSurface(surface, e.clientY);
+          const delta = Math.round((e.clientY - rs.startY) / PX_PER_MIN / 15) * 15;
+          let nextStart = rs.startMin;
+          let nextEnd = rs.endMin;
+          if (rs.edge === "start") {
+            nextStart = Math.max(0, Math.min(nextEnd - 15, rs.startMin + delta));
+          } else {
+            nextEnd = Math.min(DAY_MINUTES, Math.max(nextStart + 15, rs.endMin + delta));
+          }
+          const topPx = nextStart * PX_PER_MIN;
+          const heightPx = Math.max(40, (nextEnd - nextStart) * PX_PER_MIN);
+          rs.nextStart = nextStart;
+          rs.nextEnd = nextEnd;
+          rs.card.style.top = `${topPx}px`;
+          rs.card.style.height = `${heightPx}px`;
+          state.dragOverCol = col;
+          col.classList.add("is-drop-target");
+          updateDropHint(col, rs.edge === "start" ? topPx : (nextEnd * PX_PER_MIN));
+          if (surface) {
+            if (surface === weekView.querySelector("[data-itinerary-scroll-surface]")) state.weekScrollTop = surface.scrollTop;
+            if (surface === dayView.querySelector("[data-itinerary-scroll-surface]")) state.dayScrollTop = surface.scrollTop;
+          }
+        }, { passive: false });
+        const finishPointerDrop = (e, cancelled) => {
+          const rs = state.resizeState;
+          if (!rs || rs.pointerId !== e.pointerId) return;
+          const col = rs.card.closest("[data-itinerary-drop-date]");
+          const hasChange = rs.nextStart !== undefined && rs.nextEnd !== undefined
+            && (rs.nextStart !== rs.startMin || rs.nextEnd !== rs.endMin);
+          const edge = rs.edge;
+          const entry = rs.entry;
+          const nextStart = rs.nextStart ?? rs.startMin;
+          const nextEnd = rs.nextEnd ?? rs.endMin;
+          clearResizeState();
+          if (!cancelled && hasChange) {
+            void onResizeCommit(entry, nextStart, nextEnd, edge, col);
+            state.lastDragEndAt = Date.now();
+            e.preventDefault();
+          }
+        };
+        tripCalendarRoot.addEventListener("pointerup", (e) => finishPointerDrop(e, false), { passive: false });
+        tripCalendarRoot.addEventListener("pointercancel", (e) => finishPointerDrop(e, true), { passive: true });
+        tripCalendarRoot.addEventListener("click", (e) => {
+          if (e.target?.closest?.("[data-itinerary-resize-handle]")) return;
+          const card = e.target?.closest?.("[data-itinerary-drag-item]");
+          if (!card || !quickEditModal || !quickEditBody) return;
+          if (Date.now() - state.lastDragEndAt < 180) return;
+          const entry = getRenderableEntries().find((x) => x.itemID === (card.getAttribute("data-itinerary-drag-item") || ""));
+          if (!entry) return;
+          const form = entry.form;
+          if (quickEditTitle) quickEditTitle.textContent = entry.title;
+          quickEditBody.innerHTML = "";
+          quickEditBody.appendChild(form);
+          form.classList.remove("hidden");
+          quickEditModal.classList.remove("hidden");
+          quickEditModal.setAttribute("aria-hidden", "false");
+          const closeModal = () => {
+            const row = entry.row;
+            if (row) row.appendChild(form);
+            form.classList.add("hidden");
+            quickEditModal.classList.add("hidden");
+            quickEditModal.setAttribute("aria-hidden", "true");
+          };
+          const onSubmit = async (ev) => {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            try {
+              await submitFormAjax(form);
+              await syncAllRenderedItineraryRows();
+              closeModal();
+              renderCalendar();
+              showToast("Changes saved.");
+            } catch (error) {
+              showToast(error?.message || "Unable to save right now.");
+            }
+          };
+          form.addEventListener("submit", onSubmit, { once: true, capture: true });
+          quickEditModal.querySelectorAll("[data-itinerary-quick-edit-close]").forEach((btn) => {
+            btn.addEventListener("click", closeModal, { once: true });
+          });
+        });
+      };
+      const startChangePolling = () => {
+        if (window.remiRealtimeTripSyncEnabled) return;
+        if (!tripID) return;
+        const POLL_BASE_MS = 8000;
+        const POLL_HIDDEN_MS = 20000;
+        const POLL_MAX_MS = 45000;
+        const POLL_BUSY_MS = 4000;
+        let pollFailures = 0;
+        let pollInFlight = false;
+        let pollTimer = null;
+        const schedule = (ms) => {
+          if (pollTimer) window.clearTimeout(pollTimer);
+          pollTimer = window.setTimeout(runPoll, Math.max(800, ms));
+        };
+        const nextDelay = () => {
+          if (document.hidden) return POLL_HIDDEN_MS;
+          if (pollFailures <= 0) return POLL_BASE_MS;
+          return Math.min(POLL_MAX_MS, POLL_BASE_MS * Math.pow(2, pollFailures));
+        };
+        const quickEditOpen = () =>
+          Boolean(quickEditModal) &&
+          !quickEditModal.classList.contains("hidden") &&
+          quickEditModal.getAttribute("aria-hidden") !== "true";
+        const runPoll = async () => {
+          if (pollInFlight) {
+            schedule(POLL_BUSY_MS);
+            return;
+          }
+          if (state.resizeState || quickEditOpen()) {
+            schedule(POLL_BUSY_MS);
+            return;
+          }
+          pollInFlight = true;
+          try {
+            const url = `/api/v1/trips/${encodeURIComponent(tripID)}/changes${state.since ? `?since=${encodeURIComponent(state.since)}` : ""}`;
+            const res = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
+            if (!res.ok) {
+              pollFailures = Math.min(5, pollFailures + 1);
+              return;
+            }
+            const body = await res.json();
+            const changes = Array.isArray(body?.changes) ? body.changes : [];
+            if (changes.length) {
+              const last = changes[changes.length - 1];
+              if (last?.changed_at) state.since = String(last.changed_at);
+              await syncAllRenderedItineraryRows();
+              if (state.view !== "list") renderCalendar();
+            }
+            pollFailures = 0;
+          } catch (e) {
+            pollFailures = Math.min(5, pollFailures + 1);
+          } finally {
+            pollInFlight = false;
+            schedule(nextDelay());
+          }
+        };
+        document.addEventListener("visibilitychange", () => {
+          if (!document.hidden) schedule(600);
+        });
+        schedule(POLL_BASE_MS);
+      };
+      bindCalendarInteractions();
+      renderCalendar();
+      window.addEventListener("resize", syncWeekHeaderAlignment);
+      startChangePolling();
+      toggleView("list");
+      }
+    }
   }
 
   const LOCATION_SUGGEST_CLIENT_CACHE_MAX = 200;
@@ -2257,6 +3873,20 @@ window.addEventListener("load", () => {
         }
         return;
       }
+      const quickEditBodyEl = document.querySelector("[data-itinerary-quick-edit-body]");
+      const quickEditModalEl = document.querySelector("[data-itinerary-quick-edit-modal]");
+      if (quickEditBodyEl && quickEditModalEl && quickEditBodyEl.contains(form)) {
+        const viewId = itineraryViewIdForForm(formId);
+        const view = viewId ? document.getElementById(viewId) : null;
+        const row = view?.closest(".timeline-item");
+        if (row) row.appendChild(form);
+        form.classList.add("hidden");
+        if (row) row.classList.remove("editing");
+        if (view) view.classList.remove("hidden");
+        quickEditModalEl.classList.add("hidden");
+        quickEditModalEl.setAttribute("aria-hidden", "true");
+        return;
+      }
       if (form.classList.contains("budget-expense-edit-form")) {
         const expenseId = form.getAttribute("data-budget-expense-id") || "";
         const editTr = expenseId
@@ -2411,7 +4041,20 @@ window.addEventListener("load", () => {
         form.querySelector("input.remi-date-iso[name='itinerary_date']") ||
         form.querySelector("input[name='itinerary_date']");
       if (dateInput) dateInput.dataset.originalValue = dateInput.value;
+      if (form.classList.contains("remi-checklist-inline-edit-form")) {
+        window.requestAnimationFrame(() => {
+          form.querySelector("input[name='text']")?.focus();
+        });
+      }
     });
+    const tag = (btn.tagName || "").toLowerCase();
+    if (tag !== "button" && tag !== "a") {
+      btn.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        btn.click();
+      });
+    }
   };
   document.querySelectorAll("[data-inline-edit-open]").forEach((btn) => wireOneInlineEditOpenBtn(btn));
   window.remiWireInlineEditOpenButtonsIn = (root) => {
@@ -2439,6 +4082,61 @@ window.addEventListener("load", () => {
     closeInlineEdit(formId);
   });
 
+  document.addEventListener("click", (event) => {
+    const btn = event.target?.closest?.("[data-trip-keep-note-edit-cancel]");
+    if (!(btn instanceof HTMLElement)) return;
+    const details = btn.closest("details.trip-keep-details");
+    if (!(details instanceof HTMLDetailsElement)) return;
+    const form = details.querySelector("form.trip-keep-form");
+    if (form instanceof HTMLFormElement) {
+      form.reset();
+    }
+    details.open = false;
+    details.removeAttribute("open");
+  });
+
+  document.addEventListener("click", (event) => {
+    const btn = event.target?.closest?.("[data-trip-keep-note-open-edit]");
+    if (!(btn instanceof HTMLElement)) return;
+    const id = btn.getAttribute("data-trip-keep-note-open-edit");
+    if (!id) return;
+    const det = document.getElementById(`keep-note-details-${id}`);
+    if (det instanceof HTMLDetailsElement) {
+      det.open = true;
+      window.requestAnimationFrame(() => {
+        det.querySelector("input:not([type='hidden']), textarea")?.focus();
+      });
+    }
+  });
+
+  (function initTripKeepNoteViewDialog() {
+    const dialog = document.getElementById("trip-keep-note-view-dialog");
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    const titleEl = dialog.querySelector("#trip-keep-note-view-dialog-title");
+    const bodyEl = dialog.querySelector("#trip-keep-note-view-dialog-body");
+    const close = () => dialog.close();
+    dialog.querySelector("[data-trip-keep-note-view-close]")?.addEventListener("click", close);
+    dialog.addEventListener("click", (e) => {
+      if (e.target === dialog) close();
+    });
+    dialog.addEventListener("close", () => {
+      if (bodyEl) bodyEl.textContent = "";
+    });
+    document.addEventListener("click", (e) => {
+      const btn = e.target?.closest?.("[data-trip-keep-note-view-more]");
+      if (!(btn instanceof HTMLElement)) return;
+      e.preventDefault();
+      const tid = btn.getAttribute("data-note-template-id");
+      const tpl = tid ? document.getElementById(tid) : null;
+      if (!(tpl instanceof HTMLTemplateElement)) return;
+      const fullText = tpl.content.textContent ?? "";
+      const rawTitle = (btn.getAttribute("data-note-title") || "").trim();
+      if (titleEl) titleEl.textContent = rawTitle || "Note";
+      if (bodyEl) bodyEl.textContent = fullText;
+      dialog.showModal();
+    });
+  })();
+
   const budgetMobileEditDialog = document.getElementById("budget-mobile-expense-edit");
   budgetMobileEditDialog?.querySelector("[data-budget-mobile-edit-close]")?.addEventListener("click", () => {
     const form = budgetMobileEditDialog.querySelector(".budget-expense-edit-form");
@@ -2459,6 +4157,38 @@ window.addEventListener("load", () => {
     const form = slot?.querySelector(".tab-expense-edit-form");
     if (form?.id) closeInlineEdit(form.id);
   });
+
+  const initAddStopTabs = () => {
+    document.querySelectorAll("[data-add-stop-tabs]").forEach((host) => {
+      if (!(host instanceof HTMLElement)) return;
+      if (host.dataset.addStopTabsInit === "1") return;
+      host.dataset.addStopTabsInit = "1";
+      const tabs = host.querySelectorAll("[data-add-stop-tab]");
+      const panels = host.querySelectorAll("[data-add-stop-panel]");
+      const activate = (id) => {
+        tabs.forEach((btn) => {
+          if (!(btn instanceof HTMLElement)) return;
+          const on = btn.getAttribute("data-add-stop-tab") === id;
+          btn.setAttribute("aria-selected", on ? "true" : "false");
+          btn.classList.toggle("add-stop-tabs__tab--active", on);
+          btn.tabIndex = on ? 0 : -1;
+        });
+        panels.forEach((panel) => {
+          if (!(panel instanceof HTMLElement)) return;
+          const on = panel.getAttribute("data-add-stop-panel") === id;
+          panel.hidden = !on;
+          panel.classList.toggle("hidden", !on);
+        });
+      };
+      tabs.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = btn.getAttribute("data-add-stop-tab");
+          if (id) activate(id);
+        });
+      });
+    });
+  };
+  initAddStopTabs();
 
   const initItineraryForm = (itineraryForm) => {
     const locationInput = itineraryForm.querySelector("[data-location-input]");
@@ -2763,27 +4493,34 @@ window.addEventListener("load", () => {
   });
 
   const vehicleDropoffSyncByFieldset = new WeakMap();
-  document.querySelectorAll(".vehicle-dropoff-fieldset").forEach((fs) => {
-    const same = fs.querySelector("[data-vehicle-dropoff-same]");
-    const diff = fs.querySelector("[data-vehicle-dropoff-diff]");
-    const locWrap = fs.querySelector("[data-vehicle-dropoff-field]");
-    const locInp = locWrap?.querySelector("input[name='drop_off_location']");
-    const sync = () => {
-      const different = Boolean(diff?.checked);
-      if (locWrap) {
-        locWrap.toggleAttribute("hidden", !different);
-        locWrap.setAttribute("aria-hidden", different ? "false" : "true");
-      }
-      if (locInp) {
-        locInp.disabled = !different;
-        locInp.required = different;
-      }
-    };
-    same?.addEventListener("change", sync);
-    diff?.addEventListener("change", sync);
-    vehicleDropoffSyncByFieldset.set(fs, sync);
-    sync();
-  });
+  const initVehicleDropoffFieldsetsIn = (root) => {
+    const scope = root instanceof HTMLElement || root instanceof Document ? root : document;
+    scope.querySelectorAll(".vehicle-dropoff-fieldset").forEach((fs) => {
+      if (fs.dataset.remiVehicleDropoffBound === "1") return;
+      fs.dataset.remiVehicleDropoffBound = "1";
+      const same = fs.querySelector("[data-vehicle-dropoff-same]");
+      const diff = fs.querySelector("[data-vehicle-dropoff-diff]");
+      const locWrap = fs.querySelector("[data-vehicle-dropoff-field]");
+      const locInp = locWrap?.querySelector("input[name='drop_off_location']");
+      const sync = () => {
+        const different = Boolean(diff?.checked);
+        if (locWrap) {
+          locWrap.toggleAttribute("hidden", !different);
+          locWrap.setAttribute("aria-hidden", different ? "false" : "true");
+        }
+        if (locInp) {
+          locInp.disabled = !different;
+          locInp.required = different;
+        }
+      };
+      same?.addEventListener("change", sync);
+      diff?.addEventListener("change", sync);
+      vehicleDropoffSyncByFieldset.set(fs, sync);
+      sync();
+    });
+  };
+  initVehicleDropoffFieldsetsIn(document);
+  window.remiInitVehicleDropoffFieldsetsIn = initVehicleDropoffFieldsetsIn;
 
   window.remiResyncVehicleDropoffInForm = (form) => {
     if (!(form instanceof HTMLElement)) return;
@@ -3236,12 +4973,18 @@ window.addEventListener("load", () => {
   const updateChecklistToggleUI = (form, done) => {
     const row = form.closest(".checklist-view");
     if (!row) return;
-    const icon = row.querySelector(".check-btn .material-symbols-outlined");
-    const text = row.querySelector("span:not(.material-symbols-outlined)");
-    if (icon) icon.textContent = done ? "check" : "circle";
+    const icon = row.querySelector(".remi-checklist-check-btn .material-symbols-outlined, .check-btn .material-symbols-outlined");
+    const text = row.querySelector(".remi-checklist-item-text");
+    const btn = row.querySelector(".remi-checklist-check-btn");
+    if (btn) btn.classList.toggle("remi-checklist-check-btn--done", done);
+    if (btn) btn.classList.toggle("trip-keep-check-btn--done", done);
+    if (icon) icon.textContent = done ? "check" : "";
     if (text) text.classList.toggle("done", done);
+    if (text) text.classList.toggle("trip-keep-checklist-text--done", done);
     const hiddenDone = form.querySelector("input[name='done']");
     if (hiddenDone) hiddenDone.value = done ? "false" : "true";
+    const toggleBtn = row.querySelector(".trip-keep-check-btn");
+    if (toggleBtn) toggleBtn.setAttribute("aria-pressed", done ? "true" : "false");
   };
 
   const updateChecklistEditUI = (form) => {
@@ -3250,7 +4993,7 @@ window.addEventListener("load", () => {
     const textInput = form.querySelector("input[name='text']");
     const nextText = (textInput?.value || "").trim();
     if (!nextText) return;
-    const textNode = row.querySelector(".checklist-view > span:not(.material-symbols-outlined)");
+    const textNode = row.querySelector(".remi-checklist-item-text");
     if (textNode) {
       textNode.textContent = nextText;
     }
@@ -3460,7 +5203,7 @@ window.addEventListener("load", () => {
         ext = state.existingExt;
         sub = "Marked for removal. Save changes to apply.";
       } else {
-        fileName = meta.kind === "image" ? "No image attached" : "No attachment";
+        fileName = meta.kind === "image" ? "No image uploaded" : "No file attached";
         sub = `Max file size: ${maxSizeMsg}`;
       }
 
@@ -3468,7 +5211,7 @@ window.addEventListener("load", () => {
       nameEl.textContent = fileName;
       subEl.textContent = sub;
       replaceBtn.querySelector("span:last-child").textContent =
-        state.pendingFile || existingUrl ? "Replace File" : "Choose File";
+        state.pendingFile || existingUrl ? "Replace File" : "Upload File";
       const canRemove = Boolean(state.pendingFile || existingUrl);
       removeBtn.hidden = !canRemove;
       removeBtn.querySelector("span.material-symbols-outlined").textContent = state.removeMarked ? "undo" : "delete";
@@ -3556,12 +5299,15 @@ window.addEventListener("load", () => {
   const rewireInjectedActionUI = (root) => {
     if (!remiIsDomQueryRoot(root)) return;
     window.remiEnsureCsrfOnPostForms?.(root);
+    // Do not clear remiConfirmWired / remiAjaxWired on existing nodes: stacking duplicate
+    // capture-phase confirm handlers makes the second handler block submit after OK (confirmPass
+    // is consumed by the first). Only wire forms that are new (e.g. from AJAX partial HTML).
     root.querySelectorAll("form[data-app-confirm]").forEach((f) => {
-      delete f.dataset.remiConfirmWired;
+      if (f.dataset.remiConfirmWired === "1") return;
       window.remiWireAppConfirmOnForm?.(f);
     });
     root.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
-      delete f.dataset.remiAjaxWired;
+      if (f.dataset.remiAjaxWired === "1") return;
       window.remiBindAjaxSubmitForm?.(f);
     });
     window.remiWireInlineEditOpenButtonsIn?.(root);
@@ -3570,6 +5316,65 @@ window.addEventListener("load", () => {
     window.remiWireTimeFieldsIn?.(root);
     window.remiInitAttachmentEditFieldsIn?.(root);
     window.remiApplyExpenseActionsDropdownOpen?.();
+  };
+
+  /**
+   * Applies JSON `tripDocuments` payload from upload/update/delete handlers on the trip documents page.
+   * @returns {boolean} true if the DOM was updated.
+   */
+  window.remiApplyTripDocumentsAjaxResponse = (root, td /* , form */) => {
+    if (!root || !td || typeof td !== "object") return false;
+    const ul = root.querySelector(".trip-documents-items");
+    if (!ul) return false;
+    let changed = false;
+    if (td.removeId) {
+      const id = String(td.removeId);
+      const li = ul.querySelector(`[data-trip-doc-id="${CSS.escape(id)}"]`);
+      if (li) {
+        li.remove();
+        changed = true;
+      }
+    }
+    if (td.replaceHtml && td.documentId) {
+      const id = String(td.documentId);
+      const li = ul.querySelector(`[data-trip-doc-id="${CSS.escape(id)}"]`);
+      if (li) {
+        const tpl = document.createElement("template");
+        tpl.innerHTML = String(td.replaceHtml).trim();
+        const neu = tpl.content.firstElementChild;
+        if (neu) {
+          li.replaceWith(neu);
+          changed = true;
+        }
+      }
+    }
+    if (td.appendHtml) {
+      const html = String(td.appendHtml).trim();
+      if (html) {
+        const tpl = document.createElement("template");
+        tpl.innerHTML = html;
+        ul.insertBefore(tpl.content, ul.firstChild);
+        changed = true;
+      }
+    }
+    if (changed) {
+      rewireInjectedActionUI(ul);
+      window.remiRefreshTripDocumentsListFilter?.();
+    }
+    return changed;
+  };
+
+  const fetchNoStore = async (resource, init = {}) => {
+    const headers = new Headers(init.headers || {});
+    if (!headers.has("Cache-Control")) {
+      headers.set("Cache-Control", "no-cache");
+    }
+    return fetch(resource, {
+      cache: "no-store",
+      credentials: "same-origin",
+      ...init,
+      headers
+    });
   };
 
   const refreshInlineViewFromServer = async (form) => {
@@ -3581,9 +5386,7 @@ window.addEventListener("load", () => {
     const currentView = document.getElementById(viewId);
     if (!currentView) return;
     try {
-      const response = await fetch(window.location.href, {
-        cache: "no-store",
-        credentials: "same-origin",
+      const response = await fetchNoStore(window.location.href, {
         headers: {
           "X-Requested-With": "XMLHttpRequest",
           Accept: "text/html"
@@ -3611,13 +5414,133 @@ window.addEventListener("load", () => {
 
   // Shared helper: fetch fresh page HTML once, reuse across calls
   const fetchFreshDoc = async () => {
-    const r = await fetch(window.location.href, {
-      cache: "no-store",
-      credentials: "same-origin",
+    const r = await fetchNoStore(window.location.href, {
       headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" }
     });
     if (!r.ok) return null;
     return new DOMParser().parseFromString(await r.text(), "text/html");
+  };
+
+  const rewireLiveRefreshedDom = (root = document) => {
+    const scope = root instanceof HTMLElement || root instanceof Document ? root : document;
+    scope.querySelectorAll("form[data-app-confirm]").forEach((f) => {
+      delete f.dataset.remiConfirmWired;
+      window.remiWireAppConfirmOnForm?.(f);
+    });
+    scope.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
+      delete f.dataset.remiAjaxWired;
+      window.remiBindAjaxSubmitForm?.(f);
+    });
+    window.remiWireInlineEditOpenButtonsIn?.(scope);
+    window.remiInitAttachmentEditFieldsIn?.(scope);
+    window.remiWireDateFieldsIn?.(scope);
+    window.remiWireDateTimeFieldsIn?.(scope);
+    window.remiWireTimeFieldsIn?.(scope);
+    window.remiEnsureCsrfOnPostForms?.(scope);
+    window.remiInitTripInviteMethodsIn?.(scope);
+    window.remiInitVehicleDropoffFieldsetsIn?.(scope);
+    window.remiSetupMobileEntryCarouselsIn?.(scope);
+    window.remiRefreshTripDocumentsListFilter?.();
+    window.remiFitBudgetDonutCenterValues?.(scope);
+  };
+
+  const replaceSelectorFromFreshDoc = (selector, freshDoc) => {
+    const currentNodes = Array.from(document.querySelectorAll(selector));
+    const freshNodes = Array.from(freshDoc.querySelectorAll(selector));
+    if (!currentNodes.length || currentNodes.length !== freshNodes.length) return false;
+    currentNodes.forEach((node, idx) => {
+      const freshNode = freshNodes[idx];
+      if (!freshNode) return;
+      node.replaceWith(freshNode.cloneNode(true));
+    });
+    return true;
+  };
+
+  const refreshSharedTripChromeFromServer = async () => {
+    const freshDoc = await fetchFreshDoc();
+    if (!freshDoc) return false;
+    let changed = false;
+    [
+      ".trip-mobile-header",
+      ".trip-desktop-header-tools",
+      ".trip-members-mobile-shell",
+      ".sidebar-trip-members-wrap"
+    ].forEach((selector) => {
+      changed = replaceSelectorFromFreshDoc(selector, freshDoc) || changed;
+    });
+    if (changed) {
+      rewireLiveRefreshedDom(document);
+    }
+    return changed;
+  };
+
+  const refreshTripDetailsSupportSectionsFromServer = async () => {
+    const freshDoc = await fetchFreshDoc();
+    if (!freshDoc) return false;
+    let changed = false;
+    [
+      ".trip-page-stays-section",
+      ".trip-page-vehicles-section",
+      ".trip-page-flights-section",
+      ".trip-members-mobile-shell",
+      ".sidebar-trip-members-wrap",
+      ".trip-mobile-header",
+      ".trip-desktop-header-tools"
+    ].forEach((selector) => {
+      changed = replaceSelectorFromFreshDoc(selector, freshDoc) || changed;
+    });
+    if (changed) {
+      rewireLiveRefreshedDom(document);
+    }
+    return changed;
+  };
+
+  const hasOptimisticRowRemoveSkip = (form) =>
+    Boolean(document.querySelector("main.tab-page")) &&
+    Boolean(form.closest("[data-tab-refresh-region], .tab-settle-card, .tab-expenses-section"));
+
+  const beginOptimisticAjaxMutation = (form, formData) => {
+    const rollbacks = [];
+    const action = (form.action || "").toLowerCase();
+    if (form.classList.contains("check-row")) {
+      const done = String(formData.get("done")) === "true";
+      updateChecklistToggleUI(form, done);
+      rollbacks.push(() => updateChecklistToggleUI(form, !done));
+    }
+    if (action.includes("/delete") && !hasOptimisticRowRemoveSkip(form)) {
+      const row = form.closest(
+        ".timeline-item, .expense-item, .reminder-checklist-item, .budget-tx-view, .budget-mobile-tx-item, .flight-card, .vehicle-rental-item, .vehicle-rental-card, .accommodation-card-wrap, .trip-document-row"
+      );
+      if (row?.parentNode) {
+        const parent = row.parentNode;
+        const nextSibling = row.nextSibling;
+        const isTimelineRow = row.classList.contains("timeline-item");
+        row.remove();
+        if (isTimelineRow) {
+          void renderItineraryConnectors(document);
+          window.remiRefreshTripMapFromItineraryDOM?.();
+        }
+        rollbacks.push(() => {
+          parent.insertBefore(row, nextSibling);
+          if (isTimelineRow) {
+            void renderItineraryConnectors(document);
+            window.remiRefreshTripMapFromItineraryDOM?.();
+          }
+          rewireLiveRefreshedDom(parent instanceof HTMLElement ? parent : document);
+        });
+      }
+    }
+    return {
+      rollback() {
+        for (let i = rollbacks.length - 1; i >= 0; i -= 1) {
+          try {
+            rollbacks[i]();
+          } catch (e) {
+            /* ignore */
+          }
+        }
+      }
+    };
   };
 
   window.refreshTheTabPageFromServer = async () => {
@@ -4025,6 +5948,7 @@ window.addEventListener("load", () => {
     if (!(form instanceof HTMLFormElement)) return;
       if (event.defaultPrevented) return;
       event.preventDefault();
+      const submitterEl = event.submitter;
       const method = (form.getAttribute("method") || "post").toUpperCase();
       const formData = new FormData(form);
       mergeFormAssociatedControls(form, formData);
@@ -4060,20 +5984,109 @@ window.addEventListener("load", () => {
       const requestBody = isMultipartForm ? formData : new URLSearchParams(formData);
       const requestHeaders = {
         "X-Requested-With": "XMLHttpRequest",
+        "Cache-Control": "no-cache",
         Accept: "application/json"
       };
       if (!isMultipartForm) {
         requestHeaders["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
       }
+      const optimisticMutation = beginOptimisticAjaxMutation(form, formData);
       try {
-        const response = await fetch(form.action, {
+        const response = await fetchNoStore(form.action, {
           method,
           body: requestBody,
           headers: requestHeaders
         });
         if (!response.ok) {
           const txt = (await response.text()).trim();
-          throw new Error(txt || "Save failed.");
+          let errBody = null;
+          try {
+            errBody = txt ? JSON.parse(txt) : null;
+          } catch {
+            errBody = null;
+          }
+          const jsonMsg = errBody && errBody.error ? String(errBody.error) : "";
+          const jsonCode = errBody && errBody.code ? String(errBody.code) : "";
+          const error = new Error(jsonMsg || txt || "Save failed.");
+          error.status = response.status;
+          error.code = jsonCode;
+          throw error;
+        }
+        const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
+        if (contentType.includes("application/json")) {
+          let data;
+          try {
+            data = await response.json();
+          } catch {
+            throw new Error("Invalid server response.");
+          }
+          if (data && data.error) {
+            throw new Error(String(data.error));
+          }
+          if (data != null && data.tripDocuments != null && typeof data.tripDocuments === "object") {
+            const docRoot = document.querySelector("[data-trip-documents-root]");
+            if (docRoot) {
+              window.remiApplyTripDocumentsAjaxResponse?.(docRoot, data.tripDocuments, form);
+              showToast(inferToastMessage(form));
+              return;
+            }
+          }
+        }
+        if (form.matches("[data-remi-expense-add-form]")) {
+          const saveExpenseAnother =
+            submitterEl instanceof HTMLElement &&
+            submitterEl.getAttribute("data-remi-save-expense-another") === "1";
+          const msg = inferToastMessage(form);
+          if (saveExpenseAnother) {
+            if (document.body.classList.contains("budget-page")) {
+              try {
+                sessionStorage.setItem(TOAST_KEY, msg);
+                sessionStorage.setItem("remi_focus_budget_expense_title", "1");
+              } catch (e) {
+                /* ignore */
+              }
+              window.location.reload();
+              return;
+            }
+            showToast(msg);
+            if (document.querySelector(".trip-details-page .budget-tile")) {
+              await refreshBudgetTilesFromPage();
+            }
+            window.remiResetExpenseAddForm?.(form);
+            const titleInp = form.querySelector('input[name="title"]');
+            if (titleInp instanceof HTMLElement) titleInp.focus();
+            return;
+          }
+          try {
+            sessionStorage.setItem(TOAST_KEY, msg);
+          } catch (e) {
+            /* ignore */
+          }
+          window.location.reload();
+          return;
+        }
+        if (form.matches("[data-remi-trip-tab-add-form]")) {
+          const saveGroupAnother =
+            submitterEl instanceof HTMLElement &&
+            submitterEl.getAttribute("data-remi-save-group-expense-another") === "1";
+          const msg = inferToastMessage(form);
+          if (saveGroupAnother) {
+            showToast(msg);
+            if (document.querySelector(".trip-details-page .budget-tile")) {
+              await refreshBudgetTilesFromPage();
+            }
+            window.remiResetExpenseAddForm?.(form);
+            const titleInp = form.querySelector('input[name="title"]');
+            if (titleInp instanceof HTMLElement) titleInp.focus();
+            return;
+          }
+          try {
+            sessionStorage.setItem(TOAST_KEY, msg);
+          } catch (e) {
+            /* ignore */
+          }
+          window.location.reload();
+          return;
         }
         if (form.classList.contains("check-row")) {
           const done = String(formData.get("done")) === "true";
@@ -4081,6 +6094,12 @@ window.addEventListener("load", () => {
         }
         if (/\/checklist\/[^/]+\/update$/i.test(form.action || "")) {
           updateChecklistEditUI(form);
+        }
+        if (
+          /\/checklist\/[^/]+\/(toggle|update|delete)/i.test(form.action || "") &&
+          (form.closest("[data-trip-keep-board-root]") || form.closest("[data-trip-details-keep-live]"))
+        ) {
+          void window.remiSyncTripKeepAfterMutation?.();
         }
         if (form.id && isItineraryItemForm(form.id)) {
           const itineraryRow = form.closest(".timeline-item");
@@ -4198,6 +6217,16 @@ window.addEventListener("load", () => {
         }
         showToast(inferToastMessage(form));
       } catch (error) {
+        optimisticMutation.rollback();
+        const status = Number(error?.status || 0);
+        const code = String(error?.code || "").toLowerCase();
+        if (status === 409 || code === "conflict") {
+          showToast(
+            error?.message ||
+              "Someone else updated this expense a moment ago. Reopen it to review the latest values, then try again."
+          );
+          return;
+        }
         showToast(error?.message || "Unable to save right now.");
       }
   };
@@ -4234,11 +6263,11 @@ window.addEventListener("load", () => {
         delete root.dataset.tabSplitBound;
       });
       destTbody?.querySelectorAll("form[data-app-confirm]").forEach((f) => {
-        delete f.dataset.remiConfirmWired;
+        if (f.dataset.remiConfirmWired === "1") return;
         window.remiWireAppConfirmOnForm?.(f);
       });
       destTbody?.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
-        delete f.dataset.remiAjaxWired;
+        if (f.dataset.remiAjaxWired === "1") return;
         window.remiBindAjaxSubmitForm?.(f);
       });
       window.remiEnsureCsrfOnPostForms?.(destTbody || document);
@@ -4248,7 +6277,7 @@ window.addEventListener("load", () => {
       window.remiWireDateTimeFieldsIn?.(destTbody || document);
       window.remiWireTimeFieldsIn?.(destTbody || document);
       window.remiSyncTabExpenseInstantFilter?.();
-      btn.textContent = "All transactions shown";
+      btn.textContent = "Showing all transactions";
       btn.classList.add("tab-exp-view-all-disabled");
     } catch {
       btn.disabled = false;
@@ -4271,11 +6300,11 @@ window.addEventListener("load", () => {
         Array.from(srcUl.querySelectorAll(":scope > li")).forEach((li) => ul.appendChild(li));
       }
       ul.querySelectorAll("form[data-app-confirm]").forEach((f) => {
-        delete f.dataset.remiConfirmWired;
+        if (f.dataset.remiConfirmWired === "1") return;
         window.remiWireAppConfirmOnForm?.(f);
       });
       ul.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
-        delete f.dataset.remiAjaxWired;
+        if (f.dataset.remiAjaxWired === "1") return;
         window.remiBindAjaxSubmitForm?.(f);
       });
       window.remiEnsureCsrfOnPostForms?.(ul);
@@ -4295,11 +6324,11 @@ window.addEventListener("load", () => {
     if (!(target instanceof HTMLElement)) return;
     if (target.id !== "budget-transactions-tbody") return;
     target.querySelectorAll("form[data-app-confirm]").forEach((f) => {
-      delete f.dataset.remiConfirmWired;
+      if (f.dataset.remiConfirmWired === "1") return;
       window.remiWireAppConfirmOnForm?.(f);
     });
     target.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
-      delete f.dataset.remiAjaxWired;
+      if (f.dataset.remiAjaxWired === "1") return;
       window.remiBindAjaxSubmitForm?.(f);
     });
     window.remiWireInlineEditOpenButtonsIn?.(target);
@@ -4426,20 +6455,48 @@ window.addEventListener("load", () => {
     target.setAttribute("aria-hidden", "false");
     if (mobileBackdrop) mobileBackdrop.classList.remove("hidden");
   };
-  if (mobileFab && mobileFabToggle) {
-    closeMobileFab();
-    mobileFabToggle.addEventListener("click", () => {
-      if (mobileFab.classList.contains("open")) {
-        closeMobileFab();
-      } else {
-        openMobileFab();
-      }
-    });
+  const tripIdFromPath = () => {
+    const m = window.location.pathname.match(/^\/trips\/([^/]+)/i);
+    return m && m[1] ? m[1] : "";
+  };
+  const openDesktopFabFallback = (sheetId) => {
+    if (!sheetId || window.innerWidth <= 920) return false;
+    if (document.querySelector("main.trip-details-page") && document.getElementById(sheetId)) {
+      return false;
+    }
+    const tripId = tripIdFromPath();
+    if (!tripId) return false;
+    const pathBase = `/trips/${tripId}`;
+    const navMap = {
+      "mobile-sheet-stop": `${pathBase}?open=stop`,
+      "mobile-sheet-expense": `${pathBase}/expenses#add-expense`,
+      "mobile-sheet-tab": `${pathBase}/group-expenses#add-group-expense`,
+      "mobile-sheet-accommodation": `${pathBase}/accommodation`,
+      "mobile-sheet-vehicle": `${pathBase}/vehicle-rental`,
+      "mobile-sheet-flight": `${pathBase}/flights`,
+      "mobile-sheet-checklist": `${pathBase}?open=checklist`
+    };
+    const target = navMap[sheetId];
+    if (!target) return false;
+    window.location.assign(target);
+    return true;
+  };
+  const bindTripQuickSheets = () => {
     document.querySelectorAll("[data-mobile-sheet-open]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const sheetId = btn.getAttribute("data-mobile-sheet-open");
+        if (openDesktopFabFallback(sheetId)) {
+          closeMobileFab();
+          return;
+        }
         openMobileSheet(sheetId);
         closeMobileFab();
+        const dcf = document.querySelector("[data-desktop-calendar-flyout]");
+        if (dcf) {
+          dcf.classList.add("hidden");
+          dcf.setAttribute("aria-hidden", "true");
+          dcf.classList.remove("is-expanded");
+        }
       });
     });
     document.querySelectorAll("[data-mobile-sheet-close]").forEach((btn) => {
@@ -4452,24 +6509,31 @@ window.addEventListener("load", () => {
         closeMobileSheets();
       });
     }
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      closeMobileFab();
-      closeMobileSheets();
-    });
-    window.addEventListener("resize", () => {
-      if (window.innerWidth > 920) {
+  };
+  if (mobileSheets.length > 0 || mobileBackdrop) {
+    bindTripQuickSheets();
+  }
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    closeMobileFab();
+    closeMobileSheets();
+  });
+  if (mobileFab && mobileFabToggle) {
+    closeMobileFab();
+    mobileFabToggle.addEventListener("click", () => {
+      if (mobileFab.classList.contains("open")) {
         closeMobileFab();
-        closeMobileSheets();
+      } else {
+        openMobileFab();
       }
     });
+    window.addEventListener("resize", closeMobileFab);
   }
 
   document.querySelectorAll(".mobile-sheet").forEach((sheet) => {
     sheet.addEventListener(
       "focusin",
       (e) => {
-        if (window.innerWidth > 920) return;
         const t = e.target;
         if (!(t instanceof HTMLElement)) return;
         if (!t.matches("input, textarea, select")) return;
@@ -4576,7 +6640,9 @@ window.addEventListener("load", () => {
       sections().forEach((section) => {
         const cards = section.querySelectorAll(".trip-card[data-trip-search]");
         if (cards.length === 0) {
-          section.hidden = activeQuery;
+          /* Keep section in the tree: empty states use data-trip-search-hide-when-query; hiding
+             the whole section made the dashboard look blank when the search box had any value. */
+          section.hidden = false;
           return;
         }
         if (!activeQuery) {
@@ -4606,6 +6672,7 @@ window.addEventListener("load", () => {
     tripSearchInput.addEventListener("input", applyTripSearch);
     tripSearchInput.addEventListener("search", applyTripSearch);
     applyTripSearch();
+    window.requestAnimationFrame(() => applyTripSearch());
   }
 
   const mapEl = document.getElementById("map");
@@ -5408,7 +7475,7 @@ window.addEventListener("load", () => {
   const LONG_MS = 520;
   const MOVE_PX = 14;
   const ROW_SEL =
-    ".expense-item, .timeline-item, .reminder-checklist-item, .flight-card, .title-row, .budget-mobile-tx-item, .accommodation-card-wrap, .vehicle-rental-item, .trip-documents-item";
+    ".expense-item, .timeline-item, .reminder-checklist-item, .page-trip-notes .trip-keep-masonry .trip-keep-card--note, .trip-details-keep-preview .trip-keep-card--note, .flight-card, .title-row, .budget-mobile-tx-item, .accommodation-card-wrap, .vehicle-rental-item, .trip-documents-item";
 
   const sheet = document.getElementById("trip-long-press-sheet");
   const titleEl = document.getElementById("trip-long-press-sheet-title");
@@ -5468,8 +7535,14 @@ window.addEventListener("load", () => {
       return row.querySelector(".itinerary-item-view strong")?.textContent?.trim() || "Stop";
     }
     if (row.matches(".reminder-checklist-item")) {
-      const s = row.querySelector(".checklist-view > span");
+      const s = row.querySelector(".remi-checklist-item-text, .checklist-view > span");
       return s?.textContent?.trim() || "Checklist item";
+    }
+    if (row.matches(".trip-details-keep-preview .trip-keep-card--note")) {
+      return row.querySelector(".trip-keep-note-title")?.textContent?.trim() || "Note";
+    }
+    if (row.matches(".page-trip-notes .trip-keep-masonry .trip-keep-card--note")) {
+      return row.querySelector(".trip-keep-note-title")?.textContent?.trim() || "Note";
     }
     if (row.matches(".flight-card")) {
       return row.querySelector(".flight-view h4")?.textContent?.trim() || "Flight";
@@ -5504,10 +7577,26 @@ window.addEventListener("load", () => {
 
   function openSheetForRow(row) {
     const actionsRoot = row.querySelector("details.trip-inline-actions-dropdown");
-    if (!actionsRoot) {
-      return;
+    let sourceButtons = actionsRoot
+      ? Array.from(
+          actionsRoot.querySelectorAll(".trip-inline-actions-buttons button, .trip-inline-actions-buttons a.item-action-btn")
+        )
+      : [];
+    if (
+      !sourceButtons.length &&
+      (row.classList.contains("reminder-checklist-item") ||
+        (row.classList.contains("trip-keep-card--note") && row.closest(".trip-details-keep-preview")))
+    ) {
+      const editBtn = row.querySelector(
+        ".remi-checklist-item-actions .remi-checklist-action-btn--secondary[data-inline-edit-open]"
+      );
+      const delBtn = row.querySelector(".remi-checklist-item-actions .remi-checklist-delete-form button[type='submit']");
+      sourceButtons = [editBtn, delBtn].filter(Boolean);
     }
-    const sourceButtons = actionsRoot.querySelectorAll(".trip-inline-actions-buttons button");
+    if (!sourceButtons.length && row.matches(".page-trip-notes .trip-keep-masonry .trip-keep-card--note")) {
+      const noteEdit = row.querySelector("[data-trip-keep-note-open-edit]");
+      sourceButtons = noteEdit ? [noteEdit] : [];
+    }
     if (!sourceButtons.length) {
       return;
     }
@@ -5521,6 +7610,9 @@ window.addEventListener("load", () => {
       b.textContent = text || "Action";
       if (src.classList.contains("danger")) {
         b.classList.add("danger");
+      }
+      if (src.classList.contains("item-action-btn--download")) {
+        b.classList.add("trip-long-press-sheet__action--download");
       }
       b.addEventListener("click", () => {
         sheet.close();
@@ -5556,11 +7648,24 @@ window.addEventListener("load", () => {
         return;
       }
       const actionsRoot = row.querySelector("details.trip-inline-actions-dropdown");
-      if (!actionsRoot) {
-        return;
-      }
-      const hasActions = actionsRoot.querySelector(".trip-inline-actions-buttons button");
-      if (!hasActions) {
+      const hasFromDetails = Boolean(
+        actionsRoot?.querySelector(".trip-inline-actions-buttons button, .trip-inline-actions-buttons a.item-action-btn")
+      );
+      const hasFromChecklist =
+        row.classList.contains("reminder-checklist-item") &&
+        Boolean(
+          row.querySelector(".remi-checklist-item-actions .remi-checklist-action-btn--secondary[data-inline-edit-open]")
+        );
+      const hasFromNote =
+        row.classList.contains("trip-keep-card--note") &&
+        Boolean(row.closest(".trip-details-keep-preview")) &&
+        Boolean(
+          row.querySelector(".remi-checklist-item-actions .remi-checklist-action-btn--secondary[data-inline-edit-open]")
+        );
+      const hasFromNotesPageNote =
+        row.matches(".page-trip-notes .trip-keep-masonry .trip-keep-card--note") &&
+        Boolean(row.querySelector("[data-trip-keep-note-open-edit]"));
+      if (!hasFromDetails && !hasFromChecklist && !hasFromNote && !hasFromNotesPageNote) {
         return;
       }
       const t = e.touches[0];
@@ -5668,6 +7773,400 @@ window.addEventListener("load", () => {
   } else {
     boot();
   }
+
+  document.addEventListener("remi-keep-dom-updated", syncBind);
+})();
+
+(function initTripKeepNotesSearchComposer() {
+  const sync = () => {
+    const input = document.getElementById("keep-search-q");
+    const composer = document.querySelector("[data-trip-keep-composer-row]");
+    const clearBtn = document.querySelector("[data-trip-keep-search-clear]");
+    if (!(input instanceof HTMLInputElement)) return;
+    const q = input.value.trim();
+    if (clearBtn instanceof HTMLElement) {
+      clearBtn.classList.toggle("hidden", q.length === 0);
+    }
+    if (composer instanceof HTMLElement) {
+      composer.classList.toggle("trip-keep-composer-row--hidden-for-search", q.length > 0);
+    }
+  };
+
+  const bind = () => {
+    if (!document.body.classList.contains("page-trip-notes")) return;
+    const form = document.querySelector("[data-trip-keep-search-form]");
+    const input = document.getElementById("keep-search-q");
+    const clearBtn = document.querySelector("[data-trip-keep-search-clear]");
+    if (!(form instanceof HTMLFormElement) || !(input instanceof HTMLInputElement)) return;
+    if (form.dataset.tripKeepSearchUiBound === "1") return;
+    form.dataset.tripKeepSearchUiBound = "1";
+    input.addEventListener("input", sync);
+    input.addEventListener("search", sync);
+    clearBtn?.addEventListener("click", () => {
+      input.value = "";
+      sync();
+      form.submit();
+    });
+    sync();
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bind, { once: true });
+  } else {
+    bind();
+  }
+
+  document.addEventListener("remi-keep-dom-updated", () => {
+    sync();
+  });
+})();
+
+(function remiTripKeepLiveSync() {
+  const remiKeepChangeRelevant = (entity) => {
+    const e = String(entity || "")
+      .toLowerCase()
+      .trim();
+    return e === "trip_note" || e === "checklist_item" || e === "checklist_category_pin";
+  };
+
+  const hasActiveKeepBoardEdit = (root) => {
+    if (!(root instanceof HTMLElement)) return false;
+    const noteDlg = document.getElementById("trip-keep-note-view-dialog");
+    if (noteDlg instanceof HTMLDialogElement && noteDlg.open) return true;
+    if (root.querySelector("details.trip-keep-details[open]")) return true;
+    if (root.querySelector(".remi-checklist-inline-edit-form:not(.hidden)")) return true;
+    return false;
+  };
+
+  const remiAfterKeepDomSwap = (root) => {
+    const scope = root instanceof HTMLElement ? root : document.body;
+    scope.querySelectorAll("form[data-app-confirm]").forEach((f) => {
+      if (f.dataset.remiConfirmWired === "1") return;
+      window.remiWireAppConfirmOnForm?.(f);
+    });
+    scope.querySelectorAll("form[data-ajax-submit]").forEach((f) => {
+      if (f.dataset.remiAjaxWired === "1") return;
+      window.remiBindAjaxSubmitForm?.(f);
+    });
+    window.remiEnsureCsrfOnPostForms?.(document);
+    window.remiWireInlineEditOpenButtonsIn?.(scope);
+    window.remiWireDateFieldsIn?.(scope);
+    document.dispatchEvent(new Event("remi-keep-dom-updated"));
+  };
+
+  const fetchKeepBoardFragment = async (tripID, view, q) => {
+    const u = new URL(`/api/v1/trips/${encodeURIComponent(tripID)}/keep/board-fragment`, window.location.origin);
+    if (view && view !== "notes") u.searchParams.set("view", view);
+    const qq = String(q || "").trim();
+    if (qq) u.searchParams.set("q", qq);
+    const res = await fetch(u.toString(), {
+      credentials: "same-origin",
+      headers: { Accept: "text/html", "X-Requested-With": "XMLHttpRequest" }
+    });
+    if (!res.ok) throw new Error("Could not refresh notes board.");
+    return await res.text();
+  };
+
+  const fetchDetailsPreviewFragment = async (tripID) => {
+    const res = await fetch(
+      `/api/v1/trips/${encodeURIComponent(tripID)}/keep/details-preview-fragment`,
+      {
+        credentials: "same-origin",
+        headers: { Accept: "text/html", "X-Requested-With": "XMLHttpRequest" }
+      }
+    );
+    if (!res.ok) throw new Error("Could not refresh notes preview.");
+    return await res.text();
+  };
+
+  window.remiSyncTripKeepAfterMutation = async () => {
+    try {
+      const notesBody = document.body;
+      if (notesBody.classList.contains("page-trip-notes") && notesBody.hasAttribute("data-trip-keep-live")) {
+        const tid = notesBody.getAttribute("data-trip-id") || "";
+        if (tid) {
+          const view = notesBody.getAttribute("data-keep-view") || "notes";
+          const input = document.querySelector("#keep-search-q");
+          const qFromInput = input instanceof HTMLInputElement ? input.value.trim() : "";
+          const qFromUrl = new URLSearchParams(window.location.search).get("q") || "";
+          const q = qFromInput || qFromUrl;
+          const cur = document.querySelector("[data-trip-keep-board-root]");
+          if (cur?.parentNode && !hasActiveKeepBoardEdit(cur)) {
+            const html = await fetchKeepBoardFragment(tid, view, q);
+            const tpl = document.createElement("template");
+            tpl.innerHTML = html.trim();
+            const next = tpl.content.firstElementChild;
+            if (next) {
+              cur.parentNode.replaceChild(next, cur);
+              remiAfterKeepDomSwap(next);
+            }
+          }
+        }
+      }
+      const host = document.querySelector("[data-trip-details-keep-live]");
+      if (host instanceof HTMLElement) {
+        const tid = host.getAttribute("data-trip-id") || "";
+        if (tid && !hasActiveKeepBoardEdit(host)) {
+          const html = await fetchDetailsPreviewFragment(tid);
+          host.innerHTML = html.trim();
+          remiAfterKeepDomSwap(host);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const startNotesPageKeepPolling = () => {
+    if (window.remiRealtimeTripSyncEnabled) return;
+    const body = document.body;
+    if (!body.classList.contains("page-trip-notes") || !body.hasAttribute("data-trip-keep-live")) return;
+    const tripID = body.getAttribute("data-trip-id") || "";
+    if (!tripID) return;
+    let since = "";
+    let inflight = false;
+    let timer = null;
+    const schedule = (ms) => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(tick, Math.max(500, ms));
+    };
+    const tick = async () => {
+      if (inflight) {
+        schedule(2000);
+        return;
+      }
+      if (document.hidden) {
+        schedule(20000);
+        return;
+      }
+      const boardMount = document.querySelector("[data-trip-keep-board-root]");
+      if (hasActiveKeepBoardEdit(boardMount)) {
+        schedule(4000);
+        return;
+      }
+      inflight = true;
+      try {
+        const url = `/api/v1/trips/${encodeURIComponent(tripID)}/changes${since ? `?since=${encodeURIComponent(since)}` : ""}`;
+        const res = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
+        if (!res.ok) {
+          schedule(12000);
+          return;
+        }
+        const payload = await res.json();
+        const changes = Array.isArray(payload?.changes) ? payload.changes : [];
+        let relevant = false;
+        if (changes.length) {
+          const last = changes[changes.length - 1];
+          if (last?.changed_at) since = String(last.changed_at);
+          relevant = changes.some((c) => remiKeepChangeRelevant(c?.entity));
+        }
+        if (relevant) {
+          const view = body.getAttribute("data-keep-view") || "notes";
+          const input = document.querySelector("#keep-search-q");
+          const qFromInput = input instanceof HTMLInputElement ? input.value.trim() : "";
+          const qFromUrl = new URLSearchParams(window.location.search).get("q") || "";
+          const q = qFromInput || qFromUrl;
+          const html = await fetchKeepBoardFragment(tripID, view, q);
+          const cur = document.querySelector("[data-trip-keep-board-root]");
+          if (cur?.parentNode && !hasActiveKeepBoardEdit(cur)) {
+            const tpl = document.createElement("template");
+            tpl.innerHTML = html.trim();
+            const next = tpl.content.firstElementChild;
+            if (next) {
+              cur.parentNode.replaceChild(next, cur);
+              remiAfterKeepDomSwap(next);
+            }
+          }
+        }
+        schedule(5000);
+      } catch {
+        schedule(12000);
+      } finally {
+        inflight = false;
+      }
+    };
+    schedule(800);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) schedule(400);
+    });
+  };
+
+  const startTripDetailsKeepPolling = () => {
+    if (window.remiRealtimeTripSyncEnabled) return;
+    const host = document.querySelector("[data-trip-details-keep-live]");
+    if (!host) return;
+    const tripID = host.getAttribute("data-trip-id") || "";
+    if (!tripID) return;
+    let since = "";
+    let inflight = false;
+    let timer = null;
+    const schedule = (ms) => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(tick, Math.max(500, ms));
+    };
+    const tick = async () => {
+      if (inflight) {
+        schedule(2000);
+        return;
+      }
+      if (document.hidden) {
+        schedule(20000);
+        return;
+      }
+      if (hasActiveKeepBoardEdit(host)) {
+        schedule(4000);
+        return;
+      }
+      inflight = true;
+      try {
+        const url = `/api/v1/trips/${encodeURIComponent(tripID)}/changes${since ? `?since=${encodeURIComponent(since)}` : ""}`;
+        const res = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
+        if (!res.ok) {
+          schedule(12000);
+          return;
+        }
+        const payload = await res.json();
+        const changes = Array.isArray(payload?.changes) ? payload.changes : [];
+        let relevant = false;
+        if (changes.length) {
+          const last = changes[changes.length - 1];
+          if (last?.changed_at) since = String(last.changed_at);
+          relevant = changes.some((c) => remiKeepChangeRelevant(c?.entity));
+        }
+        if (relevant) {
+          const html = await fetchDetailsPreviewFragment(tripID);
+          host.innerHTML = html.trim();
+          remiAfterKeepDomSwap(host);
+        }
+        schedule(5000);
+      } catch {
+        schedule(12000);
+      } finally {
+        inflight = false;
+      }
+    };
+    schedule(800);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) schedule(400);
+    });
+  };
+
+  window.remiRealtimeTripSyncEnabled = typeof window.EventSource === "function";
+
+  const startZeroRefreshTripSync = () => {
+    if (!window.remiRealtimeTripSyncEnabled) return;
+    const tripMatch = window.location.pathname.match(/^\/trips\/([^/]+)/i);
+    const tripID = tripMatch ? decodeURIComponent(tripMatch[1]) : "";
+    if (!tripID) return;
+
+    let refreshQueued = false;
+    let refreshInFlight = false;
+    let pendingViewportRefresh = false;
+    const softRefreshActiveTripPage = async () => {
+      if (document.hidden) {
+        refreshQueued = true;
+        return;
+      }
+      if (
+        document.querySelector(".item-edit:not(.hidden), .trip-keep-form:not(.hidden), .trip-keep-form.item-edit:not(.hidden)") ||
+        hasActiveKeepBoardEdit(document.querySelector("[data-trip-keep-board-root]")) ||
+        hasActiveKeepBoardEdit(document.querySelector("[data-trip-details-keep-live]"))
+      ) {
+        refreshQueued = true;
+        window.setTimeout(() => {
+          if (!refreshInFlight) void softRefreshActiveTripPage();
+        }, 700);
+        return;
+      }
+      refreshInFlight = true;
+      refreshQueued = false;
+      try {
+        if (document.querySelector("main.trip-details-page")) {
+          await syncAllRenderedItineraryRows();
+          await refreshBudgetTilesFromPage();
+          await window.remiSyncTripKeepAfterMutation?.();
+          await refreshTripDetailsSupportSectionsFromServer();
+          return;
+        }
+        if (document.querySelector("main.tab-page")) {
+          await window.refreshTheTabPageFromServer();
+          await refreshSharedTripChromeFromServer();
+          return;
+        }
+        if (document.body.classList.contains("page-trip-notes")) {
+          const view = document.body.getAttribute("data-keep-view") || "notes";
+          const input = document.querySelector("#keep-search-q");
+          const qFromInput = input instanceof HTMLInputElement ? input.value.trim() : "";
+          const qFromUrl = new URLSearchParams(window.location.search).get("q") || "";
+          const html = await fetchKeepBoardFragment(tripID, view, qFromInput || qFromUrl);
+          const cur = document.querySelector("[data-trip-keep-board-root]");
+          if (cur?.parentNode) {
+            const tpl = document.createElement("template");
+            tpl.innerHTML = html.trim();
+            const next = tpl.content.firstElementChild;
+            if (next) {
+              cur.parentNode.replaceChild(next, cur);
+              remiAfterKeepDomSwap(next);
+            }
+          }
+          await refreshSharedTripChromeFromServer();
+          return;
+        }
+        window.location.reload();
+      } catch (e) {
+        window.location.reload();
+      } finally {
+        refreshInFlight = false;
+        if (refreshQueued) {
+          refreshQueued = false;
+          void softRefreshActiveTripPage();
+        }
+      }
+    };
+
+    const source = new EventSource(`/api/v1/trips/${encodeURIComponent(tripID)}/events?after_id=latest`);
+    source.addEventListener("change", () => {
+      if (refreshInFlight) {
+        refreshQueued = true;
+        return;
+      }
+      void softRefreshActiveTripPage();
+    });
+    source.onerror = () => {
+      refreshQueued = true;
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && (refreshQueued || pendingViewportRefresh)) {
+        pendingViewportRefresh = false;
+        void softRefreshActiveTripPage();
+      }
+    });
+    if (typeof window.matchMedia === "function") {
+      const mq = window.matchMedia("(max-width: 980px)");
+      const onViewportSwap = () => {
+        pendingViewportRefresh = true;
+        if (!document.hidden) {
+          void softRefreshActiveTripPage();
+        }
+      };
+      if (typeof mq.addEventListener === "function") {
+        mq.addEventListener("change", onViewportSwap);
+      } else if (typeof mq.addListener === "function") {
+        mq.addListener(onViewportSwap);
+      }
+    }
+  };
+
+  const boot = () => {
+    startZeroRefreshTripSync();
+    startNotesPageKeepPolling();
+    startTripDetailsKeepPolling();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else {
+    boot();
+  }
 })();
 
 // Trip settings: Trip sections (ui_trip_section_*) are masters for module on/off; Primary Content uses ui_vis_main_*
@@ -5714,14 +8213,6 @@ window.addEventListener("load", () => {
         col.checked = preservedMain.get(key);
       }
       label.classList.remove("trip-settings-sec-vis-mirror-label--locked");
-    }
-    const hint = label.querySelector(".trip-settings-vis-live-hint");
-    if (hint) {
-      if (on) {
-        hint.setAttribute("hidden", "");
-      } else {
-        hint.removeAttribute("hidden");
-      }
     }
   }
 
@@ -6161,7 +8652,9 @@ const wireSiteSettingsGoogleMapsKeyForms = () => {
       initSiteSettingsGoogleMapsKeySection(form);
       form.dataset.remiGmapsKeyWired = "1";
     } catch (err) {
-      console.error("Google Maps key settings UI failed to initialize", err);
+      if (typeof window.remiToast === "function") {
+        window.remiToast("Map settings controls are temporarily unavailable.");
+      }
     }
   });
 };
@@ -6227,6 +8720,8 @@ window.addEventListener("load", () => {
   }
 
   function setupCarousel(wrap) {
+    if (!(wrap instanceof HTMLElement) || wrap.dataset.remiCarouselBound === "1") return;
+    wrap.dataset.remiCarouselBound = "1";
     const viewport = wrap.querySelector(".mobile-entry-carousel__viewport");
     const track = wrap.querySelector(".mobile-entry-carousel__track");
     const prevBtn = wrap.querySelector(".mobile-entry-carousel__hint--prev");
@@ -6298,8 +8793,13 @@ window.addEventListener("load", () => {
     requestAnimationFrame(() => setSlideSize());
   }
 
+  const initMobileEntryCarouselsIn = (root) => {
+    const scope = root instanceof HTMLElement || root instanceof Document ? root : document;
+    scope.querySelectorAll("[data-mobile-entry-carousel]").forEach(setupCarousel);
+  };
+  window.remiSetupMobileEntryCarouselsIn = initMobileEntryCarouselsIn;
   const boot = () => {
-    document.querySelectorAll("[data-mobile-entry-carousel]").forEach(setupCarousel);
+    initMobileEntryCarouselsIn(document);
   };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot, { once: true });
@@ -6350,6 +8850,20 @@ window.addEventListener("load", () => {
   /** Match Go trips.roundMoney */
   function roundMoney(x) {
     return Math.round(x * 100) / 100;
+  }
+
+  function parseMoneyToCentsClient(value) {
+    const raw = String(value ?? "").trim().replace(/,/g, "");
+    if (!raw) return 0;
+    const sign = raw.startsWith("-") ? -1 : 1;
+    const normalized = raw.replace(/^[+-]/, "");
+    const parts = normalized.split(".");
+    if (parts.length > 2) return 0;
+    const whole = parts[0] || "0";
+    let frac = parts[1] || "";
+    if (!/^\d+$/.test(whole) || (frac && !/^\d+$/.test(frac))) return 0;
+    frac = (frac + "00").slice(0, 2);
+    return sign * ((parseInt(whole, 10) * 100) + parseInt(frac || "0", 10));
   }
 
   /** Match Go trips.fixRoundingDrift: add penny drift to lexicographically last participant key. */
@@ -6460,15 +8974,15 @@ window.addEventListener("load", () => {
     const weights = collectWeights(root);
     let sum = 0;
     keys.forEach((k) => {
-      sum += weights[k] || 0;
+      sum += parseMoneyToCentsClient(weights[k] || 0);
     });
     return sum;
   }
 
   function exactSumsMatch(root) {
-    const total = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
+    const total = parseMoneyToCentsClient(root.querySelector("[data-tab-amount-input]")?.value || "");
     const sum = exactSelectedSum(root);
-    return Math.abs(total - sum) < 0.005;
+    return total === sum;
   }
 
   /** Selected participants must each have an integer share count ≥ 1 (matches server TabSplitShares validation). */
@@ -6524,18 +9038,19 @@ window.addEventListener("load", () => {
     const matchEl = root.querySelector("[data-tab-exact-match]");
     if (!remainingEl || mode !== "exact") return;
     const sym = currencySym(root);
-    const total = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
-    const sum = exactSelectedSum(root);
-    const remaining = total - sum;
+    const totalCents = parseMoneyToCentsClient(root.querySelector("[data-tab-amount-input]")?.value || "");
+    const sumCents = exactSelectedSum(root);
+    const remainingCents = totalCents - sumCents;
+    const remaining = remainingCents / 100;
     let remText;
-    if (remaining < -0.005) {
+    if (remainingCents < 0) {
       remText = `-${sym}${(-remaining).toFixed(2)}`;
     } else {
       remText = `${sym}${remaining.toFixed(2)}`;
     }
     remainingEl.textContent = remText;
     if (matchEl) {
-      const ok = Math.abs(remaining) < 0.005;
+      const ok = remainingCents === 0;
       matchEl.classList.toggle("hidden", !ok);
     }
   }
@@ -6619,7 +9134,7 @@ window.addEventListener("load", () => {
     if (amtInp instanceof HTMLInputElement && !hasPositiveTabAmount(root)) {
       btn.disabled = true;
       btn.setAttribute("aria-disabled", "true");
-      btn.setAttribute("title", "Enter a positive expense amount first.");
+      btn.setAttribute("title", "Enter an amount before configuring the split.");
       return;
     }
     const total = parseFloat(String(root.querySelector("[data-tab-amount-input]")?.value || "")) || 0;
@@ -6776,10 +9291,18 @@ window.addEventListener("load", () => {
     const keys = selectedKeys(root);
     const raw = collectWeights(root);
     const weights = {};
+    const amountsCents = {};
+    const mode = (root.querySelector("[data-tab-split-mode]")?.value || "equal").toLowerCase();
     keys.forEach((k) => {
-      weights[k] = raw[k] || 0;
+      if (mode === "exact") {
+        amountsCents[k] = parseMoneyToCentsClient(raw[k] || 0);
+      } else {
+        weights[k] = raw[k] || 0;
+      }
     });
-    const payload = { participants: keys, weights };
+    const payload = mode === "exact"
+      ? { participants: keys, amounts_cents: amountsCents }
+      : { participants: keys, weights };
     const hid = root.querySelector("[data-tab-split-json]");
     if (hid) hid.value = JSON.stringify(payload);
   }
@@ -6908,10 +9431,10 @@ window.addEventListener("load", () => {
     const hint = root.querySelector("[data-tab-split-hint]");
     if (hint) {
       const hints = {
-        equal: "Split equally among selected people.",
-        exact: "Enter each person’s share in dollars (must add up to the expense total).",
-        percent: "Percentages should add up to 100%.",
-        shares: "Allocate costs using a proportional share system.",
+        equal: "Split equally among selected members.",
+        exact: "Enter each person’s share (must total the expense amount).",
+        percent: "Percentages must total 100%.",
+        shares: "Allocate costs using share units.",
       };
       hint.textContent = hints[m] || "";
     }
@@ -6935,7 +9458,10 @@ window.addEventListener("load", () => {
         });
       }
       setMode(root, initMode, true);
-      Object.entries(initJson.weights || {}).forEach(([k, v]) => {
+      const initEntries = initMode === "exact"
+        ? Object.entries(initJson.amounts_cents || {}).map(([k, v]) => [k, Number(v) / 100])
+        : Object.entries(initJson.weights || {});
+      initEntries.forEach(([k, v]) => {
         const found = Array.from(root.querySelectorAll("[data-tab-weight-key]")).find(
           (i) => i.getAttribute("data-tab-weight-key") === k,
         );
@@ -6959,7 +9485,10 @@ window.addEventListener("load", () => {
       setMode(root, tripMode, true);
       const allowSeedWeights = tripMode !== "exact" || hasPositiveTabAmount(root);
       if (allowSeedWeights) {
-        Object.entries(tripDef.weights || {}).forEach(([k, v]) => {
+        const defaultEntries = tripMode === "exact"
+          ? Object.entries(tripDef.amounts_cents || {}).map(([k, v]) => [k, Number(v) / 100])
+          : Object.entries(tripDef.weights || {});
+        defaultEntries.forEach(([k, v]) => {
           const found = Array.from(root.querySelectorAll("[data-tab-weight-key]")).find(
             (i) => i.getAttribute("data-tab-weight-key") === k,
           );
@@ -7108,9 +9637,8 @@ window.addEventListener("load", () => {
 (function initTabExpenseInstantFilter() {
   const norm = (s) => String(s || "").trim().toLowerCase();
 
-  function apply() {
-    const section = document.querySelector("[data-tab-expenses-section]");
-    if (!section) return;
+  function applySection(section) {
+    if (!(section instanceof HTMLElement)) return;
     const input = section.querySelector("[data-tab-exp-filter-input]");
     const catSelect = section.querySelector("[data-tab-exp-filter-category]");
     const q = norm(input?.value);
@@ -7167,28 +9695,43 @@ window.addEventListener("load", () => {
     }
   }
 
-  function wire() {
-    const section = document.querySelector("[data-tab-expenses-section]");
-    if (!section || section.dataset.remiTabExpFilterWired === "1") return;
-    section.dataset.remiTabExpFilterWired = "1";
-    const input = section.querySelector("[data-tab-exp-filter-input]");
-    const catSelect = section.querySelector("[data-tab-exp-filter-category]");
-    const form = section.querySelector("[data-tab-exp-filter-form]");
-    input?.addEventListener("input", () => apply());
-    input?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") e.preventDefault();
+  function apply() {
+    document.querySelectorAll("[data-tab-expenses-section]").forEach((section) => {
+      applySection(section);
     });
-    catSelect?.addEventListener("change", () => apply());
-    form?.addEventListener("submit", (e) => {
-      e.preventDefault();
-    });
-    apply();
+  }
+
+  let mqBound = false;
+  function bindMqOnce() {
+    if (mqBound) return;
+    mqBound = true;
     const mq = window.matchMedia?.("(max-width: 920px)");
     if (mq?.addEventListener) {
       mq.addEventListener("change", () => apply());
     } else if (mq?.addListener) {
       mq.addListener(() => apply());
     }
+  }
+
+  function wire() {
+    document.querySelectorAll("[data-tab-expenses-section]").forEach((section) => {
+      if (!(section instanceof HTMLElement)) return;
+      if (section.dataset.remiTabExpFilterWired === "1") return;
+      section.dataset.remiTabExpFilterWired = "1";
+      const input = section.querySelector("[data-tab-exp-filter-input]");
+      const catSelect = section.querySelector("[data-tab-exp-filter-category]");
+      const form = section.querySelector("[data-tab-exp-filter-form]");
+      input?.addEventListener("input", () => apply());
+      input?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") e.preventDefault();
+      });
+      catSelect?.addEventListener("change", () => apply());
+      form?.addEventListener("submit", (e) => {
+        e.preventDefault();
+      });
+      applySection(section);
+    });
+    bindMqOnce();
   }
 
   window.remiSyncTabExpenseInstantFilter = apply;
@@ -7202,7 +9745,7 @@ window.addEventListener("load", () => {
 
 const TAB_OVER_TIME_PAGE_SIZE = 7;
 
-/** When opening Group Expenses via #add-group-expense (or legacy #add-tab), scroll to Log new expense after layout. */
+/** When opening Group Expenses via #add-group-expense (or legacy #add-tab), scroll to Add New Expense after layout. */
 function scrollToTabLogExpenseFromHash() {
   if (!document.body.classList.contains("page-the-tab")) return;
   const h = (window.location.hash || "").trim().toLowerCase();
@@ -7472,6 +10015,36 @@ function initTabOverTimeChart() {
   const root = document.querySelector("[data-trip-documents-root]");
   if (!root) return;
   const mqTripDocDesktop = window.matchMedia("(min-width: 981px)");
+  const mqDocActionsMobile = window.matchMedia("(max-width: 980px)");
+  const mainShell = document.querySelector("main.app-shell[data-max-upload-file-size-mb]");
+  const getTripDocMaxBytes = () => {
+    const raw = mainShell?.getAttribute("data-max-upload-file-size-mb") || "";
+    const mb = Math.max(1, parseInt(raw, 10) || 5);
+    return mb * 1024 * 1024;
+  };
+  const uploadFeedbacks = Array.from(root.querySelectorAll("[data-trip-doc-upload-feedback]"));
+  const clearTripDocUploadFeedback = () => {
+    uploadFeedbacks.forEach((el) => {
+      if (el instanceof HTMLElement) {
+        el.textContent = "";
+        el.classList.add("hidden");
+      }
+    });
+  };
+  const setTripDocUploadFeedback = (msg) => {
+    const t = String(msg || "").trim();
+    if (!t) {
+      clearTripDocUploadFeedback();
+      return;
+    }
+    const cap = t.charAt(0).toUpperCase() + t.slice(1);
+    uploadFeedbacks.forEach((el) => {
+      if (el instanceof HTMLElement) {
+        el.textContent = cap;
+        el.classList.remove("hidden");
+      }
+    });
+  };
   const searchInput = root.querySelector("[data-trip-doc-search]");
   const categorySelect = root.querySelector("[data-trip-doc-category]");
   const items = Array.from(root.querySelectorAll("[data-trip-doc-item]"));
@@ -7494,6 +10067,14 @@ function initTabOverTimeChart() {
   categorySelect?.addEventListener("change", apply);
   apply();
 
+  window.remiRefreshTripDocumentsListFilter = () => {
+    const ul = root.querySelector(".trip-documents-items");
+    if (!ul) return;
+    items.length = 0;
+    items.push(...ul.querySelectorAll("[data-trip-doc-item]"));
+    apply();
+  };
+
   const dropzone = root.querySelector("[data-trip-doc-dropzone]");
   const input = root.querySelector("[data-trip-doc-file-input]");
   const selectedList = root.querySelector("[data-trip-doc-selected-list]");
@@ -7506,8 +10087,7 @@ function initTabOverTimeChart() {
   const syncTripDocUploadSubmitLabel = () => {
     const btn = root.querySelector(".trip-documents-upload-submit");
     if (!(btn instanceof HTMLButtonElement)) return;
-    const n = tripDocStagedFiles.length;
-    const label = n > 1 ? "Upload Documents" : "Upload Document";
+    const label = "Upload";
     btn.textContent = label;
     btn.setAttribute("aria-label", label);
   };
@@ -7524,26 +10104,35 @@ function initTabOverTimeChart() {
     const seen = new Set(tripDocStagedFiles.map(tripDocFileKey));
     const isBlocked = window.remiIsBlockedUploadFilename;
     const blockedMsg = window.remiBlockedUploadFilenameMessage;
+    let added = 0;
     for (let i = 0; i < fileList.length; i++) {
       const f = fileList[i];
       if (typeof isBlocked === "function" && isBlocked(f.name)) {
-        window.remiShowToast?.(
-          blockedMsg || "This file type is not allowed — executables and scripts cannot be uploaded."
-        );
+        const bm =
+          blockedMsg || "This file type is not allowed — executables and scripts cannot be uploaded.";
+        setTripDocUploadFeedback(bm);
+        window.remiShowToast?.(bm);
         continue;
       }
       const k = tripDocFileKey(f);
       if (!seen.has(k)) {
         seen.add(k);
         tripDocStagedFiles.push(f);
+        added += 1;
       }
     }
     syncTripDocStagedToInput();
     refreshTripDocSelectedList();
+    if (added > 0) clearTripDocUploadFeedback();
   };
+
+  const selectionStatus = root.querySelector("[data-trip-doc-selection-status]");
 
   const refreshTripDocSelectedList = () => {
     syncTripDocUploadSubmitLabel();
+    if (selectionStatus instanceof HTMLElement) {
+      selectionStatus.classList.toggle("hidden", tripDocStagedFiles.length > 0);
+    }
     if (!(selectedList instanceof HTMLElement) || !(input instanceof HTMLInputElement)) return;
     selectedList.innerHTML = "";
     if (tripDocStagedFiles.length === 0) {
@@ -7570,6 +10159,9 @@ function initTabOverTimeChart() {
   };
 
   if (dropzone && input instanceof HTMLInputElement) {
+    input.addEventListener("click", () => {
+      clearTripDocUploadFeedback();
+    });
     input.addEventListener("change", () => {
       if (input.files && input.files.length) {
         addTripDocFilesToStaged(input.files);
@@ -7597,6 +10189,135 @@ function initTabOverTimeChart() {
     refreshTripDocSelectedList();
   }
 
+  const validateFn = window.remiValidateBookingAttachmentFile;
+  const uploadForm = root.querySelector(".trip-documents-upload-form");
+  const mobileForm = root.querySelector(".trip-documents-mobile-upload");
+  const mobileInput = root.querySelector("[data-trip-doc-mobile-file-input]");
+
+  const runTripDocumentsAjaxUpload = async (formEl, fileCountHint) => {
+    if (!(formEl instanceof HTMLFormElement)) return;
+    let r;
+    try {
+      const fd = new FormData(formEl);
+      r = await fetch(formEl.action, {
+        method: "POST",
+        body: fd,
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          Accept: "application/json"
+        }
+      });
+    } catch (e) {
+      const msg = e?.message || "Upload failed.";
+      setTripDocUploadFeedback(msg);
+      window.remiShowToast?.(msg);
+      return;
+    }
+    const raw = await r.text();
+    let data = null;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      data = null;
+    }
+    if (!r.ok) {
+      const msg = (data && data.error) || raw.trim() || "Upload failed.";
+      setTripDocUploadFeedback(msg);
+      window.remiShowToast?.(msg);
+      return;
+    }
+    if (!data || !data.tripDocuments) {
+      const msg = "Unexpected server response.";
+      setTripDocUploadFeedback(msg);
+      window.remiShowToast?.(msg);
+      return;
+    }
+    if (window.remiApplyTripDocumentsAjaxResponse?.(root, data.tripDocuments, formEl)) {
+      tripDocStagedFiles = [];
+      if (input instanceof HTMLInputElement) {
+        input.value = "";
+        syncTripDocStagedToInput();
+      }
+      refreshTripDocSelectedList();
+      clearTripDocUploadFeedback();
+      if (mobileInput instanceof HTMLInputElement) {
+        mobileInput.value = "";
+      }
+      const n = typeof fileCountHint === "number" && fileCountHint > 0 ? fileCountHint : 1;
+      window.remiShowToast?.(n > 1 ? `${n} documents uploaded.` : "Document uploaded.");
+    }
+  };
+
+  if (uploadForm instanceof HTMLFormElement && typeof validateFn === "function") {
+    uploadForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (tripDocStagedFiles.length === 0) {
+        setTripDocUploadFeedback("Please select at least one file.");
+        window.remiShowToast?.("Please select at least one file.");
+        return;
+      }
+      const maxB = getTripDocMaxBytes();
+      const nFiles = tripDocStagedFiles.length;
+      void (async () => {
+        for (let i = 0; i < tripDocStagedFiles.length; i++) {
+          const f = tripDocStagedFiles[i];
+          const r = await validateFn(f, maxB);
+          if (!r || !r.ok) {
+            const msg = (r && r.message) || "Upload could not be validated.";
+            setTripDocUploadFeedback(msg);
+            window.remiShowToast?.(msg);
+            return;
+          }
+        }
+        clearTripDocUploadFeedback();
+        await runTripDocumentsAjaxUpload(uploadForm, nFiles);
+      })();
+    });
+  }
+
+  if (mobileForm instanceof HTMLFormElement && mobileInput instanceof HTMLInputElement) {
+    mobileInput.addEventListener("click", () => {
+      clearTripDocUploadFeedback();
+    });
+    if (typeof validateFn === "function") {
+      mobileInput.addEventListener("change", () => {
+        const files = mobileInput.files;
+        if (!files || files.length === 0) return;
+        const maxB = getTripDocMaxBytes();
+        const nFiles = files.length;
+        void (async () => {
+          for (let i = 0; i < files.length; i++) {
+            const f = files[i];
+            if (typeof window.remiIsBlockedUploadFilename === "function" && window.remiIsBlockedUploadFilename(f.name)) {
+              const bm =
+                window.remiBlockedUploadFilenameMessage ||
+                "This file type is not allowed — executables and scripts cannot be uploaded.";
+              setTripDocUploadFeedback(bm);
+              window.remiShowToast?.(bm);
+              mobileInput.value = "";
+              return;
+            }
+            const r = await validateFn(f, maxB);
+            if (!r || !r.ok) {
+              const msg = (r && r.message) || "Upload could not be validated.";
+              setTripDocUploadFeedback(msg);
+              window.remiShowToast?.(msg);
+              return;
+            }
+          }
+          clearTripDocUploadFeedback();
+          await runTripDocumentsAjaxUpload(mobileForm, nFiles);
+        })();
+      });
+    } else {
+      mobileInput.addEventListener("change", () => {
+        if (mobileInput.files && mobileInput.files.length > 0) {
+          void runTripDocumentsAjaxUpload(mobileForm, mobileInput.files.length);
+        }
+      });
+    }
+  }
+
   const closeRename = (li) => {
     if (!(li instanceof HTMLElement)) return;
     li.classList.remove("editing");
@@ -7622,6 +10343,7 @@ function initTabOverTimeChart() {
       tripDocStagedFiles.splice(i, 1);
       syncTripDocStagedToInput();
       refreshTripDocSelectedList();
+      clearTripDocUploadFeedback();
       return;
     }
     const openUrlBtn = e.target.closest("[data-trip-doc-open-url]");
@@ -7638,6 +10360,12 @@ function initTabOverTimeChart() {
       e.preventDefault();
       const li = openBtn.closest(".trip-documents-item");
       if (!(li instanceof HTMLElement)) return;
+      if (mqDocActionsMobile.matches) {
+        const actionsDetails = openBtn.closest("details.trip-documents-item-actions");
+        if (actionsDetails instanceof HTMLDetailsElement) {
+          actionsDetails.removeAttribute("open");
+        }
+      }
       root.querySelectorAll(".trip-documents-item.editing").forEach((other) => {
         if (other !== li) closeRename(other);
       });
@@ -7666,6 +10394,130 @@ function initTabOverTimeChart() {
     if (li && root.contains(li) && li.classList.contains("editing")) {
       e.preventDefault();
       closeRename(li);
+      return;
+    }
+    if (mqDocActionsMobile.matches) {
+      const openActions = root.querySelector("details.trip-documents-item-actions[open]");
+      if (openActions instanceof HTMLDetailsElement) {
+        e.preventDefault();
+        openActions.removeAttribute("open");
+      }
     }
   });
+
+  const closeOtherDocActionMenus = (keepOpen) => {
+    root.querySelectorAll("details.trip-documents-item-actions[open]").forEach((d) => {
+      if (d !== keepOpen) d.removeAttribute("open");
+    });
+  };
+  root.addEventListener("toggle", (e) => {
+    if (!mqDocActionsMobile.matches) return;
+    const t = e.target;
+    if (!(t instanceof HTMLDetailsElement) || !t.classList.contains("trip-documents-item-actions")) return;
+    if (t.open) {
+      closeOtherDocActionMenus(t);
+    }
+  });
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!mqDocActionsMobile.matches) return;
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      const openDetails = root.querySelector("details.trip-documents-item-actions[open]");
+      if (!openDetails || !(openDetails instanceof HTMLDetailsElement)) return;
+      if (openDetails.contains(t)) return;
+      openDetails.removeAttribute("open");
+    },
+    true
+  );
+})();
+
+/** Budget donut: scale center amount so it stays inside the ring (same abbrev string as trip budget tile). */
+(function remiBudgetDonutCenterFit() {
+  const MIN_PX = 11;
+  const WIDTH_FRAC = 0.96;
+
+  const fitOne = (valueEl) => {
+    const fit = valueEl.closest(".budget-donut-center-value-fit");
+    if (!(fit instanceof HTMLElement)) return;
+    const maxW = fit.clientWidth * WIDTH_FRAC;
+    if (maxW <= 1) return;
+    valueEl.style.fontSize = "";
+    let hi = parseFloat(window.getComputedStyle(valueEl).fontSize);
+    if (!Number.isFinite(hi) || hi < MIN_PX) hi = MIN_PX;
+    valueEl.style.fontSize = `${hi}px`;
+    if (valueEl.scrollWidth <= maxW) return;
+    let lo = MIN_PX;
+    let best = lo;
+    for (let i = 0; i < 28; i++) {
+      const mid = (lo + hi) / 2;
+      valueEl.style.fontSize = `${mid}px`;
+      if (valueEl.scrollWidth <= maxW) {
+        best = mid;
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    valueEl.style.fontSize = `${best}px`;
+  };
+
+  const fitIn = (root) => {
+    const scope = root instanceof HTMLElement ? root : document;
+    scope.querySelectorAll(".budget-donut-center-value").forEach((el) => {
+      if (el instanceof HTMLElement) fitOne(el);
+    });
+  };
+
+  let ro;
+  const observeWrappers = () => {
+    if (typeof ResizeObserver !== "function") return;
+    document.querySelectorAll(".budget-donut-wrapper").forEach((w) => {
+      if (!(w instanceof HTMLElement)) return;
+      if (w.dataset.remiDonutFitObserved === "1") return;
+      w.dataset.remiDonutFitObserved = "1";
+      if (!ro) {
+        ro = new ResizeObserver((entries) => {
+          for (const ent of entries) {
+            const t = ent.target;
+            if (!(t instanceof HTMLElement)) continue;
+            t.querySelectorAll(".budget-donut-center-value").forEach((el) => {
+              if (el instanceof HTMLElement) fitOne(el);
+            });
+          }
+        });
+      }
+      ro.observe(w);
+    });
+  };
+
+  window.remiFitBudgetDonutCenterValues = (root) => {
+    observeWrappers();
+    fitIn(root ?? document);
+  };
+
+  const boot = () => {
+    window.remiFitBudgetDonutCenterValues(document);
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else {
+    boot();
+  }
+
+  document.body?.addEventListener("htmx:afterSwap", (event) => {
+    const target = event?.detail?.target;
+    if (!(target instanceof HTMLElement)) return;
+    const hasDonut =
+      target.matches(".budget-donut-wrapper, .budget-donut, .budget-donut-center, .budget-donut-center-value-fit") ||
+      target.querySelector(".budget-donut-center-value");
+    if (!hasDonut) return;
+    window.remiFitBudgetDonutCenterValues(target);
+  });
+
+  if (document.fonts?.ready) {
+    document.fonts.ready.then(() => window.remiFitBudgetDonutCenterValues(document)).catch(() => {});
+  }
 })();

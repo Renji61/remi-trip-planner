@@ -4,7 +4,8 @@ import (
 	"strings"
 )
 
-// Main trip page section keys (hero + edit panel remain fixed above these).
+// Main trip page section keys (hero card and trip header/edit panel stay above these;
+// Trip Map is the first key in the scrollable main column).
 const (
 	MainSectionMap       = "map"
 	MainSectionItinerary = "itinerary"
@@ -16,16 +17,16 @@ const (
 	MainSectionTheTab    = "the_tab"
 )
 
-// DefaultMainSectionOrder matches the historical trip page layout.
+// DefaultMainSectionOrder is the main-column order on Trip Details (below the hero).
 var DefaultMainSectionOrder = []string{
 	MainSectionMap,
 	MainSectionItinerary,
-	MainSectionSpends,
-	MainSectionTheTab,
-	MainSectionChecklist,
+	MainSectionFlights,
 	MainSectionStay,
 	MainSectionVehicle,
-	MainSectionFlights,
+	MainSectionChecklist,
+	MainSectionSpends,
+	MainSectionTheTab,
 }
 
 var mainSectionSet = map[string]struct{}{
@@ -44,22 +45,25 @@ const (
 	SidebarAddStop      = "add_stop"
 	SidebarBudget       = "budget"
 	SidebarQuickSpends  = "quick_spends"
+	SidebarTabTotal     = "tab_total"
 	SidebarAddTab       = "add_tab"
 	SidebarAddChecklist = "checklist"
 )
 
 var DefaultSidebarWidgetOrder = []string{
 	SidebarAddStop,
-	SidebarBudget,
-	SidebarQuickSpends,
-	SidebarAddTab,
 	SidebarAddChecklist,
+	SidebarQuickSpends,
+	SidebarTabTotal,
+	SidebarAddTab,
+	SidebarBudget,
 }
 
 var sidebarWidgetSet = map[string]struct{}{
 	SidebarAddStop:      {},
 	SidebarBudget:       {},
 	SidebarQuickSpends:  {},
+	SidebarTabTotal:     {},
 	SidebarAddTab:       {},
 	SidebarAddChecklist: {},
 }
@@ -72,7 +76,37 @@ func NormalizeMainSectionOrder(raw string) []string {
 
 // NormalizeSidebarWidgetOrder is like NormalizeMainSectionOrder for sidebar keys.
 func NormalizeSidebarWidgetOrder(raw string) []string {
-	return normalizeOrder(raw, sidebarWidgetSet, DefaultSidebarWidgetOrder)
+	out := normalizeOrder(raw, sidebarWidgetSet, DefaultSidebarWidgetOrder)
+	return ensureSidebarTabTotalBeforeAddTab(out)
+}
+
+// ensureSidebarTabTotalBeforeAddTab keeps the group-expense summary tile directly above
+// the add form when both appear in the sidebar order (including legacy saved orders).
+func ensureSidebarTabTotalBeforeAddTab(keys []string) []string {
+	hasAdd := false
+	for _, k := range keys {
+		if k == SidebarAddTab {
+			hasAdd = true
+			break
+		}
+	}
+	if !hasAdd {
+		return keys
+	}
+	without := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k != SidebarTabTotal {
+			without = append(without, k)
+		}
+	}
+	out := make([]string, 0, len(without)+1)
+	for _, k := range without {
+		if k == SidebarAddTab {
+			out = append(out, SidebarTabTotal)
+		}
+		out = append(out, k)
+	}
+	return out
 }
 
 // JoinMainSectionOrder encodes main section order for storage.
@@ -183,10 +217,10 @@ func SidebarWidgetVisible(key string, t Trip) bool {
 	if !t.UIShowChecklist && key == SidebarAddChecklist {
 		return false
 	}
-	if !t.UIShowSpends && (key == SidebarBudget || key == SidebarQuickSpends || key == SidebarAddTab) {
+	if !t.UIShowSpends && (key == SidebarBudget || key == SidebarQuickSpends || key == SidebarTabTotal || key == SidebarAddTab) {
 		return false
 	}
-	if !t.UIShowTheTab && key == SidebarAddTab {
+	if !t.UIShowTheTab && (key == SidebarTabTotal || key == SidebarAddTab) {
 		return false
 	}
 	if strings.TrimSpace(t.UISidebarWidgetHidden) != "" {
@@ -196,6 +230,54 @@ func SidebarWidgetVisible(key string, t Trip) bool {
 		return true
 	}
 	return true
+}
+
+// TripMobileFabHasItems is true when the trip FAB menu would list at least one action
+// (must match web/templates/trip_mobile_fab_links.html).
+func TripMobileFabHasItems(t Trip) bool {
+	if t.UIShowItinerary && SidebarWidgetVisible(SidebarAddStop, t) {
+		return true
+	}
+	if t.UIShowSpends && SidebarWidgetVisible(SidebarQuickSpends, t) {
+		return true
+	}
+	if t.SectionEnabledTheTab() && SidebarWidgetVisible(SidebarAddTab, t) {
+		return true
+	}
+	if t.UIShowStay {
+		return true
+	}
+	if t.UIShowVehicle {
+		return true
+	}
+	if t.UIShowFlights {
+		return true
+	}
+	if SidebarWidgetVisible(SidebarAddChecklist, t) {
+		return true
+	}
+	if t.UIShowDocuments {
+		return true
+	}
+	return false
+}
+
+// TripDesktopCalendarFlyoutHasActions is true when the itinerary calendar “quick add” flyout
+// would show at least one button (trip.html desktop-calendar-flyout).
+func TripDesktopCalendarFlyoutHasActions(t Trip) bool {
+	if t.UIShowItinerary && SidebarWidgetVisible(SidebarAddStop, t) {
+		return true
+	}
+	if t.UIShowStay {
+		return true
+	}
+	if t.UIShowVehicle {
+		return true
+	}
+	if t.UIShowFlights {
+		return true
+	}
+	return false
 }
 
 // MainSectionVisibilityIcon is a Material Symbols name for trip settings visibility rows.
@@ -231,6 +313,8 @@ func SidebarWidgetVisibilityIcon(key string) string {
 		return "account_balance_wallet"
 	case SidebarQuickSpends:
 		return "receipt_long"
+	case SidebarTabTotal:
+		return "groups"
 	case SidebarAddTab:
 		return "post_add"
 	case SidebarAddChecklist:
@@ -250,7 +334,7 @@ func MainSectionLabel(key string) string {
 	case MainSectionSpends:
 		return "Expenses"
 	case MainSectionChecklist:
-		return "Reminder Checklist"
+		return "Notes & Checklists"
 	case MainSectionStay:
 		return "Accommodation"
 	case MainSectionVehicle:
@@ -268,15 +352,17 @@ func MainSectionLabel(key string) string {
 func SidebarWidgetLabel(key string) string {
 	switch key {
 	case SidebarAddStop:
-		return "Add New Stop"
+		return "Add Stop"
 	case SidebarBudget:
 		return "Budget Limit"
 	case SidebarQuickSpends:
-		return "Quick Expenses"
+		return "Add Expense"
+	case SidebarTabTotal:
+		return "Group Expense"
 	case SidebarAddTab:
-		return "Add to Group Expenses"
+		return "Add Group Expense"
 	case SidebarAddChecklist:
-		return "Add to Checklist"
+		return "Add Note / Checklist"
 	default:
 		return key
 	}

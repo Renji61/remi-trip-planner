@@ -1,0 +1,11 @@
+{{define "tripDetailsNoteSlideActions"}}
+<div class="remi-slide-actions-group remi-checklist-item-actions">
+  <button type="button" class="remi-action-btn remi-action-btn--edit remi-checklist-action-btn remi-checklist-action-btn--secondary" data-inline-edit-open="trip-details-note-edit-{{.NoteID}}" aria-label="Edit note">Edit</button>
+  <form method="post" action="/trips/{{.TripID}}/notes/note/{{.NoteID}}/intent" class="remi-checklist-delete-form remi-action-delete-form" data-app-confirm data-confirm-title="Move this note to trash?" data-confirm-body="You can restore it from Trash on the Notes page." data-confirm-ok="Move to trash" data-confirm-icon="edit_note" data-confirm-variant="danger" data-ajax-submit data-toast-message="Note moved to trash.">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+    <input type="hidden" name="intent" value="trash">
+    <button type="submit" class="remi-action-btn remi-action-btn--delete remi-checklist-action-btn remi-checklist-action-btn--danger" aria-label="Move note to trash">Delete</button>
+  </form>
+</div>
+{{end}}

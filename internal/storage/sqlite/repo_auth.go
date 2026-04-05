@@ -37,10 +37,10 @@ func (r *Repository) CreateUser(ctx context.Context, u trips.User) (string, erro
 		verified = u.EmailVerifiedAt.UTC().Format(time.RFC3339)
 	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO users (id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO users (id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at, is_admin)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.ID, strings.TrimSpace(u.Email), strings.TrimSpace(u.Username), strings.TrimSpace(u.DisplayName),
-		u.PasswordHash, strings.TrimSpace(u.AvatarPath), verified, now, now,
+		u.PasswordHash, strings.TrimSpace(u.AvatarPath), verified, now, now, sqliteBool(u.IsAdmin),
 	)
 	return u.ID, err
 }
@@ -52,45 +52,92 @@ func (r *Repository) UpdateUser(ctx context.Context, u trips.User) error {
 		verified = u.EmailVerifiedAt.UTC().Format(time.RFC3339)
 	}
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE users SET email = ?, username = ?, display_name = ?, password_hash = ?, avatar_path = ?, email_verified_at = ?, updated_at = ?
+		UPDATE users SET email = ?, username = ?, display_name = ?, password_hash = ?, avatar_path = ?, email_verified_at = ?, updated_at = ?, is_admin = ?
 		WHERE id = ?`,
 		strings.TrimSpace(u.Email), strings.TrimSpace(u.Username), strings.TrimSpace(u.DisplayName),
-		u.PasswordHash, strings.TrimSpace(u.AvatarPath), verified, now, u.ID,
+		u.PasswordHash, strings.TrimSpace(u.AvatarPath), verified, now, sqliteBool(u.IsAdmin), u.ID,
 	)
 	return err
 }
 
-func scanUser(row *sql.Row) (trips.User, error) {
+func scanUserFromScan(scan func(dest ...any) error) (trips.User, error) {
 	var u trips.User
 	var verified sql.NullString
-	err := row.Scan(&u.ID, &u.Email, &u.Username, &u.DisplayName, &u.PasswordHash, &u.AvatarPath, &verified, &u.CreatedAt, &u.UpdatedAt)
+	var admin int
+	err := scan(&u.ID, &u.Email, &u.Username, &u.DisplayName, &u.PasswordHash, &u.AvatarPath, &verified, &u.CreatedAt, &u.UpdatedAt, &admin)
 	if err != nil {
 		return u, err
 	}
 	if verified.Valid && verified.String != "" {
 		u.EmailVerifiedAt, _ = time.Parse(time.RFC3339, verified.String)
 	}
+	u.IsAdmin = admin != 0
 	return u, nil
+}
+
+func scanUser(row *sql.Row) (trips.User, error) {
+	return scanUserFromScan(row.Scan)
 }
 
 func (r *Repository) GetUserByID(ctx context.Context, id string) (trips.User, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at FROM users WHERE id = ?`, id)
+		SELECT id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at, is_admin FROM users WHERE id = ?`, id)
 	return scanUser(row)
 }
 
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (trips.User, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at FROM users WHERE email = ? COLLATE NOCASE`,
+		SELECT id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at, is_admin FROM users WHERE email = ? COLLATE NOCASE`,
 		strings.TrimSpace(email))
 	return scanUser(row)
 }
 
 func (r *Repository) GetUserByUsername(ctx context.Context, username string) (trips.User, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at FROM users WHERE username = ? COLLATE NOCASE`,
+		SELECT id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at, is_admin FROM users WHERE username = ? COLLATE NOCASE`,
 		strings.TrimSpace(username))
 	return scanUser(row)
+}
+
+func (r *Repository) ListAllUsers(ctx context.Context) ([]trips.User, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, email, username, display_name, password_hash, avatar_path, email_verified_at, created_at, updated_at, is_admin
+		FROM users ORDER BY datetime(created_at) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []trips.User
+	for rows.Next() {
+		u, err := scanUserFromScan(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) CountAdmins(ctx context.Context) (int, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE is_admin = 1`).Scan(&n)
+	return n, err
+}
+
+func (r *Repository) SetUserIsAdmin(ctx context.Context, userID string, isAdmin bool) error {
+	res, err := r.db.ExecContext(ctx, `UPDATE users SET is_admin = ?, updated_at = ? WHERE id = ?`,
+		sqliteBool(isAdmin), time.Now().UTC(), userID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (r *Repository) EmailExists(ctx context.Context, email string, excludeUserID string) (bool, error) {
@@ -298,18 +345,31 @@ func (r *Repository) AddTripMember(ctx context.Context, tripID, userID, invitedB
 		VALUES (?, ?, ?, ?, NULL)
 		ON CONFLICT(trip_id, user_id) DO UPDATE SET left_at = NULL, invited_by_user_id = excluded.invited_by_user_id, joined_at = excluded.joined_at`,
 		tripID, userID, invitedBy, now)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "trip_member", userID, "upsert", map[string]any{
+			"user_id": userID,
+		})
+	}
 	return err
 }
 
 func (r *Repository) MarkTripMemberLeft(ctx context.Context, tripID, userID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx, `UPDATE trip_members SET left_at = ? WHERE trip_id = ? AND user_id = ?`, now, tripID, userID)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "trip_member", userID, "leave", map[string]any{
+			"user_id": userID,
+		})
+	}
 	return err
 }
 
 func (r *Repository) RevokeAllCollaborators(ctx context.Context, tripID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx, `UPDATE trip_members SET left_at = ? WHERE trip_id = ? AND left_at IS NULL`, now, tripID)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "trip_member", tripID, "bulk_leave", map[string]any{})
+	}
 	return err
 }
 
@@ -406,6 +466,11 @@ func (r *Repository) CreateTripInvite(ctx context.Context, inv trips.TripInvite,
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		inv.ID, inv.TripID, strings.ToLower(strings.TrimSpace(inv.EmailNormalized)), hashToken(tokenRaw),
 		inv.InvitedByUserID, inv.ExpiresAt.UTC().Format(time.RFC3339), now.Format(time.RFC3339))
+	if err == nil {
+		_ = r.logChange(ctx, inv.TripID, "trip_invite", inv.ID, "create", map[string]any{
+			"email": strings.ToLower(strings.TrimSpace(inv.EmailNormalized)),
+		})
+	}
 	return err
 }
 
@@ -477,6 +542,9 @@ func (r *Repository) RevokePendingTripInvites(ctx context.Context, tripID string
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE trip_invites SET revoked_at = ? WHERE trip_id = ? AND accepted_at IS NULL AND revoked_at IS NULL`, now, tripID)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "trip_invite", tripID, "bulk_revoke", map[string]any{})
+	}
 	return err
 }
 
@@ -519,6 +587,7 @@ func (r *Repository) RevokeTripInviteForTrip(ctx context.Context, tripID, invite
 	if n == 0 {
 		return sql.ErrNoRows
 	}
+	_ = r.logChange(ctx, tripID, "trip_invite", inviteID, "delete", map[string]any{})
 	return nil
 }
 
@@ -529,6 +598,9 @@ func (r *Repository) CreateTripInviteLink(ctx context.Context, tripID, invitedBy
 		INSERT INTO trip_invite_links (id, trip_id, token_hash, invited_by_user_id, expires_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		id, tripID, hashToken(tokenRaw), invitedByUserID, expiresAt.UTC().Format(time.RFC3339), now)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "trip_invite_link", id, "create", map[string]any{})
+	}
 	return err
 }
 
@@ -537,5 +609,8 @@ func (r *Repository) RevokeAllTripInviteLinksForTrip(ctx context.Context, tripID
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE trip_invite_links SET revoked_at = ?
 		WHERE trip_id = ? AND revoked_at IS NULL`, now, tripID)
+	if err == nil {
+		_ = r.logChange(ctx, tripID, "trip_invite_link", tripID, "bulk_revoke", map[string]any{})
+	}
 	return err
 }

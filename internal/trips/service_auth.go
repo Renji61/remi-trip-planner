@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 	"unicode"
@@ -97,6 +96,7 @@ func (s *Service) RegisterFirstUser(ctx context.Context, email, username, displa
 		DisplayName:     strings.TrimSpace(displayName),
 		PasswordHash:    hash,
 		EmailVerifiedAt: now,
+		IsAdmin:         true,
 	}
 	user.ID, err = s.repo.CreateUser(ctx, user)
 	if err != nil {
@@ -353,14 +353,68 @@ func (s *Service) IssueEmailVerificationToken(ctx context.Context, userID string
 	if err := s.repo.ReplaceEmailVerifyToken(ctx, userID, rawToken, emailVerifyTTL); err != nil {
 		return "", err
 	}
-	u, _ := s.repo.GetUserByID(ctx, userID)
-	log.Printf("email verification link for %s: /verify-email?token=%s", u.Email, rawToken)
 	return rawToken, nil
 }
 
 func (s *Service) VerifyEmailToken(ctx context.Context, raw string) error {
 	_, err := s.repo.ConsumeEmailVerifyToken(ctx, raw)
 	return err
+}
+
+// ListUsersForManagement returns all users with password hashes cleared (admin only).
+func (s *Service) ListUsersForManagement(ctx context.Context, actorID string) ([]User, error) {
+	if actorID == "" {
+		return nil, ErrAuthRequired
+	}
+	actor, err := s.repo.GetUserByID(ctx, actorID)
+	if err != nil {
+		return nil, err
+	}
+	if !actor.IsAdmin {
+		return nil, ErrAdminRequired
+	}
+	list, err := s.repo.ListAllUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		list[i].PasswordHash = ""
+	}
+	return list, nil
+}
+
+// SetUserAdministrator promotes or demotes a user (admin only; cannot remove the last administrator).
+func (s *Service) SetUserAdministrator(ctx context.Context, actorID, targetUserID string, makeAdmin bool) error {
+	if actorID == "" || targetUserID == "" {
+		return ErrAuthRequired
+	}
+	actor, err := s.repo.GetUserByID(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	if !actor.IsAdmin {
+		return ErrAdminRequired
+	}
+	if _, err := s.repo.GetUserByID(ctx, targetUserID); err != nil {
+		return err
+	}
+	if !makeAdmin {
+		tgt, err := s.repo.GetUserByID(ctx, targetUserID)
+		if err != nil {
+			return err
+		}
+		if !tgt.IsAdmin {
+			return nil
+		}
+		n, err := s.repo.CountAdmins(ctx)
+		if err != nil {
+			return err
+		}
+		if n <= 1 {
+			return errors.New("cannot remove the last administrator")
+		}
+	}
+	return s.repo.SetUserIsAdmin(ctx, targetUserID, makeAdmin)
 }
 
 func (s *Service) TripParty(ctx context.Context, tripID string) ([]UserProfile, error) {
@@ -409,7 +463,6 @@ func (s *Service) InviteCollaboratorByEmail(ctx context.Context, tripID, ownerUs
 	if err := s.repo.CreateTripInvite(ctx, inv, rawToken); err != nil {
 		return false, err
 	}
-	log.Printf("trip invite for %s: /invites/accept?token=%s", email, rawToken)
 	return false, nil
 }
 
@@ -508,7 +561,6 @@ func (s *Service) CreateTripInviteLink(ctx context.Context, tripID, ownerUserID 
 	if err := s.repo.CreateTripInviteLink(ctx, tripID, ownerUserID, rawToken, expires); err != nil {
 		return "", err
 	}
-	log.Printf("trip invite link for trip %s: /invites/accept?token=%s", tripID, rawToken)
 	return rawToken, nil
 }
 

@@ -1,0 +1,31 @@
+{{define "tripAddStopFormInner"}}
+<div class="add-stop-tabs full" data-add-stop-tabs>
+  <div class="add-stop-tabs__bar" role="tablist" aria-label="Add stop sections">
+    <button type="button" class="add-stop-tabs__tab add-stop-tabs__tab--active" role="tab" aria-selected="true" id="add-stop-tab-details-{{.TabNamespace}}" data-add-stop-tab="details">Stop details</button>
+    <button type="button" class="add-stop-tabs__tab" role="tab" aria-selected="false" tabindex="-1" id="add-stop-tab-reminders-{{.TabNamespace}}" data-add-stop-tab="reminders">Custom reminders</button>
+  </div>
+  <div class="add-stop-tabs__panel form-grid" role="tabpanel" id="add-stop-panel-details-{{.TabNamespace}}" data-add-stop-panel="details" aria-labelledby="add-stop-tab-details-{{.TabNamespace}}">
+    <label class="full itinerary-location-label">Location Name<input type="text" name="location" placeholder="e.g. Coron Island" data-location-input autocomplete="off" required><div class="location-suggestions hidden" data-location-suggestions></div></label>
+    <p class="full location-hint" data-location-status>Type a location and coordinates will be fetched automatically.</p>
+    <label class="full">Title<input type="text" name="title" placeholder="Kayaking Big Lagoon" required></label>
+    <label>Date{{template "remiDateField" (dict "name" "itinerary_date" "value" .Trip.StartDate "min" .Trip.StartDate "max" .Trip.EndDate "mdy" (effectiveUIDateIsMDY .Trip .Settings) "required" true)}}</label>
+    <label>Cost<input type="number" step="0.01" min="0" name="est_cost" placeholder="0.00"></label>
+    <label>Start{{template "remiTimeField" (dict "name" "start_time" "value" "")}}</label>
+    <label>End{{template "remiTimeField" (dict "name" "end_time" "value" "")}}</label>
+    <input type="hidden" name="latitude" data-latitude-input>
+    <input type="hidden" name="longitude" data-longitude-input>
+    <p class="full location-hint" data-date-status></p>
+    <label class="full">Notes<input type="text" name="notes" placeholder="Optional details"></label>
+  </div>
+  <div class="add-stop-tabs__panel form-grid add-stop-tabs__panel--reminders hidden" role="tabpanel" id="add-stop-panel-reminders-{{.TabNamespace}}" data-add-stop-panel="reminders" aria-labelledby="add-stop-tab-reminders-{{.TabNamespace}}" hidden>
+    <fieldset class="full itinerary-reminders-fieldset itinerary-reminders-fieldset--tabbed">
+      <legend class="visually-hidden">Custom reminders</legend>
+      <p class="itinerary-reminders-tab-intro muted">In-app alerts this many minutes before the stop start time. This is optional.</p>
+      <label>Reminder 1<input type="number" name="reminder_a_minutes" min="0" max="525600" placeholder="e.g. 60 minute"></label>
+      <label>Reminder 1 — label<input type="text" name="reminder_a_label" placeholder="Short label" maxlength="120"></label>
+      <label>Reminder 2<input type="number" name="reminder_b_minutes" min="0" max="525600" placeholder="e.g. 30 minute"></label>
+      <label>Reminder 2 — label<input type="text" name="reminder_b_label" placeholder="Short label" maxlength="120"></label>
+    </fieldset>
+  </div>
+</div>
+{{end}}

@@ -37,6 +37,10 @@ func (a *app) mergeDashboardShell(ctx context.Context, userID, navActive, sideba
 	data["TripID"] = sidebarTripID
 	if strings.TrimSpace(userID) != "" {
 		data["CurrentUser"] = CurrentUser(ctx)
+		n, _ := a.tripService.CountUnreadNotifications(ctx, userID)
+		data["NotificationUnreadCount"] = n
+	} else {
+		data["NotificationUnreadCount"] = 0
 	}
 	return nil
 }
@@ -258,7 +262,7 @@ func (a *app) aboutPage(w http.ResponseWriter, r *http.Request) {
 	uid := CurrentUserID(r.Context())
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	section := changelog.TrimSelfHosterNotes(changelog.SectionForVersion(changelogPath(), version.Version))
@@ -270,7 +274,7 @@ func (a *app) aboutPage(w http.ResponseWriter, r *http.Request) {
 		"ChangelogHTML": renderChangelogSectionHTML(section),
 	}
 	if err := a.mergeDashboardShell(r.Context(), uid, "about", "", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, r, err)
 		return
 	}
 	_ = a.templates.ExecuteTemplate(w, "about.html", data)

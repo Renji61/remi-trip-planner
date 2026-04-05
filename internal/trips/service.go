@@ -33,20 +33,23 @@ type Trip struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	// BudgetCap: trip spending cap for Budget Limit UI; when > 0 it overrides legacy computed allocation.
-	BudgetCap float64
+	BudgetCapCents int64
+	BudgetCap      float64 // derived display value from BudgetCapCents
 	// Per-trip UI: section visibility on trip page and nav (default all enabled).
-	UIShowStay      bool
-	UIShowVehicle   bool
-	UIShowFlights   bool
-	UIShowSpends    bool
-	UIShowItinerary bool
-	UIShowChecklist bool
-	UIShowTheTab    bool
+	UIShowStay             bool
+	UIShowVehicle          bool
+	UIShowFlights          bool
+	UIShowSpends           bool
+	UIShowItinerary        bool
+	UIShowChecklist        bool
+	UIShowTheTab           bool
+	UIShowDocuments        bool
+	UICollaborationEnabled bool // invite link, trip members sidebar/widget, dashboard party stacks
 	// UIItineraryExpand: first | all | none — default expanded state for itinerary day groups.
 	UIItineraryExpand string
 	// UISpendsExpand: first | all | none — for spends-by-day on trip page.
 	UISpendsExpand string
-	// UITabExpand: legacy DB column (no longer used in UI; Group Expenses sections are always expanded).
+	// UITabExpand (DB: ui_tab_expand): first | all | none — default expanded state for group-expense day groups on the trip page.
 	UITabExpand string
 	// UITimeFormat: 12h | 24h for displayed datetimes and clock times.
 	UITimeFormat string
@@ -76,27 +79,31 @@ type Trip struct {
 }
 
 type ItineraryItem struct {
-	ID        string
-	TripID    string
-	DayNumber int
-	Title     string
-	Notes     string
-	Location  string
-	ImagePath string
-	Latitude  float64
-	Longitude float64
-	EstCost   float64
-	StartTime string
-	EndTime   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID                    string
+	TripID                string
+	DayNumber             int
+	Title                 string
+	Notes                 string
+	Location              string
+	ImagePath             string
+	Latitude              float64
+	Longitude             float64
+	EstCostCents          int64
+	EstCost               float64 // derived display value from EstCostCents
+	StartTime             string
+	EndTime               string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	ExpectedUpdatedAt     time.Time
+	EnforceOptimisticLock bool
 }
 
 type Expense struct {
 	ID            string
 	TripID        string
 	Category      string
-	Amount        float64
+	AmountCents   int64
+	Amount        float64 // derived display value from AmountCents
 	Notes         string
 	SpentOn       string
 	PaymentMethod string
@@ -104,6 +111,9 @@ type Expense struct {
 	FromTab       bool
 	ReceiptPath   string // web path e.g. /static/uploads/expenses/{tripID}/file.ext
 	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	// DueAt: optional YYYY-MM-DD for payment due reminders.
+	DueAt string
 	// Tab-only: short label for the spend (e.g. "Sunset dinner").
 	Title string
 	// Participant key user:{id} or guest:{id} who paid (Tab).
@@ -111,6 +121,9 @@ type Expense struct {
 	// TabSplit* — split among participants (see TabSplitPayload JSON).
 	SplitMode string
 	SplitJSON string
+	// ExpectedUpdatedAt is supplied by interactive editors for optimistic concurrency checks.
+	ExpectedUpdatedAt     time.Time
+	EnforceOptimisticLock bool
 }
 
 // ExpenseCategoryAccommodation is used for accommodation-synced expenses and matches the Accommodation quick-expense option.
@@ -191,9 +204,40 @@ type ChecklistItem struct {
 	Text      string
 	Done      bool
 	CreatedAt time.Time
+	// UpdatedAt bumps on text/category/due/archive/trash edits and done toggles (Keep sort / activity).
+	UpdatedAt time.Time
+	// DueAt: optional YYYY-MM-DD for visa / document deadlines (reminder engine).
+	DueAt string
+	// Archived / Trashed: Keep-style views; active items are shown on the main trip checklist.
+	Archived bool
+	Trashed  bool
 }
 
-// ReminderChecklistCategories are the available categories for Add to Checklist.
+// TripNote is a free-form note card on the trip Notes & lists page (Google Keep–style).
+type TripNote struct {
+	ID       string
+	TripID   string
+	Title    string
+	Body     string
+	Color    string // palette key e.g. default, sand, sage, mist
+	Pinned   bool
+	Archived bool
+	Trashed  bool
+	// DueAt: optional YYYY-MM-DD; appears in Reminders with checklist due items.
+	DueAt     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// Keep page sidebar views (query ?view=).
+const (
+	KeepViewNotes     = "notes"
+	KeepViewReminders = "reminders"
+	KeepViewArchive   = "archive"
+	KeepViewTrash     = "trash"
+)
+
+// ReminderChecklistCategories are the available categories for Add Note or Checklist.
 var ReminderChecklistCategories = []string{
 	"Travel Documents",
 	"Health & Safety",
@@ -208,74 +252,87 @@ var ReminderChecklistCategories = []string{
 }
 
 type Lodging struct {
-	ID                  string
-	TripID              string
-	Name                string
-	Address             string
-	Latitude            float64
-	Longitude           float64
-	CheckInAt           string
-	CheckOutAt          string
-	BookingConfirmation string
-	Cost                float64
-	Notes               string
-	AttachmentPath      string
-	ImagePath           string
-	CheckInItineraryID  string
-	CheckOutItineraryID string
-	CreatedAt           time.Time
+	ID                    string
+	TripID                string
+	Name                  string
+	Address               string
+	Latitude              float64
+	Longitude             float64
+	CheckInAt             string
+	CheckOutAt            string
+	BookingConfirmation   string
+	CostCents             int64
+	Cost                  float64 // derived display value from CostCents
+	Notes                 string
+	AttachmentPath        string
+	ImagePath             string
+	CheckInItineraryID    string
+	CheckOutItineraryID   string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	ExpectedUpdatedAt     time.Time
+	EnforceOptimisticLock bool
 }
 
 type VehicleRental struct {
-	ID                  string
-	TripID              string
-	PickUpLocation      string
-	DropOffLocation     string // empty = same as pick-up for display and drop-off itinerary location
-	VehicleDetail       string
-	PickUpAt            string
-	DropOffAt           string
-	BookingConfirmation string
-	Notes               string
-	AttachmentPath      string
-	VehicleImagePath    string
-	Cost                float64
-	InsuranceCost       float64
-	PayAtPickUp         bool
-	PickUpItineraryID   string
-	DropOffItineraryID  string
-	RentalExpenseID     string
-	InsuranceExpenseID  string
-	CreatedAt           time.Time
+	ID                    string
+	TripID                string
+	PickUpLocation        string
+	DropOffLocation       string // empty = same as pick-up for display and drop-off itinerary location
+	VehicleDetail         string
+	PickUpAt              string
+	DropOffAt             string
+	BookingConfirmation   string
+	Notes                 string
+	AttachmentPath        string
+	VehicleImagePath      string
+	CostCents             int64
+	Cost                  float64 // derived display value from CostCents
+	InsuranceCostCents    int64
+	InsuranceCost         float64 // derived display value from InsuranceCostCents
+	PayAtPickUp           bool
+	PickUpItineraryID     string
+	DropOffItineraryID    string
+	RentalExpenseID       string
+	InsuranceExpenseID    string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	ExpectedUpdatedAt     time.Time
+	EnforceOptimisticLock bool
 }
 
 type Flight struct {
-	ID                  string
-	TripID              string
-	FlightName          string
-	FlightNumber        string
-	DepartAirport       string
-	ArriveAirport       string
-	DepartAt            string
-	ArriveAt            string
-	BookingConfirmation string
-	Notes               string
-	DocumentPath        string
-	ImagePath           string
-	Cost                float64
-	DepartItineraryID   string
-	ArriveItineraryID   string
-	ExpenseID           string
-	CreatedAt           time.Time
+	ID                    string
+	TripID                string
+	FlightName            string
+	FlightNumber          string
+	DepartAirport         string
+	ArriveAirport         string
+	DepartAt              string
+	ArriveAt              string
+	BookingConfirmation   string
+	Notes                 string
+	DocumentPath          string
+	ImagePath             string
+	CostCents             int64
+	Cost                  float64 // derived display value from CostCents
+	DepartItineraryID     string
+	ArriveItineraryID     string
+	ExpenseID             string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	ExpectedUpdatedAt     time.Time
+	EnforceOptimisticLock bool
 }
 
 type Change struct {
-	ID        int64
-	TripID    string
-	Entity    string
-	EntityID  string
-	Operation string
-	ChangedAt time.Time
-	Payload   string
+	ID        int64     `json:"id"`
+	TripID    string    `json:"trip_id"`
+	Entity    string    `json:"entity"`
+	EntityID  string    `json:"entity_id"`
+	Operation string    `json:"operation"`
+	ChangedAt time.Time `json:"changed_at"`
+	Payload   string    `json:"payload"`
 }
 
 type AppSettings struct {
@@ -364,6 +421,15 @@ type Repository interface {
 	DeleteChecklistItem(ctx context.Context, itemID string) error
 	ToggleChecklistItem(ctx context.Context, itemID string, done bool) error
 	ListChecklistItems(ctx context.Context, tripID string) ([]ChecklistItem, error)
+	ListChecklistItemsForKeepView(ctx context.Context, tripID, view string) ([]ChecklistItem, error)
+	AddTripNote(ctx context.Context, n TripNote) error
+	GetTripNote(ctx context.Context, noteID string) (TripNote, error)
+	UpdateTripNote(ctx context.Context, n TripNote) error
+	DeleteTripNote(ctx context.Context, noteID string) error
+	ListTripNotesForKeepView(ctx context.Context, tripID, view string) ([]TripNote, error)
+	ListTripNotesForExport(ctx context.Context, tripID string) ([]TripNote, error)
+	ListPinnedChecklistCategories(ctx context.Context, tripID string) ([]string, error)
+	SetChecklistCategoryPinned(ctx context.Context, tripID, category string, pinned bool) error
 	AddLodging(ctx context.Context, item Lodging) error
 	UpdateLodging(ctx context.Context, item Lodging) error
 	DeleteLodging(ctx context.Context, tripID, lodgingID string) error
@@ -380,6 +446,8 @@ type Repository interface {
 	ListFlights(ctx context.Context, tripID string) ([]Flight, error)
 	GetFlight(ctx context.Context, tripID, flightID string) (Flight, error)
 	ListChanges(ctx context.Context, tripID, since string) ([]Change, error)
+	ListChangesAfterID(ctx context.Context, tripID string, afterID int64) ([]Change, error)
+	LatestChangeLogID(ctx context.Context, tripID string) (int64, error)
 	GetAppSettings(ctx context.Context) (AppSettings, error)
 	SaveAppSettings(ctx context.Context, settings AppSettings) error
 	GetTripDayLabels(ctx context.Context, tripID string) (map[int]string, error)
@@ -387,6 +455,9 @@ type Repository interface {
 
 	CountUsers(ctx context.Context) (int, error)
 	CreateUser(ctx context.Context, u User) (string, error)
+	ListAllUsers(ctx context.Context) ([]User, error)
+	CountAdmins(ctx context.Context) (int, error)
+	SetUserIsAdmin(ctx context.Context, userID string, isAdmin bool) error
 	UpdateUser(ctx context.Context, u User) error
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
@@ -441,6 +512,22 @@ type Repository interface {
 	AddTripDocument(ctx context.Context, doc TripDocument) error
 	UpdateTripDocumentDisplayName(ctx context.Context, tripID, documentID, displayName string) error
 	DeleteTripDocument(ctx context.Context, tripID, documentID string) error
+
+	InsertAppNotification(ctx context.Context, n AppNotification) (inserted bool, err error)
+	CountUnreadAppNotifications(ctx context.Context, userID string) (int, error)
+	ListAppNotifications(ctx context.Context, userID string, limit int) ([]AppNotification, error)
+	MarkAppNotificationRead(ctx context.Context, userID, notificationID string) error
+	MarkAllAppNotificationsRead(ctx context.Context, userID string) error
+	DeleteAppNotificationsForTrip(ctx context.Context, tripID string) error
+	ListUnreadAppNotifications(ctx context.Context, userID string, limit int) ([]AppNotification, error)
+
+	ListItineraryCustomRemindersByTrip(ctx context.Context, tripID string) ([]ItineraryCustomReminder, error)
+	ReplaceItineraryItemCustomReminders(ctx context.Context, tripID, itineraryItemID string, rows []ItineraryCustomReminder) error
+
+	ListTripIDsForReminderScan(ctx context.Context) ([]string, error)
+	GetCalendarFeedTokenHash(ctx context.Context, tripID string) (hash string, ok bool, err error)
+	UpsertCalendarFeedToken(ctx context.Context, tripID, tokenHash, createdByUserID string) error
+	DeleteCalendarFeedToken(ctx context.Context, tripID string) error
 }
 
 type Service struct {
@@ -751,6 +838,10 @@ func (s *Service) UpdateTrip(ctx context.Context, t Trip) error {
 	if t.ID == "" || t.Name == "" {
 		return errors.New("trip id and name are required")
 	}
+	if t.BudgetCapCents == 0 && t.BudgetCap != 0 {
+		t.BudgetCapCents = MoneyToCentsFloat(t.BudgetCap)
+	}
+	SetTripBudgetCapCents(&t, t.BudgetCapCents)
 	current, err := s.repo.GetTrip(ctx, t.ID)
 	if err != nil {
 		return err
@@ -766,7 +857,11 @@ func (s *Service) ArchiveTrip(ctx context.Context, tripID string) error {
 	if tripID == "" {
 		return errors.New("trip id is required")
 	}
-	return s.repo.ArchiveTrip(ctx, tripID)
+	if err := s.repo.ArchiveTrip(ctx, tripID); err != nil {
+		return err
+	}
+	_ = s.repo.DeleteAppNotificationsForTrip(ctx, tripID)
+	return nil
 }
 
 func (s *Service) DeleteTrip(ctx context.Context, tripID string) error {
@@ -797,6 +892,10 @@ func (s *Service) AddItineraryItem(ctx context.Context, item ItineraryItem) erro
 	if item.TripID == "" || item.Title == "" {
 		return errors.New("trip and title are required")
 	}
+	if item.EstCostCents == 0 && item.EstCost != 0 {
+		item.EstCostCents = MoneyToCentsFloat(item.EstCost)
+	}
+	SetItineraryEstCostCents(&item, item.EstCostCents)
 	trip, err := s.repo.GetTrip(ctx, item.TripID)
 	if err != nil {
 		return err
@@ -882,7 +981,9 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 		if _, protected := keep[it.ID]; protected {
 			continue
 		}
-		_ = s.repo.DeleteItineraryItem(ctx, lodging.TripID, it.ID)
+		if err := s.repo.DeleteItineraryItem(ctx, lodging.TripID, it.ID); err != nil {
+			return lodging, err
+		}
 	}
 
 	checkInItem := ItineraryItem{
@@ -894,10 +995,10 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 		Latitude:  lodging.Latitude,
 		Longitude: lodging.Longitude,
 		Notes:     checkInNotes,
-		EstCost:   lodging.Cost,
 		StartTime: checkInTime,
 		EndTime:   checkInTime,
 	}
+	SetItineraryEstCostCents(&checkInItem, lodging.CostCents)
 	checkOutItem := ItineraryItem{
 		ID:        coID,
 		TripID:    lodging.TripID,
@@ -907,10 +1008,10 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 		Latitude:  lodging.Latitude,
 		Longitude: lodging.Longitude,
 		Notes:     checkOutNotes,
-		EstCost:   lodging.Cost,
 		StartTime: checkOutTime,
 		EndTime:   checkOutTime,
 	}
+	SetItineraryEstCostCents(&checkOutItem, lodging.CostCents)
 
 	if ciID != "" && coID != "" {
 		n1, err1 := s.repo.UpdateItineraryItem(ctx, checkInItem)
@@ -929,10 +1030,14 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 	}
 
 	if ciID != "" {
-		_ = s.repo.DeleteItineraryItem(ctx, lodging.TripID, ciID)
+		if err := s.repo.DeleteItineraryItem(ctx, lodging.TripID, ciID); err != nil {
+			return lodging, err
+		}
 	}
 	if coID != "" {
-		_ = s.repo.DeleteItineraryItem(ctx, lodging.TripID, coID)
+		if err := s.repo.DeleteItineraryItem(ctx, lodging.TripID, coID); err != nil {
+			return lodging, err
+		}
 	}
 
 	newCI := uuid.NewString()
@@ -941,16 +1046,18 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 		ID: newCI, TripID: lodging.TripID, DayNumber: checkInDay,
 		Title: AccommodationItineraryCheckInTitle(lodging.Name), Location: lodging.Address,
 		Latitude: lodging.Latitude, Longitude: lodging.Longitude,
-		Notes: checkInNotes, EstCost: lodging.Cost,
+		Notes:     checkInNotes,
 		StartTime: checkInTime, EndTime: checkInTime,
 	}
+	SetItineraryEstCostCents(&newCheckIn, lodging.CostCents)
 	newCheckOut := ItineraryItem{
 		ID: newCO, TripID: lodging.TripID, DayNumber: checkOutDay,
 		Title: AccommodationItineraryCheckOutTitle(lodging.Name), Location: lodging.Address,
 		Latitude: lodging.Latitude, Longitude: lodging.Longitude,
-		Notes: checkOutNotes, EstCost: lodging.Cost,
+		Notes:     checkOutNotes,
 		StartTime: checkOutTime, EndTime: checkOutTime,
 	}
+	SetItineraryEstCostCents(&newCheckOut, lodging.CostCents)
 	if err := s.repo.AddItineraryItem(ctx, newCheckIn); err != nil {
 		return lodging, err
 	}
@@ -993,7 +1100,11 @@ func (s *Service) GetExpense(ctx context.Context, tripID, expenseID string) (Exp
 }
 
 func (s *Service) AddExpense(ctx context.Context, expense Expense) error {
-	if expense.TripID == "" || expense.Amount < 0 {
+	if expense.AmountCents == 0 && expense.Amount != 0 {
+		expense.AmountCents = MoneyToCentsFloat(expense.Amount)
+	}
+	SetExpenseAmountCents(&expense, expense.AmountCents)
+	if expense.TripID == "" || expense.AmountCents < 0 {
 		return errors.New("invalid expense")
 	}
 	trip, err := s.repo.GetTrip(ctx, expense.TripID)
@@ -1016,6 +1127,13 @@ func (s *Service) UpdateItineraryItem(ctx context.Context, item ItineraryItem) e
 	if item.TripID == "" || item.ID == "" || item.Title == "" {
 		return errors.New("invalid itinerary item")
 	}
+	if item.EstCostCents == 0 && item.EstCost != 0 {
+		item.EstCostCents = MoneyToCentsFloat(item.EstCost)
+	}
+	SetItineraryEstCostCents(&item, item.EstCostCents)
+	if item.EnforceOptimisticLock && item.ExpectedUpdatedAt.IsZero() {
+		return errors.New("this itinerary stop was opened from an older view. Refresh the page and try again.")
+	}
 	trip, err := s.repo.GetTrip(ctx, item.TripID)
 	if err != nil {
 		return err
@@ -1028,6 +1146,19 @@ func (s *Service) UpdateItineraryItem(ctx context.Context, item ItineraryItem) e
 		return err
 	}
 	if n == 0 {
+		items, listErr := s.repo.ListItineraryItems(ctx, item.TripID)
+		if listErr != nil {
+			return listErr
+		}
+		for _, existing := range items {
+			if existing.ID == item.ID {
+				return &ConflictError{
+					Resource:        "itinerary_item",
+					Message:         "Someone else updated this itinerary stop a moment ago. Reopen it to review the latest details, then try again.",
+					LatestUpdatedAt: existing.UpdatedAt,
+				}
+			}
+		}
 		return errors.New("itinerary item not found")
 	}
 	return nil
@@ -1077,8 +1208,15 @@ func (s *Service) ClearLodgingItineraryRefs(ctx context.Context, tripID, itemID 
 }
 
 func (s *Service) UpdateExpense(ctx context.Context, expense Expense) error {
-	if expense.TripID == "" || expense.ID == "" || expense.Amount < 0 {
+	if expense.AmountCents == 0 && expense.Amount != 0 {
+		expense.AmountCents = MoneyToCentsFloat(expense.Amount)
+	}
+	SetExpenseAmountCents(&expense, expense.AmountCents)
+	if expense.TripID == "" || expense.ID == "" || expense.AmountCents < 0 {
 		return errors.New("invalid expense")
+	}
+	if expense.EnforceOptimisticLock && expense.ExpectedUpdatedAt.IsZero() {
+		return errors.New("this expense was opened from an older view. Refresh the page and try again.")
 	}
 	prev, err := s.repo.GetExpense(ctx, expense.TripID, expense.ID)
 	if err != nil {
@@ -1114,6 +1252,9 @@ func (s *Service) UpdateExpense(ctx context.Context, expense Expense) error {
 	}
 	expense.LodgingID = prev.LodgingID
 	expense.FromTab = prev.FromTab
+	if expense.EnforceOptimisticLock && expense.ExpectedUpdatedAt.IsZero() {
+		expense.ExpectedUpdatedAt = prev.UpdatedAt
+	}
 	if err := s.repo.UpdateExpense(ctx, expense); err != nil {
 		return err
 	}
@@ -1210,6 +1351,7 @@ func (s *Service) UpdateChecklistItem(ctx context.Context, item ChecklistItem) e
 	}
 	item.Done = existing.Done
 	item.CreatedAt = existing.CreatedAt
+	item.DueAt = strings.TrimSpace(item.DueAt)
 	return s.repo.UpdateChecklistItem(ctx, item)
 }
 
@@ -1232,37 +1374,52 @@ func (s *Service) DeleteChecklistItem(ctx context.Context, itemID string) error 
 }
 
 func (s *Service) AddLodging(ctx context.Context, item Lodging) error {
-	if item.TripID == "" || item.Name == "" {
-		return errors.New("trip and accommodation name are required")
-	}
-	trip, err := s.repo.GetTrip(ctx, item.TripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	if err := s.repo.AddLodging(ctx, item); err != nil {
-		return err
-	}
-	return s.SyncExpenseForLodging(ctx, item)
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if item.TripID == "" || item.Name == "" {
+			return errors.New("trip and accommodation name are required")
+		}
+		if item.CostCents == 0 && item.Cost != 0 {
+			item.CostCents = MoneyToCentsFloat(item.Cost)
+		}
+		SetLodgingCostCents(&item, item.CostCents)
+		trip, err := txs.repo.GetTrip(ctx, item.TripID)
+		if err != nil {
+			return err
+		}
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		if err := txs.repo.AddLodging(ctx, item); err != nil {
+			return err
+		}
+		return txs.SyncExpenseForLodging(ctx, item)
+	})
 }
 
 func (s *Service) UpdateLodging(ctx context.Context, item Lodging) error {
-	if item.TripID == "" || item.ID == "" || item.Name == "" {
-		return errors.New("invalid accommodation entry")
-	}
-	trip, err := s.repo.GetTrip(ctx, item.TripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	if err := s.repo.UpdateLodging(ctx, item); err != nil {
-		return err
-	}
-	return s.SyncExpenseForLodging(ctx, item)
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if item.TripID == "" || item.ID == "" || item.Name == "" {
+			return errors.New("invalid accommodation entry")
+		}
+		if item.CostCents == 0 && item.Cost != 0 {
+			item.CostCents = MoneyToCentsFloat(item.Cost)
+		}
+		SetLodgingCostCents(&item, item.CostCents)
+		if item.EnforceOptimisticLock && item.ExpectedUpdatedAt.IsZero() {
+			return errors.New("this accommodation was opened from an older view. Refresh the page and try again.")
+		}
+		trip, err := txs.repo.GetTrip(ctx, item.TripID)
+		if err != nil {
+			return err
+		}
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		if err := txs.repo.UpdateLodging(ctx, item); err != nil {
+			return err
+		}
+		return txs.SyncExpenseForLodging(ctx, item)
+	})
 }
 
 // SyncExpenseForLodging upserts an expense row tied to this accommodation booking (category Accommodation).
@@ -1284,18 +1441,19 @@ func (s *Service) SyncExpenseForLodging(ctx context.Context, l Lodging) error {
 	notes := lodgingExpenseNotes(l)
 	spentOn := lodgingExpenseSpentOn(l)
 	if errors.Is(err, sql.ErrNoRows) {
-		return s.repo.AddExpense(ctx, Expense{
+		e := Expense{
 			ID:        uuid.NewString(),
 			TripID:    l.TripID,
 			Category:  ExpenseCategoryAccommodation,
-			Amount:    l.Cost,
 			Notes:     notes,
 			SpentOn:   spentOn,
 			LodgingID: l.ID,
-		})
+		}
+		SetExpenseAmountFloat(&e, l.Cost)
+		return s.repo.AddExpense(ctx, e)
 	}
 	existing.Category = ExpenseCategoryAccommodation
-	existing.Amount = l.Cost
+	SetExpenseAmountFloat(&existing, l.Cost)
 	existing.Notes = notes
 	existing.SpentOn = spentOn
 	existing.LodgingID = l.ID
@@ -1372,37 +1530,60 @@ func flightLabelFromItineraryTitle(title string) (label string, ok bool) {
 }
 
 func (s *Service) AddVehicleRental(ctx context.Context, item VehicleRental) error {
-	if item.TripID == "" || item.PickUpLocation == "" {
-		return errors.New("trip and pick up location are required")
-	}
-	trip, err := s.repo.GetTrip(ctx, item.TripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	if err := s.repo.AddVehicleRental(ctx, item); err != nil {
-		return err
-	}
-	return s.SyncExpenseForVehicleRental(ctx, item)
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if item.TripID == "" || item.PickUpLocation == "" {
+			return errors.New("trip and pick up location are required")
+		}
+		if item.CostCents == 0 && item.Cost != 0 {
+			item.CostCents = MoneyToCentsFloat(item.Cost)
+		}
+		if item.InsuranceCostCents == 0 && item.InsuranceCost != 0 {
+			item.InsuranceCostCents = MoneyToCentsFloat(item.InsuranceCost)
+		}
+		SetVehicleCostCents(&item, item.CostCents)
+		SetVehicleInsuranceCostCents(&item, item.InsuranceCostCents)
+		trip, err := txs.repo.GetTrip(ctx, item.TripID)
+		if err != nil {
+			return err
+		}
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		if err := txs.repo.AddVehicleRental(ctx, item); err != nil {
+			return err
+		}
+		return txs.SyncExpenseForVehicleRental(ctx, item)
+	})
 }
 
 func (s *Service) UpdateVehicleRental(ctx context.Context, item VehicleRental) error {
-	if item.TripID == "" || item.ID == "" || item.PickUpLocation == "" {
-		return errors.New("invalid vehicle rental entry")
-	}
-	trip, err := s.repo.GetTrip(ctx, item.TripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	if err := s.repo.UpdateVehicleRental(ctx, item); err != nil {
-		return err
-	}
-	return s.SyncExpenseForVehicleRental(ctx, item)
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if item.TripID == "" || item.ID == "" || item.PickUpLocation == "" {
+			return errors.New("invalid vehicle rental entry")
+		}
+		if item.CostCents == 0 && item.Cost != 0 {
+			item.CostCents = MoneyToCentsFloat(item.Cost)
+		}
+		if item.InsuranceCostCents == 0 && item.InsuranceCost != 0 {
+			item.InsuranceCostCents = MoneyToCentsFloat(item.InsuranceCost)
+		}
+		SetVehicleCostCents(&item, item.CostCents)
+		SetVehicleInsuranceCostCents(&item, item.InsuranceCostCents)
+		if item.EnforceOptimisticLock && item.ExpectedUpdatedAt.IsZero() {
+			return errors.New("this vehicle rental was opened from an older view. Refresh the page and try again.")
+		}
+		trip, err := txs.repo.GetTrip(ctx, item.TripID)
+		if err != nil {
+			return err
+		}
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		if err := txs.repo.UpdateVehicleRental(ctx, item); err != nil {
+			return err
+		}
+		return txs.SyncExpenseForVehicleRental(ctx, item)
+	})
 }
 
 func (s *Service) GetVehicleRental(ctx context.Context, tripID, rentalID string) (VehicleRental, error) {
@@ -1413,67 +1594,92 @@ func (s *Service) GetVehicleRental(ctx context.Context, tripID, rentalID string)
 }
 
 func (s *Service) DeleteVehicleRental(ctx context.Context, tripID, rentalID string) error {
-	if tripID == "" || rentalID == "" {
-		return errors.New("invalid vehicle rental entry")
-	}
-	trip, err := s.repo.GetTrip(ctx, tripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	rental, err := s.repo.GetVehicleRental(ctx, tripID, rentalID)
-	if err != nil {
-		return err
-	}
-	if rental.PickUpItineraryID != "" {
-		_ = s.repo.DeleteItineraryItem(ctx, tripID, rental.PickUpItineraryID)
-	}
-	if rental.DropOffItineraryID != "" {
-		_ = s.repo.DeleteItineraryItem(ctx, tripID, rental.DropOffItineraryID)
-	}
-	if rental.RentalExpenseID != "" {
-		_ = s.repo.DeleteExpense(ctx, tripID, rental.RentalExpenseID)
-	}
-	if rental.InsuranceExpenseID != "" {
-		_ = s.repo.DeleteExpense(ctx, tripID, rental.InsuranceExpenseID)
-	}
-	return s.repo.DeleteVehicleRental(ctx, tripID, rentalID)
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if tripID == "" || rentalID == "" {
+			return errors.New("invalid vehicle rental entry")
+		}
+		trip, err := txs.repo.GetTrip(ctx, tripID)
+		if err != nil {
+			return err
+		}
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		rental, err := txs.repo.GetVehicleRental(ctx, tripID, rentalID)
+		if err != nil {
+			return err
+		}
+		if rental.PickUpItineraryID != "" {
+			if err := txs.repo.DeleteItineraryItem(ctx, tripID, rental.PickUpItineraryID); err != nil {
+				return err
+			}
+		}
+		if rental.DropOffItineraryID != "" {
+			if err := txs.repo.DeleteItineraryItem(ctx, tripID, rental.DropOffItineraryID); err != nil {
+				return err
+			}
+		}
+		if rental.RentalExpenseID != "" {
+			if err := txs.repo.DeleteExpense(ctx, tripID, rental.RentalExpenseID); err != nil {
+				return err
+			}
+		}
+		if rental.InsuranceExpenseID != "" {
+			if err := txs.repo.DeleteExpense(ctx, tripID, rental.InsuranceExpenseID); err != nil {
+				return err
+			}
+		}
+		return txs.repo.DeleteVehicleRental(ctx, tripID, rentalID)
+	})
 }
 
 func (s *Service) AddFlight(ctx context.Context, item Flight) error {
-	if item.TripID == "" || strings.TrimSpace(item.DepartAirport) == "" || strings.TrimSpace(item.ArriveAirport) == "" {
-		return errors.New("trip and airport details are required")
-	}
-	trip, err := s.repo.GetTrip(ctx, item.TripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	if err := s.repo.AddFlight(ctx, item); err != nil {
-		return err
-	}
-	return s.SyncExpenseForFlight(ctx, item)
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if item.TripID == "" || strings.TrimSpace(item.DepartAirport) == "" || strings.TrimSpace(item.ArriveAirport) == "" {
+			return errors.New("trip and airport details are required")
+		}
+		if item.CostCents == 0 && item.Cost != 0 {
+			item.CostCents = MoneyToCentsFloat(item.Cost)
+		}
+		SetFlightCostCents(&item, item.CostCents)
+		trip, err := txs.repo.GetTrip(ctx, item.TripID)
+		if err != nil {
+			return err
+		}
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		if err := txs.repo.AddFlight(ctx, item); err != nil {
+			return err
+		}
+		return txs.SyncExpenseForFlight(ctx, item)
+	})
 }
 
 func (s *Service) UpdateFlight(ctx context.Context, item Flight) error {
-	if item.TripID == "" || item.ID == "" || strings.TrimSpace(item.DepartAirport) == "" || strings.TrimSpace(item.ArriveAirport) == "" {
-		return errors.New("invalid flight entry")
-	}
-	trip, err := s.repo.GetTrip(ctx, item.TripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	if err := s.repo.UpdateFlight(ctx, item); err != nil {
-		return err
-	}
-	return s.SyncExpenseForFlight(ctx, item)
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if item.TripID == "" || item.ID == "" || strings.TrimSpace(item.DepartAirport) == "" || strings.TrimSpace(item.ArriveAirport) == "" {
+			return errors.New("invalid flight entry")
+		}
+		if item.CostCents == 0 && item.Cost != 0 {
+			item.CostCents = MoneyToCentsFloat(item.Cost)
+		}
+		SetFlightCostCents(&item, item.CostCents)
+		if item.EnforceOptimisticLock && item.ExpectedUpdatedAt.IsZero() {
+			return errors.New("this flight was opened from an older view. Refresh the page and try again.")
+		}
+		trip, err := txs.repo.GetTrip(ctx, item.TripID)
+		if err != nil {
+			return err
+		}
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		if err := txs.repo.UpdateFlight(ctx, item); err != nil {
+			return err
+		}
+		return txs.SyncExpenseForFlight(ctx, item)
+	})
 }
 
 func (s *Service) GetFlight(ctx context.Context, tripID, flightID string) (Flight, error) {
@@ -1484,30 +1690,38 @@ func (s *Service) GetFlight(ctx context.Context, tripID, flightID string) (Fligh
 }
 
 func (s *Service) DeleteFlight(ctx context.Context, tripID, flightID string) error {
-	if tripID == "" || flightID == "" {
-		return errors.New("invalid flight entry")
-	}
-	trip, err := s.repo.GetTrip(ctx, tripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	flight, err := s.repo.GetFlight(ctx, tripID, flightID)
-	if err != nil {
-		return err
-	}
-	if flight.DepartItineraryID != "" {
-		_ = s.repo.DeleteItineraryItem(ctx, tripID, flight.DepartItineraryID)
-	}
-	if flight.ArriveItineraryID != "" {
-		_ = s.repo.DeleteItineraryItem(ctx, tripID, flight.ArriveItineraryID)
-	}
-	if flight.ExpenseID != "" {
-		_ = s.repo.DeleteExpense(ctx, tripID, flight.ExpenseID)
-	}
-	return s.repo.DeleteFlight(ctx, tripID, flightID)
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if tripID == "" || flightID == "" {
+			return errors.New("invalid flight entry")
+		}
+		trip, err := txs.repo.GetTrip(ctx, tripID)
+		if err != nil {
+			return err
+		}
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		flight, err := txs.repo.GetFlight(ctx, tripID, flightID)
+		if err != nil {
+			return err
+		}
+		if flight.DepartItineraryID != "" {
+			if err := txs.repo.DeleteItineraryItem(ctx, tripID, flight.DepartItineraryID); err != nil {
+				return err
+			}
+		}
+		if flight.ArriveItineraryID != "" {
+			if err := txs.repo.DeleteItineraryItem(ctx, tripID, flight.ArriveItineraryID); err != nil {
+				return err
+			}
+		}
+		if flight.ExpenseID != "" {
+			if err := txs.repo.DeleteExpense(ctx, tripID, flight.ExpenseID); err != nil {
+				return err
+			}
+		}
+		return txs.repo.DeleteFlight(ctx, tripID, flightID)
+	})
 }
 
 func (s *Service) SyncExpenseForFlight(ctx context.Context, f Flight) error {
@@ -1527,7 +1741,7 @@ func (s *Service) SyncExpenseForFlight(ctx context.Context, f Flight) error {
 		existing, err := s.repo.GetExpense(ctx, f.TripID, f.ExpenseID)
 		if err == nil {
 			existing.Category = "Airfare"
-			existing.Amount = f.Cost
+			SetExpenseAmountFloat(&existing, f.Cost)
 			existing.Notes = notes
 			existing.SpentOn = spentOn
 			existing.LodgingID = ""
@@ -1539,14 +1753,15 @@ func (s *Service) SyncExpenseForFlight(ctx context.Context, f Flight) error {
 		}
 	}
 	id := uuid.NewString()
-	if err := s.repo.AddExpense(ctx, Expense{
+	e := Expense{
 		ID:       id,
 		TripID:   f.TripID,
 		Category: "Airfare",
-		Amount:   f.Cost,
 		Notes:    notes,
 		SpentOn:  spentOn,
-	}); err != nil {
+	}
+	SetExpenseAmountFloat(&e, f.Cost)
+	if err := s.repo.AddExpense(ctx, e); err != nil {
 		return err
 	}
 	f.ExpenseID = id
@@ -1572,7 +1787,7 @@ func (s *Service) SyncExpenseForVehicleRental(ctx context.Context, v VehicleRent
 			existing, err := s.repo.GetExpense(ctx, v.TripID, expenseID)
 			if err == nil {
 				existing.Category = "Car Rental"
-				existing.Amount = amount
+				SetExpenseAmountFloat(&existing, amount)
 				existing.Notes = notes
 				existing.SpentOn = spentOn
 				existing.LodgingID = ""
@@ -1580,14 +1795,15 @@ func (s *Service) SyncExpenseForVehicleRental(ctx context.Context, v VehicleRent
 			}
 		}
 		id := uuid.NewString()
-		return id, s.repo.AddExpense(ctx, Expense{
+		e := Expense{
 			ID:       id,
 			TripID:   v.TripID,
 			Category: "Car Rental",
-			Amount:   amount,
 			Notes:    notes,
 			SpentOn:  spentOn,
-		})
+		}
+		SetExpenseAmountFloat(&e, amount)
+		return id, s.repo.AddExpense(ctx, e)
 	}
 
 	rentalExpenseID, err := upsert(v.RentalExpenseID, v.Cost, "Rental Cost")
@@ -1768,39 +1984,49 @@ func flightExpenseSpentOn(f Flight) string {
 }
 
 func (s *Service) DeleteLodging(ctx context.Context, tripID, lodgingID string) error {
-	if tripID == "" || lodgingID == "" {
-		return errors.New("invalid accommodation entry")
-	}
-	trip, err := s.repo.GetTrip(ctx, tripID)
-	if err != nil {
-		return err
-	}
-	if trip.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
-	lodging, err := s.repo.GetLodging(ctx, tripID, lodgingID)
-	if err != nil {
-		return err
-	}
-	ci, co := lodging.CheckInItineraryID, lodging.CheckOutItineraryID
-	if ci == "" || co == "" {
-		ci2, co2 := s.findLodgingItineraryPair(ctx, tripID, lodging.Name)
-		if ci == "" {
-			ci = ci2
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		if tripID == "" || lodgingID == "" {
+			return errors.New("invalid accommodation entry")
 		}
-		if co == "" {
-			co = co2
+		trip, err := txs.repo.GetTrip(ctx, tripID)
+		if err != nil {
+			return err
 		}
-	}
-	if ci != "" {
-		_ = s.repo.DeleteItineraryItem(ctx, tripID, ci)
-	}
-	if co != "" {
-		_ = s.repo.DeleteItineraryItem(ctx, tripID, co)
-	}
-	_ = s.deleteStrayLodgingItineraryByName(ctx, tripID, lodging.Name)
-	_ = s.repo.DeleteExpenseByLodgingID(ctx, tripID, lodgingID)
-	return s.repo.DeleteLodging(ctx, tripID, lodgingID)
+		if trip.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		lodging, err := txs.repo.GetLodging(ctx, tripID, lodgingID)
+		if err != nil {
+			return err
+		}
+		ci, co := lodging.CheckInItineraryID, lodging.CheckOutItineraryID
+		if ci == "" || co == "" {
+			ci2, co2 := txs.findLodgingItineraryPair(ctx, tripID, lodging.Name)
+			if ci == "" {
+				ci = ci2
+			}
+			if co == "" {
+				co = co2
+			}
+		}
+		if ci != "" {
+			if err := txs.repo.DeleteItineraryItem(ctx, tripID, ci); err != nil {
+				return err
+			}
+		}
+		if co != "" {
+			if err := txs.repo.DeleteItineraryItem(ctx, tripID, co); err != nil {
+				return err
+			}
+		}
+		if err := txs.deleteStrayLodgingItineraryByName(ctx, tripID, lodging.Name); err != nil {
+			return err
+		}
+		if err := txs.repo.DeleteExpenseByLodgingID(ctx, tripID, lodgingID); err != nil {
+			return err
+		}
+		return txs.repo.DeleteLodging(ctx, tripID, lodgingID)
+	})
 }
 
 func (s *Service) deleteStrayLodgingItineraryByName(ctx context.Context, tripID, name string) error {
@@ -1815,7 +2041,9 @@ func (s *Service) deleteStrayLodgingItineraryByName(ctx context.Context, tripID,
 	addAccommodationItineraryTitleKeys(want, name)
 	for _, it := range items {
 		if _, match := want[it.Title]; match {
-			_ = s.repo.DeleteItineraryItem(ctx, tripID, it.ID)
+			if err := s.repo.DeleteItineraryItem(ctx, tripID, it.ID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -1838,6 +2066,14 @@ func (s *Service) GetLodging(ctx context.Context, tripID, lodgingID string) (Lod
 
 func (s *Service) ListChanges(ctx context.Context, tripID, since string) ([]Change, error) {
 	return s.repo.ListChanges(ctx, tripID, since)
+}
+
+func (s *Service) ListChangesAfterID(ctx context.Context, tripID string, afterID int64) ([]Change, error) {
+	return s.repo.ListChangesAfterID(ctx, tripID, afterID)
+}
+
+func (s *Service) LatestChangeLogID(ctx context.Context, tripID string) (int64, error) {
+	return s.repo.LatestChangeLogID(ctx, tripID)
 }
 
 func (s *Service) GetAppSettings(ctx context.Context) (AppSettings, error) {

@@ -8,8 +8,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Planned / follow-ups
 
-- Flesh out `POST /api/v1/trips/{tripID}/sync` request handling per [docs/sync_contract.md](docs/sync_contract.md).
-- Richer conflict handling beyond last-write-wins for sync clients.
+- Richer conflict handling for sync clients beyond optimistic locking on selected entities.
+
+## [1.49.0] - 2026-04-05
+
+### Added
+
+- **Auth audit logging:** structured `slog` events `login_success`, `login_failed` (extended), `logout`, and `password_changed` with `request_id`, trusted-proxy client IP, and truncated User-Agent (no passwords or login identifiers).
+- **5xx error correlation:** custom recoverer and `writeInternalServerError` return a public `error_id` (HTML or JSON for API/JSON clients); server logs include `error_id`, `request_id`, path, method, and `user_id` when known. Panic logs attach the same `error_id` to stack traces. Authenticated and public **`httpapp`** handlers that previously used `http.Error(..., 500)` route through `writeInternalServerError` where applicable (including template render failures on trip pages).
+- **Account data export:** `GET /profile/export` returns `application/json` attachment `remi-export-YYYYMMDD.json` (profile without password hash, user settings, redacted app settings, visible trips with persisted entities and document metadata).
+- **Backup helpers:** `scripts/backup-sqlite.sh`, `scripts/backup-sqlite.ps1`, and optional `docker-compose.backup.yml` (Compose profile `backup`); README and self-hosting docs include `sqlite3 .backup` examples and uploads volume reminders.
+- **Sync API:** `POST /api/v1/trips/{tripID}/sync` applies JSON `ops` (trip / itinerary_item / expense / checklist_item) with per-op results, `server_changes` delta, optional numeric `base_cursor` + `stale_base`; trip delete/archive require owner. `GET .../changes` JSON uses snake_case fields on change objects. **Conflict** results use code `conflict` when optimistic locking rejects a stale write.
+- **Money in minor units:** expense amounts, group-expense splits, tab settlements, trip budget cap, itinerary estimated costs, and booking totals are stored as **integer minor units** (e.g. cents) in SQLite with additive migration from legacy `REAL` columns; UI and APIs continue to show decimal amounts where appropriate.
+- **Optimistic concurrency:** `updated_at` and `expected_updated_at` on key entities (expenses, bookings, itinerary lines, etc.) so concurrent edits can return **409 Conflict** with JSON `code: conflict` for HTMX/async clients instead of silent last-write-wins.
+- **Transactional bookings:** add/update/delete for lodging, vehicle rental, and flights runs in a **single DB transaction** with linked itinerary rows and expenses so partial failures roll back cleanly.
+- **Live UI refresh:** Server-Sent Events (`GET /api/v1/trips/{tripID}/events`, `text/event-stream`) so open sessions can refresh lists without a full page reload (alongside HTMX/fetch patterns elsewhere).
+
+### Changed
+
+- **User-facing errors:** calmer copy for common server failures instead of a raw “500 Internal Server Error” where the unified error writer applies.
+- **Trip Documents / invites:** client-side caching of generated invite links avoids repeated `POST /invite-link` when the members panel re-renders (prevents token rotation loops on document-heavy pages).
+- **Docker / Compose:** image runs as a **non-root** user; optional **read-only root filesystem**, **`tmpfs` for `/tmp`**, **`no-new-privileges`**, and **`cap_drop: ALL`** on the default `docker-compose.yml` service (adjust if your environment needs extra caps).
+
+### Security
+
+- **CSRF** validation on state-changing requests; **session cookies** use **HttpOnly** and **SameSite=Strict** (and **Secure** when `REMI_ENV=production`).
+- **Upload hardening:** stricter type/extension checks (e.g. SVG and risky types rejected where configured); size limits enforced server-side to match app settings.
+- **Self-hosted update check** unchanged: still compares this build to **GitHub Releases** — publishing **`v1.49.0`** is what makes older installs show an update on **About** / `GET /api/about/update-check`.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.49.0`** and the matching **GHCR** image tag if you pull from the registry, so instances on **1.48.0** or older detect the new version.
+- **Database:** startup migrations add cent columns and `updated_at` fields; existing installs upgrade in place. **Rebuild** or **pull** the image and restart the container/process after backup.
 
 ## [1.48.0] - 2026-04-01
 
@@ -306,7 +336,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.48.0...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.0...HEAD
+[1.49.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.48.0...v1.49.0
 [1.48.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.47.0...v1.48.0
 [1.47.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.46.0...v1.47.0
 [1.46.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.45.0...v1.46.0

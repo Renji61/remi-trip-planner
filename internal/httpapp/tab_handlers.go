@@ -9,7 +9,6 @@ import (
 	"math"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -398,6 +397,7 @@ func tabAllowedParticipantKeys(party []trips.UserProfile, guests []trips.TripGue
 }
 
 func (a *app) resolveTabSplitForRequest(ctx context.Context, tripID string, trip trips.Trip, amount float64, r *http.Request) (splitMode, splitJSON string, err error) {
+	amountCents := trips.MoneyToCentsFloat(amount)
 	splitMode = strings.TrimSpace(r.FormValue("split_mode"))
 	splitJSON = strings.TrimSpace(r.FormValue("split_json"))
 	party, _ := a.tripService.TripParty(ctx, tripID)
@@ -415,7 +415,7 @@ func (a *app) resolveTabSplitForRequest(ctx context.Context, tripID string, trip
 		if strings.TrimSpace(trip.TabDefaultSplitMode) != "" && strings.TrimSpace(trip.TabDefaultSplitJSON) != "" {
 			splitMode = trip.TabDefaultSplitMode
 			splitJSON = trip.TabDefaultSplitJSON
-			_, err = trips.NormalizeTabSplitPayload(splitMode, amount, splitJSON, allowed)
+			_, err = trips.NormalizeTabSplitPayload(splitMode, amountCents, splitJSON, allowed)
 			if err != nil {
 				splitMode = trips.TabSplitEqual
 				splitJSON = buildEqualSplitJSON(party, guests)
@@ -431,7 +431,7 @@ func (a *app) resolveTabSplitForRequest(ctx context.Context, tripID string, trip
 	if splitMode == "" {
 		splitMode = trips.TabSplitEqual
 	}
-	_, err = trips.NormalizeTabSplitPayload(splitMode, amount, splitJSON, allowed)
+	_, err = trips.NormalizeTabSplitPayload(splitMode, amountCents, splitJSON, allowed)
 	return splitMode, splitJSON, err
 }
 
@@ -502,8 +502,8 @@ func (a *app) deleteTripGuest(w http.ResponseWriter, r *http.Request) {
 func (a *app) addTabSettlement(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
 	_ = r.ParseForm()
-	amount, _ := strconv.ParseFloat(strings.TrimSpace(r.FormValue("amount")), 64)
-	if amount <= 0 {
+	amountCents, err := trips.ParseMoneyToCents(r.FormValue("amount"))
+	if err != nil || amountCents <= 0 {
 		http.Error(w, "invalid amount", http.StatusBadRequest)
 		return
 	}
@@ -511,7 +511,7 @@ func (a *app) addTabSettlement(w http.ResponseWriter, r *http.Request) {
 		TripID:      tripID,
 		PayerUserID: strings.TrimSpace(r.FormValue("payer_user_id")),
 		PayeeUserID: strings.TrimSpace(r.FormValue("payee_user_id")),
-		Amount:      amount,
+		AmountCents: amountCents,
 		Method:      strings.TrimSpace(r.FormValue("method")),
 		SettledOn:   strings.TrimSpace(r.FormValue("settled_on")),
 		Notes:       strings.TrimSpace(r.FormValue("notes")),
@@ -549,13 +549,17 @@ func (a *app) updateTabSettlement(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "only the trip owner can edit settlements", http.StatusForbidden)
 		return
 	}
-	amount, _ := strconv.ParseFloat(strings.TrimSpace(r.FormValue("amount")), 64)
+	amountCents, err := trips.ParseMoneyToCents(r.FormValue("amount"))
+	if err != nil {
+		http.Error(w, "invalid amount", http.StatusBadRequest)
+		return
+	}
 	st := trips.TabSettlement{
 		ID:          settlementID,
 		TripID:      tripID,
 		PayerUserID: strings.TrimSpace(r.FormValue("payer_user_id")),
 		PayeeUserID: strings.TrimSpace(r.FormValue("payee_user_id")),
-		Amount:      amount,
+		AmountCents: amountCents,
 		Method:      strings.TrimSpace(r.FormValue("method")),
 		SettledOn:   strings.TrimSpace(r.FormValue("settled_on")),
 		Notes:       strings.TrimSpace(r.FormValue("notes")),

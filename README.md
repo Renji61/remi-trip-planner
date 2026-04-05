@@ -66,6 +66,8 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### Expenses & group expenses
 
 - Manual **expenses** (category, amount, date, payment method, notes) at `/trips/{id}/expenses`; **group expenses** at `/trips/{id}/group-expenses` with equal, exact, percent, and share-based splits; **301** redirects from legacy `/budget` and `/tab` URLs.
+- Amounts are persisted as **integer minor units** (e.g. cents) in SQLite for accurate split math; the UI still uses familiar decimal entry.
+- **Optimistic concurrency** on many trip-scoped edits: if someone else saved first, the UI can receive **409 Conflict** with a structured error instead of silently overwriting.
 - **Budget summary** on the trip page (budgeted vs spent), including **Total group expense** on mobile and in the desktop sidebar when group expenses are enabled; dedicated expenses subpage with transactions and export.
 - **Quick expense** entry from the trip sidebar (when the expenses section is enabled).
 - Some expenses are **linked** to stay, vehicle, or flight bookings and edited from those flows.
@@ -74,6 +76,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### Stay, vehicle, flights
 
 - Full **accommodation**, **vehicle rental**, and **flights** sections with forms, attachments/images/documents, and links to **itinerary stops** and **expenses** where designed.
+- **Add/update/delete** flows for those bookings run in **transactions** with linked itinerary lines (and related cleanup) so you do not get half-applied saves if something fails mid-way.
 
 ### Trip documents & uploads
 
@@ -101,18 +104,23 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - App title, default currency, **default map location** (place search with short name stored; Tokyo fallback), map zoom, theme (light / dark / system), location lookup, dashboard presentation options — via **Settings** and quick theme POST from the trip shell.
 - **Desktop:** shared **account** dropdown (profile initial, **Profile**, **App settings**, **Log out**) on trip topbars and other app-shell pages for consistent navigation.
 
+### Account export & privacy
+
+- **Profile → Your data:** `GET /profile/export` (session cookie, same-site browser navigation) downloads **`remi-export-YYYYMMDD.json`**: safe profile fields (no password hash), your user settings, app settings with **secrets redacted** (e.g. Google Maps API key), and every trip you can see (itinerary, expenses, checklist, stays, vehicles, flights, group/tab settlements, guests, departed participants, trip document metadata including stored paths — not file bytes). **CSRF:** export uses **GET** so it is not tied to form CSRF tokens; it only works for an authenticated session from the same site (mitigate cross-site download by keeping cookies `SameSite`/`Secure` in production as configured).
+
 ### About & updates
 
-- **About** page with installed version, release notes, and **check for updates** (compares to **GitHub’s latest Release** for self-hosted instances — publish a Release for each version tag so others see an update).
+- **About** page with installed version, bundled changelog excerpt for that version, and **check for updates** (compares to **GitHub’s latest Release** for self-hosted instances — publish a **Release** for each **`v*.*.*`** tag so older installs show an update).
 
 ### PWA
 
 - **Manifest** and **service worker** for add-to-home-screen style use and basic static caching (see [PWA & offline](#pwa--offline)).
 
-### Sync (for future / native clients)
+### Sync (local-first / native clients)
 
-- **Read** server change history: `GET /api/v1/trips/{tripID}/changes`.
-- **Sync** placeholder: `POST /api/v1/trips/{tripID}/sync` — see [docs/sync_contract.md](docs/sync_contract.md).
+- **Read** server change history: `GET /api/v1/trips/{tripID}/changes?since=…` (session cookie, trip access).
+- **Live stream:** `GET /api/v1/trips/{tripID}/events` streams **`text/event-stream`** (change batches) for push-style refresh while a trip is open in the browser.
+- **Write batch:** `POST /api/v1/trips/{tripID}/sync` with JSON body (`client_id`, optional numeric `base_cursor`, `ops[]`) — applies create/update/delete (and trip `archive`) for `trip`, `itinerary_item`, `expense`, `checklist_item`; returns per-op results and new `change_log` rows; conflicts surface as **`conflict`** in per-op results when optimistic locking applies. See [docs/sync_contract.md](docs/sync_contract.md).
 
 ---
 
@@ -152,8 +160,21 @@ Environment variables (all optional except as noted):
 | `APP_ADDR` | `127.0.0.1:4122` | HTTP listen address for **native** runs (loopback only; not reachable from other machines). Set `:4122` to listen on all interfaces. Inside Docker the image uses `:8080`; map host port in Compose (default **4122**). |
 | `SQLITE_PATH` | `./data/trips.db` | SQLite database file path. |
 | `REMI_ROOT` | _(unset)_ | Absolute path to repo root if the process cwd is not the module directory. |
+| `REMI_ENV` | _(unset)_ | Set to **`production`** behind HTTPS: **JSON logs** to stdout, **`Secure` session cookies**, **HSTS** and **CSP-Report-Only** headers, stricter browser defaults. Omit or use any other value for local dev (text logs to stderr). |
+| `REMI_TRUSTED_PROXIES` | _(unset)_ | Comma-separated **trusted proxy IPs or CIDRs** (e.g. `127.0.0.1,10.0.0.0/8`). When the **direct** client IP matches, `X-Forwarded-For` is used for **client IP** (rate limits and access logs). Leave unset if the app is not behind a reverse proxy (avoids spoofing). |
+| `REMI_RATE_LIMIT_AUTH_RPM` | `40` | Per-IP requests per minute for sensitive routes: `POST /login`, `/register`, `/setup`; `GET /verify-email` (with token); `POST /invites/accept`; `POST /profile/resend-verify`. |
+| `REMI_RATE_LIMIT_AUTH_BURST` | `12` | Burst allowance for the same limiter. |
+| `REMI_HSTS_MAX_AGE` | `31536000` | `Strict-Transport-Security` **max-age** (seconds) when `REMI_ENV=production`. Set to `0` to disable HSTS. |
+| `REMI_HEALTHZ_DB` | _(unset)_ | If `1` / `true`, `GET /healthz` also runs **`SELECT 1`** against SQLite (returns **503** if the DB is unreachable). Default health check stays cheap (no DB). |
 
 Inside Docker, the image sets `APP_ADDR=:8080` and `SQLITE_PATH=/app/data/trips.db`.
+
+**Production example (Compose / systemd):** set `REMI_ENV=production`, terminate **TLS** at Caddy/nginx/Cloudflare, and set `REMI_TRUSTED_PROXIES` to your proxy’s **egress** IP(s) toward the app so `X-Forwarded-For` is trusted.
+
+### SQLite concurrency
+
+- SQLite uses **WAL** mode: many **readers** and **one writer** at a time per database file. For internet-facing multi-user use, run **one app instance** (one process/container) writing to a given `SQLITE_PATH` unless you know what you’re doing; **do not** point multiple replicas at the same file on network storage without understanding locking.
+- **Backup:** copy `SQLITE_PATH` and `web/static/uploads/` (or your Docker volumes) on a schedule; test restores.
 
 ---
 
@@ -197,7 +218,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.48.0` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.49.0` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 
@@ -222,7 +243,9 @@ docker compose up -d --build
 ```
 
 - **Data:** named volume **`remi-data`** → `/app/data/trips.db` in the container.
+- **Uploads:** named volume **`remi-uploads`** → `/app/web/static/uploads` (same as registry/install compose variants).
 - **Health:** image includes `wget` and a `HEALTHCHECK` on `GET /healthz` (also declared in Compose).
+- **Hardening (default compose):** app user is non-root; service may use **read-only** root, **`tmpfs`** on `/tmp`, and dropped capabilities — override only if you need extra privileges.
 - **Manual update (git):** `git pull && docker compose up -d --build`
 
 ### Registry compose (optional `.env` overrides)
@@ -274,14 +297,38 @@ CI: **[.github/workflows/docker-publish.yml](.github/workflows/docker-publish.ym
 
 ## Backup & data
 
-- **File:** copy `SQLITE_PATH` (e.g. `./data/trips.db` locally, or the Docker volume contents).
-- **Uploads:** if you use attachments/images, back up `web/static/uploads/` (ignored by git).
+- **SQLite (recommended online backup):** use the SQLite shell so the app can keep running safely (writes a consistent snapshot). Example (adjust paths):
+
+  ```bash
+  mkdir -p ./backup
+  TS=$(date -u +%Y%m%d-%H%M%S)
+  sqlite3 ./data/trips.db ".backup ./backup/remi-trips-${TS}.db"
+  ```
+
+  On Windows (PowerShell), if `sqlite3` is on your `PATH`:
+
+  ```powershell
+  New-Item -ItemType Directory -Force -Path .\backup | Out-Null
+  $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
+  sqlite3 .\data\trips.db ".backup '$(Resolve-Path .\backup)\remi-trips-$ts.db'"
+  ```
+
+  Store backups on a **different disk or host** than the live database when possible.
+
+- **Raw file copy:** you can also copy `SQLITE_PATH` while the app is stopped, or copy from the Docker **`remi-data`** volume (see [docs/self-hosting.md](docs/self-hosting.md)).
+- **Uploads:** back up **`web/static/uploads/`** together with the DB (or the Docker **`remi-uploads`** volume / bind mount). Attachments are not inside the SQLite file.
+- **Opt-in scripts:** [scripts/backup-sqlite.sh](scripts/backup-sqlite.sh) and [scripts/backup-sqlite.ps1](scripts/backup-sqlite.ps1); optional [docker-compose.backup.yml](docker-compose.backup.yml) (Compose **profile `backup`**) — wire to **cron** or **Task Scheduler** yourself; nothing runs automatically.
 
 ---
 
 ## Security notes
 
-- Use **strong passwords**, **HTTPS** in production, and **secure cookies** when exposing the app beyond localhost. Restrict who can reach the server (VPN, firewall, or authenticated reverse proxy).
+- Use **strong passwords**, **HTTPS** in production, and set **`REMI_ENV=production`** so session cookies are **`Secure`** and HSTS/CSP-report-only headers apply. Restrict who can reach the server (VPN, firewall, or authenticated reverse proxy).
+- Configure **`REMI_TRUSTED_PROXIES`** when behind a reverse proxy so rate limits and logs see the real client IP; never trust `X-Forwarded-For` from the open internet without a trusted hop.
+- **Auth audit (structured logs):** successful login, failed login, logout, and password change emit **`slog`** events with **`request_id`**, **client IP** (after trusted-proxy handling), and a **truncated `User-Agent`** — never the password or login identifier.
+- **5xx correlation:** panics and internal server failures use **`writeInternalServerError`**, returning a short public **`error_id`** (HTML page or JSON for `/api/*` / `Accept: application/json`); server logs include the same id plus **`request_id`**, path, method, and **`user_id`** when authenticated.
+- **Auth:** registration errors use a **generic** message when the email/username may already exist, to reduce enumeration.
+- **CSP (report-only):** in production the app sends `Content-Security-Policy-Report-Only`. Tune `connect-src` / `script-src` in `internal/httpapp/routes.go` if your deployment adds other CDNs or APIs, then consider enforcing CSP (drop `Report-Only`) once stable.
 - Keep **secrets** out of git (`.env` is gitignored). Use strong host permissions on the SQLite file.
 
 ---

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=136">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <script defer src="/static/app.js"></script>
 </head>
 <body class="auth-page">
@@ -39,11 +39,11 @@
           <p class="muted">{{.Settings.AppTitle}}</p>
         </div>
       </div>
-      {{if eq .Error "1"}}<p class="settings-field-hint error" role="alert">Invalid email, username, or password.</p>{{end}}
+      {{if eq .Error "1"}}<p class="settings-field-hint error" role="alert">Invalid email or password.</p>{{end}}
       <form method="post" action="/login" class="form-grid">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label class="full">Email or username
-          <input type="text" name="identifier" required autocomplete="username">
+          <input type="text" name="identifier" placeholder="you@example.com or johndoe" required autocomplete="username">
         </label>
         <label class="full">Password
           <input type="password" name="password" required autocomplete="current-password">

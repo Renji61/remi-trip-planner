@@ -1,0 +1,6 @@
+{{define "notificationsBell"}}
+<a href="/notifications" class="notifications-bell{{if gt .NotificationUnreadCount 0}} notifications-bell--unread{{end}}" aria-label="Notifications{{if gt .NotificationUnreadCount 0}}, {{.NotificationUnreadCount}} unread{{end}}">
+  <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
+  {{if gt .NotificationUnreadCount 0}}<span class="notifications-bell__badge" aria-hidden="true">{{.NotificationUnreadCount}}</span>{{end}}
+</a>
+{{end}}

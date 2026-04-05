@@ -11,6 +11,9 @@ var ErrTripAccessDenied = errors.New("trip access denied")
 // ErrAuthRequired is returned when an operation requires a logged-in user.
 var ErrAuthRequired = errors.New("authentication required")
 
+// ErrAdminRequired is returned when an operation requires an instance administrator.
+var ErrAdminRequired = errors.New("administrator access required")
+
 // TripAccess describes how the current user relates to a trip.
 type TripAccess struct {
 	TripID    string

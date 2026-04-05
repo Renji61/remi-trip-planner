@@ -48,6 +48,8 @@ func ApplyDefaultTripUIPresets(t *Trip) {
 	t.UIShowItinerary = true
 	t.UIShowChecklist = true
 	t.UIShowTheTab = true
+	t.UIShowDocuments = true
+	t.UICollaborationEnabled = true
 	t.UIItineraryExpand = "first"
 	t.UISpendsExpand = "first"
 	t.UITabExpand = "first"

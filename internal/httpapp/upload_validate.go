@@ -17,7 +17,7 @@ import (
 // User-facing upload errors (safe to return in HTTP bodies / toasts).
 var (
 	ErrUploadBlockedExecutable = errors.New("this file type is not allowed — executables and scripts (.exe, .sh, .bat, .msi, .js, .py, .php, etc.) cannot be uploaded")
-	ErrUploadContentMismatch   = errors.New("file contents do not match an allowed type — upload a PDF, image, or supported document only")
+	ErrUploadContentMismatch   = errors.New("Unsupported file type selected. Please upload an image or PDF document.")
 	ErrUploadEmpty             = errors.New("the selected file is empty")
 )
 
@@ -224,7 +224,7 @@ func validateProfile(k sniffKind, profile UploadProfile, declaredExt string) err
 	switch profile {
 	case UploadProfileImageOnly:
 		switch k {
-		case sniffJPEG, sniffPNG, sniffGIF, sniffWEBP, sniffBMP, sniffTIFF, sniffHEIC, sniffSVG:
+		case sniffJPEG, sniffPNG, sniffGIF, sniffWEBP, sniffBMP, sniffTIFF, sniffHEIC:
 			return nil
 		default:
 			return ErrUploadContentMismatch
@@ -242,11 +242,6 @@ func validateProfile(k sniffKind, profile UploadProfile, declaredExt string) err
 			return nil
 		case sniffZIP:
 			if de == ".docx" || de == ".xlsx" || de == ".pptx" {
-				return nil
-			}
-			return ErrUploadContentMismatch
-		case sniffSVG:
-			if de == ".svg" {
 				return nil
 			}
 			return ErrUploadContentMismatch

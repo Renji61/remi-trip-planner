@@ -2,6 +2,7 @@ package httpapp
 
 import (
 	"bytes"
+	"errors"
 	"mime/multipart"
 	"os"
 	"path/filepath"
@@ -72,6 +73,44 @@ func TestSaveValidatedUploadRejectsBlockedName(t *testing.T) {
 	_, err := SaveValidatedUpload(ioReaderAsMultipartFile(body), h, 1<<20, []string{"t"}, UploadProfileImageOnly)
 	if err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Fatalf("expected blocked extension error, got %v", err)
+	}
+}
+
+func TestSaveValidatedUploadRejectsSVGForImageOnly(t *testing.T) {
+	dir := t.TempDir()
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.MkdirAll(filepath.Join("web", "static", "uploads", "t"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	body := bytes.NewReader([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`))
+	h := &multipart.FileHeader{Filename: "image.svg", Size: int64(body.Len())}
+	_, err := SaveValidatedUpload(ioReaderAsMultipartFile(body), h, 1<<20, []string{"t"}, UploadProfileImageOnly)
+	if !errors.Is(err, ErrUploadContentMismatch) {
+		t.Fatalf("expected svg to be rejected for image uploads, got %v", err)
+	}
+}
+
+func TestSaveValidatedUploadRejectsSVGForBookingAttachment(t *testing.T) {
+	dir := t.TempDir()
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.MkdirAll(filepath.Join("web", "static", "uploads", "t"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	body := bytes.NewReader([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`))
+	h := &multipart.FileHeader{Filename: "document.svg", Size: int64(body.Len())}
+	_, err := SaveValidatedUpload(ioReaderAsMultipartFile(body), h, 1<<20, []string{"t"}, UploadProfileBookingAttachment)
+	if !errors.Is(err, ErrUploadContentMismatch) {
+		t.Fatalf("expected svg to be rejected for booking attachments, got %v", err)
 	}
 }
 

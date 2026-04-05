@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=136">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=172"></script>
+  <script defer src="/static/app.js?v=244"></script>
 </head>
 <body class="page-profile-settings">
   <main class="app-shell">
@@ -68,24 +68,32 @@
           {{end}}
           <form method="post" action="/profile" class="form-grid trip-settings-form-grid remi-trip-widget-form" data-toast-message="Profile updated.">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-            <label class="full">Email<input type="email" name="email" value="{{.User.Email}}" required autocomplete="email"></label>
-            <label class="full">Username<input type="text" name="username" value="{{.User.Username}}" required autocomplete="username"></label>
-            <label class="full">Display name<input type="text" name="display_name" value="{{.User.DisplayName}}" autocomplete="name"></label>
+            <label class="full">Email<input type="email" name="email" value="{{.User.Email}}" placeholder="you@example.com" required autocomplete="email"></label>
+            <label class="full">Username<input type="text" name="username" value="{{.User.Username}}" placeholder="johndoe" required autocomplete="username"></label>
+            <label class="full">Display name<input type="text" name="display_name" value="{{.User.DisplayName}}" placeholder="John Doe" autocomplete="name"></label>
             <button type="submit" class="full">Update profile</button>
           </form>
+        </div>
+        <div class="trip-settings-subcard" aria-labelledby="profile-export-title">
+          <div class="trip-settings-card-head">
+            <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">download</span>
+            <h3 class="trip-settings-card-title" id="profile-export-title">Your data</h3>
+          </div>
+          <p class="muted trip-settings-section-hint">Download a JSON snapshot of your profile, settings, and accessible trips (passwords excluded; API keys are redacted).</p>
+          <p class="full"><a class="btn full profile-export-btn" href="/profile/export" download>Download JSON</a></p>
         </div>
         <div class="trip-settings-subcard" aria-labelledby="profile-password-title">
           <div class="trip-settings-card-head">
             <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">lock</span>
             <h3 class="trip-settings-card-title" id="profile-password-title">Password</h3>
           </div>
-          <p class="muted trip-settings-section-hint">Use a strong password you do not reuse elsewhere.</p>
+          <p class="muted trip-settings-section-hint">Use a strong, unique password.</p>
           <form method="post" action="/profile/password" class="form-grid trip-settings-form-grid remi-trip-widget-form" data-toast-message="Password updated.">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <label class="full">Current password<input type="password" name="current_password" required autocomplete="current-password"{{if .CurrentPasswordError}} aria-invalid="true" aria-describedby="profile-current-password-error"{{end}}></label>
             {{if .CurrentPasswordError}}<p id="profile-current-password-error" class="settings-field-hint error full auth-password-hint" role="alert">{{.CurrentPasswordError}}</p>{{end}}
             <label class="full">New password<input type="password" name="new_password" required minlength="8" autocomplete="new-password" aria-describedby="profile-password-hint"></label>
-            <p id="profile-password-hint" class="settings-field-hint muted full auth-password-hint">Minimum 8 characters required.</p>
+            <p id="profile-password-hint" class="settings-field-hint muted full auth-password-hint">Minimum 8 characters</p>
             <label class="full">Confirm new password<input type="password" name="new_password_confirm" required minlength="8" autocomplete="new-password"></label>
             {{if .PasswordError}}<p class="settings-field-hint error full auth-setup-error" role="alert">{{.PasswordError}}</p>{{end}}
             <button type="submit" class="full">Update password</button>

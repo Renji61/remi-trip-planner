@@ -1,0 +1,31 @@
+# Opt-in: one-off SQLite backup into ./backup-output using Alpine + sqlite3.
+#
+# 1. Set the external volume name to match your running stack, e.g.:
+#      docker volume ls | findstr remi
+#    Common name: <project>_remi-data
+# 2. From repo root:
+#      docker compose -f docker-compose.backup.yml --profile backup run --rm remi-sqlite-backup
+#
+# Does not start automatically. Wire the command above to cron / Task Scheduler if you want schedules.
+
+services:
+  remi-sqlite-backup:
+    image: alpine:3.20
+    profiles: ["backup"]
+    volumes:
+      # TODO: set `external.name` to your remi-data volume (read-only mount).
+      - remi_data:/data:ro
+      - ./backup-output:/out
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        apk add --no-cache sqlite >/dev/null
+        ts=$$(date -u +%Y%m%d-%H%M%S)
+        sqlite3 /data/trips.db ".backup /out/remi-trips-$${ts}.db"
+        echo "Wrote /out/remi-trips-$${ts}.db"
+
+volumes:
+  remi_data:
+    external: true
+    name: remi-trip-planner_remi-data

@@ -44,9 +44,10 @@ type TabSettlement struct {
 	TripID      string
 	PayerUserID string
 	PayeeUserID string
-	Amount      float64
-	Method      string // Cash, Bank Transfer, etc.
-	SettledOn   string // date YYYY-MM-DD
+	AmountCents int64
+	Amount      float64 // derived display value from AmountCents
+	Method      string  // Cash, Bank Transfer, etc.
+	SettledOn   string  // date YYYY-MM-DD
 	Notes       string
 	CreatedAt   time.Time
 }

@@ -28,6 +28,7 @@ const (
 type TabSplitPayload struct {
 	Participants []string           `json:"participants"`
 	Weights      map[string]float64 `json:"weights,omitempty"`
+	AmountsCents map[string]int64   `json:"amounts_cents,omitempty"`
 }
 
 // TabTransfer is one directed payment in a simplified settlement plan.
@@ -89,7 +90,7 @@ func TabSettlementParticipantKey(raw string) string {
 }
 
 // NormalizeTabSplitPayload validates and returns a copy with consistent participants.
-func NormalizeTabSplitPayload(mode string, amount float64, rawJSON string, allowedKeys map[string]struct{}) (TabSplitPayload, error) {
+func NormalizeTabSplitPayload(mode string, amountCents int64, rawJSON string, allowedKeys map[string]struct{}) (TabSplitPayload, error) {
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if mode == TabSplitModeEmpty {
 		mode = TabSplitEqual
@@ -127,18 +128,24 @@ func NormalizeTabSplitPayload(mode string, amount float64, rawJSON string, allow
 	case TabSplitEqual:
 		return p, nil
 	case TabSplitExact:
-		if p.Weights == nil {
-			return p, errors.New("exact split needs an amount per person")
+		if p.AmountsCents == nil {
+			if p.Weights == nil {
+				return p, errors.New("exact split needs an amount per person")
+			}
+			p.AmountsCents = make(map[string]int64, len(p.Weights))
+			for _, k := range p.Participants {
+				p.AmountsCents[k] = MoneyToCentsFloat(p.Weights[k])
+			}
 		}
-		var sum float64
+		var sum int64
 		for _, k := range p.Participants {
-			w := p.Weights[k]
-			if w < 0 || math.IsNaN(w) {
+			c := p.AmountsCents[k]
+			if c < 0 {
 				return p, errors.New("invalid exact amount")
 			}
-			sum += w
+			sum += c
 		}
-		if math.Abs(sum-amount) > 0.02 && amount > 0 {
+		if sum != amountCents && amountCents > 0 {
 			return p, errors.New("exact amounts must add up to the expense total")
 		}
 		return p, nil
@@ -203,12 +210,42 @@ func mergeParticipantKeysFromExpense(e Expense, tripOwnerUserID string, allowed 
 			allowed[k] = struct{}{}
 		}
 	}
+	for k := range p.AmountsCents {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			allowed[k] = struct{}{}
+		}
+	}
 }
 
-// SharesForExpense returns each participant's owed share for one expense (FromTab only).
-func SharesForExpense(e Expense, partyUserIDs []string, guestIDs []string, tripOwnerUserID string) (map[string]float64, error) {
-	if !e.FromTab || e.Amount <= 0 {
-		return map[string]float64{}, nil
+func fixCentsDrift(m map[string]int64, target int64) map[string]int64 {
+	var sum int64
+	for _, v := range m {
+		sum += v
+	}
+	drift := target - sum
+	if drift == 0 {
+		return m
+	}
+	var keys []string
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return m
+	}
+	last := keys[len(keys)-1]
+	m[last] += drift
+	return m
+}
+
+func sharesForExpenseCents(e Expense, partyUserIDs []string, guestIDs []string, tripOwnerUserID string) (map[string]int64, error) {
+	if e.AmountCents == 0 && e.Amount != 0 {
+		e.AmountCents = MoneyToCentsFloat(e.Amount)
+	}
+	if !e.FromTab || e.AmountCents <= 0 {
+		return map[string]int64{}, nil
 	}
 	allowed := map[string]struct{}{}
 	for _, uid := range partyUserIDs {
@@ -220,18 +257,17 @@ func SharesForExpense(e Expense, partyUserIDs []string, guestIDs []string, tripO
 	mergeParticipantKeysFromExpense(e, tripOwnerUserID, allowed)
 	mode := strings.TrimSpace(strings.ToLower(e.SplitMode))
 	if mode == "" && strings.TrimSpace(e.SplitJSON) == "" {
-		// Legacy: equal among registered trip members only.
-		out := map[string]float64{}
+		out := map[string]int64{}
 		if len(partyUserIDs) == 0 {
 			return out, nil
 		}
-		share := e.Amount / float64(len(partyUserIDs))
+		share := e.AmountCents / int64(len(partyUserIDs))
 		for _, uid := range partyUserIDs {
-			out[ParticipantKeyUser(uid)] = roundMoney(share)
+			out[ParticipantKeyUser(uid)] = share
 		}
-		return fixRoundingDrift(out, e.Amount), nil
+		return fixCentsDrift(out, e.AmountCents), nil
 	}
-	payload, err := NormalizeTabSplitPayload(mode, e.Amount, e.SplitJSON, allowed)
+	payload, err := NormalizeTabSplitPayload(mode, e.AmountCents, e.SplitJSON, allowed)
 	if err != nil {
 		return nil, err
 	}
@@ -241,38 +277,53 @@ func SharesForExpense(e Expense, partyUserIDs []string, guestIDs []string, tripO
 	}
 	switch mode {
 	case TabSplitEqual:
-		n := float64(len(payload.Participants))
-		share := e.Amount / n
-		out := map[string]float64{}
-		for _, k := range payload.Participants {
-			out[k] = roundMoney(share)
+		out := map[string]int64{}
+		if len(payload.Participants) == 0 {
+			return out, nil
 		}
-		return fixRoundingDrift(out, e.Amount), nil
+		share := e.AmountCents / int64(len(payload.Participants))
+		for _, k := range payload.Participants {
+			out[k] = share
+		}
+		return fixCentsDrift(out, e.AmountCents), nil
 	case TabSplitExact:
-		out := map[string]float64{}
+		out := map[string]int64{}
 		for _, k := range payload.Participants {
-			out[k] = roundMoney(payload.Weights[k])
+			out[k] = payload.AmountsCents[k]
 		}
-		return fixRoundingDrift(out, e.Amount), nil
+		return fixCentsDrift(out, e.AmountCents), nil
 	case TabSplitPercent:
-		out := map[string]float64{}
+		out := map[string]int64{}
 		for _, k := range payload.Participants {
-			out[k] = roundMoney(e.Amount * payload.Weights[k] / 100)
+			out[k] = int64(math.Round(float64(e.AmountCents) * payload.Weights[k] / 100))
 		}
-		return fixRoundingDrift(out, e.Amount), nil
+		return fixCentsDrift(out, e.AmountCents), nil
 	case TabSplitShares:
 		var totalW float64
 		for _, k := range payload.Participants {
 			totalW += payload.Weights[k]
 		}
-		out := map[string]float64{}
+		out := map[string]int64{}
 		for _, k := range payload.Participants {
-			out[k] = roundMoney(e.Amount * payload.Weights[k] / totalW)
+			out[k] = int64(math.Round(float64(e.AmountCents) * payload.Weights[k] / totalW))
 		}
-		return fixRoundingDrift(out, e.Amount), nil
+		return fixCentsDrift(out, e.AmountCents), nil
 	default:
 		return nil, errors.New("unknown split method")
 	}
+}
+
+// SharesForExpense returns each participant's owed share for one expense (FromTab only).
+func SharesForExpense(e Expense, partyUserIDs []string, guestIDs []string, tripOwnerUserID string) (map[string]float64, error) {
+	sharesCents, err := sharesForExpenseCents(e, partyUserIDs, guestIDs, tripOwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(sharesCents))
+	for k, cents := range sharesCents {
+		out[k] = MoneyFromCents(cents)
+	}
+	return out, nil
 }
 
 func roundMoney(x float64) float64 {
@@ -315,12 +366,15 @@ func EffectivePaidBy(e Expense, tripOwnerUserID string) string {
 
 // TabLedger builds running balances from tab expenses and settlements (members and guests).
 func TabLedger(tabExpenses []Expense, partyUserIDs []string, guestIDs []string, settlements []TabSettlement, tripOwnerUserID string) (map[string]float64, error) {
-	bal := map[string]float64{}
+	balCents := map[string]int64{}
 	for _, e := range tabExpenses {
+		if e.AmountCents == 0 && e.Amount != 0 {
+			e.AmountCents = MoneyToCentsFloat(e.Amount)
+		}
 		if !e.FromTab {
 			continue
 		}
-		shares, err := SharesForExpense(e, partyUserIDs, guestIDs, tripOwnerUserID)
+		shares, err := sharesForExpenseCents(e, partyUserIDs, guestIDs, tripOwnerUserID)
 		if err != nil {
 			return nil, err
 		}
@@ -328,19 +382,26 @@ func TabLedger(tabExpenses []Expense, partyUserIDs []string, guestIDs []string, 
 		if payer == "" {
 			continue
 		}
-		bal[payer] = roundMoney(bal[payer] + e.Amount)
+		balCents[payer] += e.AmountCents
 		for k, sh := range shares {
-			bal[k] = roundMoney(bal[k] - sh)
+			balCents[k] -= sh
 		}
 	}
 	for _, s := range settlements {
+		if s.AmountCents == 0 && s.Amount != 0 {
+			s.AmountCents = MoneyToCentsFloat(s.Amount)
+		}
 		pk := TabSettlementParticipantKey(s.PayerUserID)
 		qk := TabSettlementParticipantKey(s.PayeeUserID)
 		if pk == "" || qk == "" {
 			continue
 		}
-		bal[pk] = roundMoney(bal[pk] + s.Amount)
-		bal[qk] = roundMoney(bal[qk] - s.Amount)
+		balCents[pk] += s.AmountCents
+		balCents[qk] -= s.AmountCents
+	}
+	bal := make(map[string]float64, len(balCents))
+	for k, cents := range balCents {
+		bal[k] = MoneyFromCents(cents)
 	}
 	return bal, nil
 }

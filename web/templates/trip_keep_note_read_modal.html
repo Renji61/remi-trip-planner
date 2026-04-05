@@ -1,0 +1,27 @@
+{{define "tripKeepNoteViewDialog"}}
+<dialog id="trip-keep-note-view-dialog" class="trip-keep-note-view-dialog" aria-labelledby="trip-keep-note-view-dialog-title">
+  <div class="trip-keep-note-view-dialog__panel">
+    <div class="trip-keep-note-view-dialog__head">
+      <h3 id="trip-keep-note-view-dialog-title"></h3>
+      <button type="button" class="secondary-btn" data-trip-keep-note-view-close>Close</button>
+    </div>
+    <div class="trip-keep-note-view-dialog__body" id="trip-keep-note-view-dialog-body"></div>
+  </div>
+</dialog>
+{{end}}
+
+{{define "tripKeepNoteCardBody"}}
+{{$note := .Note}}
+{{if trimSpace $note.Body}}
+{{$p := keepNoteBodyPreview $note.Body}}
+<div class="trip-keep-note-body-block">
+  <div class="trip-keep-note-body">{{$p.Short}}</div>
+  {{if $p.Expanded}}
+  <template id="trip-keep-note-full-{{$note.ID}}">{{$note.Body}}</template>
+  <button type="button" class="link-btn trip-keep-note-view-more" data-trip-keep-note-view-more data-note-template-id="trip-keep-note-full-{{$note.ID}}" data-note-title="{{if trimSpace $note.Title}}{{$note.Title}}{{else}}Note{{end}}" aria-label="View full note: {{if trimSpace $note.Title}}{{$note.Title}}{{else}}Note{{end}}">View more…</button>
+  {{end}}
+</div>
+{{else}}
+<p class="muted trip-keep-note-body trip-keep-note-body--empty">Empty note</p>
+{{end}}
+{{end}}

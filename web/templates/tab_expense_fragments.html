@@ -63,14 +63,15 @@
             <form id="tab-expense-edit-{{.ID}}" method="post" action="/trips/{{$.Trip.ID}}/expenses/{{.ID}}/update" class="form-grid item-edit full tab-expense-edit-form" enctype="multipart/form-data" data-ajax-submit data-toast-message="Entry updated." data-tab-expense-id="{{.ID}}">
               <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
               <input type="hidden" name="return_to" value="/trips/{{$.Trip.ID}}/group-expenses">
+              <input type="hidden" name="expected_updated_at" value="{{.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
               <input type="hidden" name="tab_meta_submitted" value="1">
               <input type="hidden" name="split_mode" value="{{.SplitMode}}" data-tab-split-mode>
               <input type="hidden" name="split_json" value="" data-tab-split-json autocomplete="off">
               <div class="full tab-expense-edit-form-head">
-                <h3>Edit group expense</h3>
-                <p class="trip-resource-form-subtitle">Update the entry; splits and balances refresh.</p>
+                <h3>Edit Expense</h3>
+                <p class="trip-resource-form-subtitle">Update details; splits and balances will refresh.</p>
               </div>
-              <label class="full">Title (optional)<input type="text" name="title" value="{{.Title}}" maxlength="200" data-tab-title-input></label>
+              <label class="full">Title (optional)<input type="text" name="title" value="{{.Title}}" maxlength="200" placeholder="e.g. Scuba diving in El Nido" data-tab-title-input></label>
               {{$curCat := .Category}}
               {{$curMethod := .PaymentMethod}}
               <label>Category
@@ -93,7 +94,7 @@
                   <option value="Mobile Payment" {{if eq $curMethod "Mobile Payment"}}selected{{end}}>Mobile Payment</option>
                 </select>
               </label>
-              <label>Amount<input type="number" step="0.01" min="0" name="amount" value="{{printf "%.2f" .Amount}}" required data-tab-amount-input></label>
+              <label>Amount<input type="number" step="0.01" min="0" name="amount" autocomplete="transaction-amount" {{template "remiPmIgnoreExt"}} value="{{printf "%.2f" .Amount}}" placeholder="0.00" required data-tab-amount-input></label>
               <label>Date{{template "remiDateField" (dict "name" "spent_on" "value" .SpentOn "mdy" (effectiveUIDateIsMDY $.Trip $.Settings))}}</label>
               <label class="full">Paid by
                 <select name="paid_by" required data-tab-paid-by>
@@ -118,10 +119,10 @@
                   <button type="button" class="tab-split-mode-btn" data-tab-split-mode-btn="shares">Shares</button>
                 </div>
                 <p class="muted tab-split-hint" data-tab-split-hint></p>
-                <p class="tab-split-amount-warning hidden" data-tab-amount-warning role="alert" aria-live="polite">Enter an expense amount first, then configure the split.</p>
+                <p class="tab-split-amount-warning hidden" data-tab-amount-warning role="alert" aria-live="polite">Enter an amount before configuring the split.</p>
                 {{template "tabSplitBreakdownShell" (dict "Party" $.Party "TripGuests" $.TripGuests "TabDepartedParticipants" $.TabDepartedParticipants "CurrencySymbol" $.CurrencySymbol "CurrentUserID" $.CurrentUserID "Trip" $.Trip "PaidByKey" .PaidBy)}}
               </div>
-              <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}"></label>
+              <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}" placeholder="Add any notes"></label>
               <input type="hidden" name="current_tab_attachment_path" value="{{.ReceiptPath}}">
               {{if .ReceiptPath}}
               <p class="full muted">Current attachment: <a href="{{.ReceiptPath}}" target="_blank" rel="noopener">Open receipt</a></p>
@@ -129,7 +130,7 @@
               {{template "remiRemoveTabAttachmentCheckbox"}}
               <label class="full">Replace receipt (optional)<input type="file" name="tab_attachment" accept=".pdf,image/*"></label>
               <div class="full expense-edit-actions">
-                <button type="submit">Save</button>
+                <button type="submit">Save Changes</button>
                 <button type="button" class="secondary-btn" data-inline-edit-cancel="tab-expense-edit-{{.ID}}">Cancel</button>
               </div>
             </form>

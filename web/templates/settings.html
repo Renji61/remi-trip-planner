@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=149">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=172"></script>
+  <script defer src="/static/app.js?v=244"></script>
 </head>
 <body class="page-site-settings">
   <main class="app-shell" aria-label="Site settings" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{if eq .Settings.UserDistanceUnit "mi"}}mi{{else if eq .Settings.UserDistanceUnit "km"}}km{{else if eq .Settings.DefaultDistanceUnit "mi"}}mi{{else}}km{{end}}">
@@ -37,7 +37,7 @@
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
           <h2>Site settings</h2>
-          <p>{{if .TripID}}Defaults and appearance for the app while you manage this trip.{{else}}Configure map behavior, registration, and your personal dashboard.{{end}}</p>
+          <p>{{if .TripID}}Defaults and appearance for the app while you manage this trip.{{else}}Configure map behavior, registration, and dashboard preferences.{{end}}</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           <a href="/" class="icon-btn" aria-label="Go to dashboard">
@@ -58,7 +58,7 @@
         <p class="settings-success site-settings-flash" role="status">Site options and your dashboard preferences were reset to defaults.</p>
         {{end}}
         {{if .TripID}}
-        <p class="site-settings-trip-context-hint muted" role="note"><strong>Per-trip map center</strong> is not on this page (these map defaults apply to everyone). Open <a href="/trips/{{.TripID}}/settings#trip-map-center-settings">Trip settings</a> and scroll to <strong>Trip map</strong> under Trip information.</p>
+        <p class="site-settings-trip-context-hint muted" role="note"><strong>Per-trip map center</strong> is not on this page (these map defaults apply to everyone). Open <a href="/trips/{{.TripID}}/settings#trip-map-center-settings">Trip settings</a> and scroll to <strong>Trip map</strong> under Trip Information.</p>
         {{end}}
 
         <div class="site-settings-layout">
@@ -72,44 +72,44 @@
                 <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">tune</span>
                 <h3 class="trip-settings-card-title" id="settings-general-title">General</h3>
               </div>
-              <p class="muted trip-settings-section-hint" id="hint-instance">App title, map defaults, and location lookup apply to <strong>everyone</strong> on this server. Dashboard title, currency, and registration below are saved to <strong>your account</strong> when you save.</p>
+              <p class="muted trip-settings-section-hint" id="hint-instance">App title, map defaults, and location lookup apply to all users. Dashboard title, currency, and registration settings below are saved to your account.</p>
               <div class="form-grid trip-settings-form-grid">
                 <label class="full">Dashboard Title
-                  <input type="text" name="trip_dashboard_heading" value="{{.Settings.TripDashboardHeading}}" required autocomplete="off" aria-describedby="hint-dash-title">
+                  <input type="text" name="trip_dashboard_heading" value="{{.Settings.TripDashboardHeading}}" placeholder="e.g. My trips" required autocomplete="off" aria-describedby="hint-dash-title">
                 </label>
-                <p id="hint-dash-title" class="settings-field-hint muted full">Shown as the main heading on your home dashboard. The sidebar brand stays <strong>{{.Settings.AppTitle}}</strong>.</p>
-                <label>Default currency name
-                  <input type="text" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}" required autocomplete="off" aria-describedby="hint-currency">
+                <p id="hint-dash-title" class="settings-field-hint muted full">Shown as the main heading on your dashboard. The sidebar brand remains <strong>REMI Trip Planner</strong>.</p>
+                <label>Default Currency
+                  <input type="text" name="default_currency_name" value="{{.Settings.DefaultCurrencyName}}" placeholder="e.g. USD" required autocomplete="off" aria-describedby="hint-currency">
                 </label>
-                <label>Default currency symbol
-                  <input type="text" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}" required autocomplete="off" aria-describedby="hint-currency">
+                <label>Currency Symbol
+                  <input type="text" name="default_currency_symbol" value="{{.Settings.DefaultCurrencySymbol}}" placeholder="e.g. $" required autocomplete="off" aria-describedby="hint-currency">
                 </label>
-                <p id="hint-currency" class="settings-field-hint muted full">Used for new trips and dashboard totals (e.g. USD and $).</p>
+                <p id="hint-currency" class="settings-field-hint muted full">Used for new trips and dashboard totals (e.g. USD, $).</p>
                 <label>Default date format
                   <select name="default_ui_date_format" aria-describedby="hint-ui-date">
                     <option value="dmy" {{if eq .Settings.DefaultUIDateFormat "mdy"}}{{else}}selected{{end}}>DD-MM-YYYY</option>
                     <option value="mdy" {{if eq .Settings.DefaultUIDateFormat "mdy"}}selected{{end}}>MM-DD-YYYY</option>
                   </select>
                 </label>
-                <p id="hint-ui-date" class="settings-field-hint muted full">Used for date fields and labels everywhere unless a trip sets its own order under Trip settings → Display preferences.</p>
+                <p id="hint-ui-date" class="settings-field-hint muted full">Used across the app unless overridden in Trip Settings → Display Preferences.</p>
                 <label class="full">Default Map Center
                   <span class="hero-trip-name-field site-settings-default-place-field">
-                    <input type="text" name="map_default_place_label" value="{{.Settings.MapDefaultPlaceLabel}}" placeholder="Search places or type a name" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-describedby="hint-map" data-site-settings-map-name>
+                    <input type="text" name="map_default_place_label" value="{{.Settings.MapDefaultPlaceLabel}}" placeholder="Search for a place or enter a location" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-describedby="hint-map" data-site-settings-map-name>
                     <input type="hidden" name="map_default_latitude" value="{{printf "%.6f" .Settings.MapDefaultLatitude}}" data-site-settings-map-lat>
                     <input type="hidden" name="map_default_longitude" value="{{printf "%.6f" .Settings.MapDefaultLongitude}}" data-site-settings-map-lng>
                   </span>
                 </label>
                 <label>Map default zoom
-                  <input type="number" min="1" max="20" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}" aria-describedby="hint-map">
+                  <input type="number" min="1" max="20" name="map_default_zoom" value="{{.Settings.MapDefaultZoom}}" placeholder="e.g. 12" aria-describedby="hint-map">
                 </label>
-                <p id="hint-map" class="settings-field-hint muted full">Default center and zoom for the <strong>Trip Map</strong> on trip details when a trip has no map center set, and for new trips when the dashboard does not pick a place. Trip maps use <strong>OpenStreetMap</strong> unless a valid Google browser key is set below. Zoom is 1–20.</p>
+                <p id="hint-map" class="settings-field-hint muted full">Sets the default map center and zoom for trips without a defined location. Uses OpenStreetMap unless a valid Google Maps key is provided. Zoom range: 1–20.</p>
                 <label class="full">Location lookup
                   <select name="enable_location_lookup" aria-describedby="hint-lookup">
                     <option value="true" {{if .Settings.EnableLocationLookup}}selected{{end}}>Enabled</option>
                     <option value="false" {{if not .Settings.EnableLocationLookup}}selected{{end}}>Disabled</option>
                   </select>
                 </label>
-                <p id="hint-lookup" class="settings-field-hint muted full">When enabled, the app can suggest coordinates for locations (may use external lookup).</p>
+                <p id="hint-lookup" class="settings-field-hint muted full">Enables location suggestions using external services.</p>
                 <div
                   class="full gmaps-api-key-section"
                   data-gmaps-key-section
@@ -117,7 +117,7 @@
                   data-saved-key="{{trimSpace .Settings.GoogleMapsAPIKey}}"
                 >
                   <span class="gmaps-api-key-section__label">Google Maps API key <span class="muted">(optional)</span></span>
-                  <p id="hint-gmaps" class="settings-field-hint muted full">When set to a valid browser API key (typically starting with <code>AIza</code>), the app uses Google for location suggestions where configured, and <strong>Trip Map</strong> on trip pages uses Google Maps. Otherwise trip maps use OpenStreetMap (Leaflet). Changes below apply when you save this form.</p>
+                  <p id="hint-gmaps" class="settings-field-hint muted full">When provided, Google Maps is used for location suggestions and trip maps. Otherwise, OpenStreetMap is used. Changes apply after saving.</p>
 
                   <div class="gmaps-key-edit-wrap" data-gmaps-key-edit hidden>
                     <input
@@ -126,7 +126,7 @@
                       class="gmaps-key-edit-input"
                       data-gmaps-key-input
                       autocomplete="off"
-                      placeholder="Paste a browser key for Maps, Places, and Geocoding"
+                      placeholder="Enter a browser API key for Maps, Places, and Geocoding"
                       aria-describedby="hint-gmaps gmaps-key-validation"
                     >
                     <p id="gmaps-key-validation" class="gmaps-key-validation muted" data-gmaps-key-validation hidden></p>
@@ -166,21 +166,21 @@
                     <option value="mi" {{if eq .Settings.DefaultDistanceUnit "mi"}}selected{{end}}>Miles</option>
                   </select>
                 </label>
-                <p id="hint-dist-app" class="settings-field-hint muted full">Used when a user or trip does not override distance units.</p>
-                <label>Max upload size per file (MB)
-                  <input type="number" min="1" max="100" name="max_upload_file_size_mb" value="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}" aria-describedby="hint-upload-size">
+                <p id="hint-dist-app" class="settings-field-hint muted full">Used when not overridden by user or trip settings.</p>
+                <label>Max Upload Size (MB)
+                  <input type="number" min="1" max="100" name="max_upload_file_size_mb" value="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}" placeholder="e.g. 5" aria-describedby="hint-upload-size">
                 </label>
-                <p id="hint-upload-size" class="settings-field-hint muted full">Applies to Trip Documents and document/image attachments across trip entry forms.</p>
+                <p id="hint-upload-size" class="settings-field-hint muted full">Applies to all document and image uploads across the app.</p>
                 <label class="trip-settings-toggle-row">
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">person_add</span>
-                  <span class="trip-settings-toggle-text">Allow new users to register <span class="trip-settings-vis-lock-hint">(public sign-up)</span></span>
+                  <span class="trip-settings-toggle-text">Allow Public Registration</span>
                   <span class="trip-settings-switch">
                     <input type="hidden" name="site_registration_enabled" value="0">
                     <input type="checkbox" name="site_registration_enabled" value="1" {{if .Settings.RegistrationEnabled}}checked{{end}}>
                     <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
                   </span>
                 </label>
-                <p class="settings-field-hint muted full">When off, <code>/register</code> is unavailable; the first account is still created via <code>/setup</code>.</p>
+                <p class="settings-field-hint muted full">When disabled, <code>/register</code> is unavailable. The first account can still be created via <code>/setup</code>.</p>
               </div>
             </div>
 
@@ -189,7 +189,7 @@
                 <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">palette</span>
                 <h3 class="trip-settings-card-title" id="settings-appearance-title">Appearance</h3>
               </div>
-              <p class="muted trip-settings-section-hint">Theme and dashboard banner image or URL.</p>
+              <p class="muted trip-settings-section-hint">Configure theme and dashboard banner.</p>
               <div class="form-grid trip-settings-form-grid">
                 <label class="full">Theme
                   <select name="theme_preference" aria-describedby="hint-theme" title="Choose app color theme">
@@ -198,7 +198,7 @@
                     <option value="system" {{if eq .Settings.ThemePreference "system"}}selected{{end}}>Follow system</option>
                   </select>
                 </label>
-                <p id="hint-theme" class="settings-field-hint muted full">Applies across the app. The header control switches light/dark and saves here.</p>
+                <p id="hint-theme" class="settings-field-hint muted full">Applies across the app. Theme changes are saved automatically.</p>
                 <label class="full">Dashboard Banner
                   <select name="dashboard_hero_background_mode" id="dashboard_hero_background_mode" aria-describedby="hint-hero">
                     <option value="default" {{if eq .Settings.DashboardHeroBackground "default"}}selected{{end}}>Default photo (optimized)</option>
@@ -206,8 +206,8 @@
                     <option value="pattern:grid" {{if eq .Settings.DashboardHeroBackground "pattern:grid"}}selected{{end}}>Muted pattern: grid</option>
                     <option value="pattern:noise" {{if eq .Settings.DashboardHeroBackground "pattern:noise"}}selected{{end}}>Muted pattern: noise</option>
                     <option value="pattern:waves" {{if eq .Settings.DashboardHeroBackground "pattern:waves"}}selected{{end}}>Muted pattern: waves</option>
-                    <option value="custom_upload" {{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}selected{{end}}>Upload image</option>
-                    <option value="custom_url" {{if hasPrefix .Settings.DashboardHeroBackground "https://"}}selected{{end}}>Custom image URL (HTTPS only)</option>
+                    <option value="custom_upload" {{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}selected{{end}}>Upload Image</option>
+                    <option value="custom_url" {{if hasPrefix .Settings.DashboardHeroBackground "https://"}}selected{{end}}>Custom Image URL (HTTPS only)</option>
                   </select>
                 </label>
                 <input type="hidden" name="dashboard_hero_existing_path" value="{{if hasPrefix .Settings.DashboardHeroBackground "/static/uploads/hero/"}}{{.Settings.DashboardHeroBackground}}{{end}}">
@@ -224,7 +224,7 @@
                 <label class="full">Custom image URL
                   <input type="url" name="dashboard_hero_background_url" placeholder="https://…" value="{{if hasPrefix .Settings.DashboardHeroBackground "https://"}}{{.Settings.DashboardHeroBackground}}{{end}}" autocomplete="off" aria-describedby="hint-hero">
                 </label>
-                <p id="hint-hero" class="settings-field-hint muted full">Select “Upload image” or “Custom image URL” to set a custom banner. Paths are stored from the site root so they keep working if the domain changes.</p>
+                <p id="hint-hero" class="settings-field-hint muted full">Choose “Upload Image” or “Custom Image URL” to set a banner. Paths are stored from the site root to remain valid if the domain changes.</p>
               </div>
             </div>
 
@@ -233,16 +233,16 @@
                 <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">dashboard</span>
                 <h3 class="trip-settings-card-title" id="settings-dashboard-title">Dashboard</h3>
               </div>
-              <p class="muted trip-settings-section-hint">How trips are listed on your home dashboard.</p>
+              <p class="muted trip-settings-section-hint">Configure how trips are displayed on your dashboard.</p>
               <div class="form-grid trip-settings-form-grid">
-                <label class="full">Your distance unit <span class="muted">(personal)</span>
+                <label class="full">Your Distance Unit
                   <select name="user_distance_unit" aria-describedby="hint-user-dist">
                     <option value="" {{if eq .Settings.UserDistanceUnit ""}}selected{{end}}>Use instance default</option>
                     <option value="km" {{if eq .Settings.UserDistanceUnit "km"}}selected{{end}}>Kilometres</option>
                     <option value="mi" {{if eq .Settings.UserDistanceUnit "mi"}}selected{{end}}>Miles</option>
                   </select>
                 </label>
-                <p id="hint-user-dist" class="settings-field-hint muted full">Applies to dashboard stats and anywhere a trip does not set its own unit.</p>
+                <p id="hint-user-dist" class="settings-field-hint muted full">Applies to dashboard stats and where trips don’t override units.</p>
                 <label class="full">Trip layout
                   <select name="dashboard_trip_layout" aria-describedby="hint-layout">
                     <option value="grid" {{if eq .Settings.DashboardTripLayout "grid"}}selected{{end}}>Grid</option>
@@ -257,13 +257,13 @@
                     <option value="status" {{if eq .Settings.DashboardTripSort "status"}}selected{{end}}>Status</option>
                   </select>
                 </label>
-                <p id="hint-layout" class="settings-field-hint muted full">Grid uses responsive columns; list uses a compact horizontal card.</p>
-                <p id="hint-sort" class="settings-field-hint muted full">Applies within Your Trips, Draft, and Archived.</p>
+                <p id="hint-layout" class="settings-field-hint muted full">Grid uses responsive columns; list uses compact rows.</p>
+                <p id="hint-sort" class="settings-field-hint muted full">Applies to Your Trips, Drafts, and Archived sections.</p>
               </div>
             </div>
 
             <div class="trip-settings-actions-row">
-              <button type="submit" class="trip-settings-save-btn">Save all changes</button>
+              <button type="submit" class="trip-settings-save-btn">Save All Changes</button>
               <a class="btn secondary-btn trip-settings-cancel" href="/">Cancel</a>
               <button type="submit" form="site-settings-reset-form" class="btn secondary-btn trip-settings-reset-inline-btn">Reset all settings</button>
             </div>
@@ -274,7 +274,7 @@
             <div class="trip-settings-assist ssi-assist" aria-labelledby="site-settings-assist-title">
               <div class="trip-settings-assist-copy">
                 <h3 class="trip-settings-assist-title" id="site-settings-assist-title">About these settings</h3>
-                <p class="trip-settings-assist-text"><strong>Save all changes</strong> applies every section on this page at once. Map and registration affect all users; theme, dashboard banner, layout, currency, and dashboard title are saved to your account.</p>
+                <p class="trip-settings-assist-text"><strong>Save All Changes</strong> applies all sections at once. Map and registration affect all users; theme, banner, layout, currency, and dashboard title are saved to your account.</p>
                 <a class="trip-settings-assist-link" href="/">Back to dashboard</a>
               </div>
               <span class="trip-settings-assist-mark" aria-hidden="true">?</span>
@@ -289,6 +289,11 @@
       </div>
     </section>
   </main>
+  <div class="settings-mobile-fab-dock" aria-label="Mobile settings actions">
+    <button type="submit" form="site-settings-save-form" class="mobile-fab-btn mobile-fab-btn--save" aria-label="Save All Changes" title="Save All Changes">
+      <span class="material-symbols-outlined" aria-hidden="true">save</span>
+    </button>
+  </div>
   {{template "dashboardBottomNav" .}}
   {{template "appMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}

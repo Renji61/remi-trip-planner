@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=174">
+  <link rel="stylesheet" href="/static/app.css?v=266">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=172"></script>
+  <script defer src="/static/app.js?v=244"></script>
 </head>
 <body class="page-trip-settings">
   <main class="app-shell" aria-label="Trip settings" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}">
@@ -37,7 +37,7 @@
     </aside>
 
     <section class="main trip-settings-main">
-      <header class="trip-mobile-header trip-settings-mobile-header">
+      <header class="trip-mobile-header site-settings-mobile-header">
         <a class="budget-mobile-header-btn" href="/" aria-label="Go to dashboard" title="Go to dashboard">
           <span class="material-symbols-outlined" aria-hidden="true">home</span>
         </a>
@@ -54,7 +54,7 @@
       <header class="topbar trip-mobile-topbar">
         <div class="title-group">
           <h2>Trip settings</h2>
-          <p>Dates, currency, navigation labels, and layout for {{.Details.Trip.Name}}.</p>
+          <p>Manage dates, currency, labels, and layout for {{.Details.Trip.Name}}.</p>
         </div>
         <div class="topbar-right topbar-right--tools">
           {{template "tripDesktopHeaderTools" .}}
@@ -74,6 +74,9 @@
         {{if .Reset}}
         <p class="settings-success trip-settings-flash" role="status">Trip display options were restored to defaults.</p>
         {{end}}
+        <form id="trip-cal-regenerate-form" method="post" action="/trips/{{.Details.Trip.ID}}/calendar/feed/regenerate" target="_blank" class="trip-cal-regenerate-proxy-form" hidden aria-hidden="true">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        </form>
 
         <form id="trip-settings-save-form" method="post" action="/trips/{{.Details.Trip.ID}}/update" enctype="multipart/form-data" class="trip-settings-form">
           <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -85,27 +88,31 @@
             <div class="trip-settings-subcard tsi-info" aria-labelledby="trip-settings-info-title">
               <div class="trip-settings-card-head">
                 <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">info</span>
-                <h3 class="trip-settings-card-title" id="trip-settings-info-title">Trip information</h3>
+                <h3 class="trip-settings-card-title" id="trip-settings-info-title">Trip Information</h3>
               </div>
               <div class="form-grid trip-settings-form-grid remi-trip-widget-form">
-                <label class="full">Trip name<input type="text" name="name" value="{{.Details.Trip.Name}}" required></label>
-                <label class="full">Description<textarea name="description" rows="3" placeholder="Short trip summary">{{.Details.Trip.Description}}</textarea></label>
+                <label class="full">Trip name<input type="text" name="name" value="{{.Details.Trip.Name}}" placeholder="e.g. Summer in Japan" required></label>
+                <label class="full">Description<textarea name="description" rows="3" placeholder="Add a short summary of your trip">{{.Details.Trip.Description}}</textarea></label>
                 <label>Start date{{template "remiDateField" (dict "name" "start_date" "value" .Details.Trip.StartDate "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings))}}</label>
                 <label>End date{{template "remiDateField" (dict "name" "end_date" "value" .Details.Trip.EndDate "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings))}}</label>
-                <label>Currency name<input type="text" name="currency_name" value="{{.CurrencyName}}" placeholder="e.g. PHP"></label>
-                <label>Currency symbol<input type="text" name="currency_symbol" value="{{.CurrencySymbol}}" placeholder="e.g. ₱"></label>
+                <label>Currency name<input type="text" name="currency_name" value="{{.CurrencyName}}" placeholder="e.g. USD"></label>
+                <label>Currency symbol<input type="text" name="currency_symbol" value="{{.CurrencySymbol}}" placeholder="e.g. $"></label>
                 <div class="full trip-settings-budget-distance-row">
-                  <label>Trip Budget<input type="number" step="0.01" min="0" name="budget_cap" value="{{printf "%.2f" .Details.Trip.BudgetCap}}" placeholder="0 = use computed budget" aria-describedby="hint-trip-budget-cap"></label>
-                  <label>Distance unit for this trip
-                    <select name="distance_unit" aria-describedby="hint-trip-dist">
-                      <option value="" {{if eq .Details.Trip.DistanceUnit ""}}selected{{end}}>Use unit set in Site Settings</option>
-                      <option value="km" {{if eq .Details.Trip.DistanceUnit "km"}}selected{{end}}>Kilometres</option>
-                      <option value="mi" {{if eq .Details.Trip.DistanceUnit "mi"}}selected{{end}}>Miles</option>
-                    </select>
-                  </label>
+                  <div class="trip-settings-budget-distance-col">
+                    <label>Trip Budget<input type="number" step="0.01" min="0" name="budget_cap" value="{{printf "%.2f" .Details.Trip.BudgetCap}}" placeholder="Enter total budget (leave 0 to auto-calculate)" aria-describedby="hint-trip-budget-cap"></label>
+                    <p id="hint-trip-budget-cap" class="settings-field-hint muted">If set above 0, this acts as a spending cap. All expenses (including group expenses, personal expenses, accommodation, vehicle rental, and flights) contribute to <strong>Actual Spending</strong>.</p>
+                  </div>
+                  <div class="trip-settings-budget-distance-col">
+                    <label>Distance unit for this trip
+                      <select name="distance_unit" aria-describedby="hint-trip-dist">
+                        <option value="" {{if eq .Details.Trip.DistanceUnit ""}}selected{{end}}>Use unit set in Site Settings</option>
+                        <option value="km" {{if eq .Details.Trip.DistanceUnit "km"}}selected{{end}}>Kilometres</option>
+                        <option value="mi" {{if eq .Details.Trip.DistanceUnit "mi"}}selected{{end}}>Miles</option>
+                      </select>
+                    </label>
+                    <p id="hint-trip-dist" class="settings-field-hint muted">Controls how distances (km/mi) are displayed for this trip.</p>
+                  </div>
                 </div>
-                <p id="hint-trip-budget-cap" class="settings-field-hint muted full">When set above zero, <strong>Trip Budget</strong> uses this cap; all expenses (group expenses, personal expenses, accommodation, vehicle rental, flights) count toward <strong>Actual Spending</strong>.</p>
-                <p id="hint-trip-dist" class="settings-field-hint muted full">Itinerary connectors and other distances on this trip follow this choice when set.</p>
                 <input type="hidden" name="cover_image_existing" value="{{.Details.Trip.CoverImage}}">
                 <label class="full">Trip cover image
                   <select name="cover_image_mode" id="trip_cover_image_mode" aria-describedby="hint-trip-cover">
@@ -119,7 +126,7 @@
                     <option value="upload" {{if hasPrefix .Details.Trip.CoverImage "/static/uploads/covers/"}}selected{{end}}>Uploaded image</option>
                   </select>
                 </label>
-                <p id="hint-trip-cover" class="settings-field-hint muted full">Applies only to this trip’s top hero on the trip page. Choose URL or upload to show your own image; patterns match the Site settings dashboard style.</p>
+                <p id="hint-trip-cover" class="settings-field-hint muted full">Displayed in the trip header. Upload an image or provide a URL. If not set, the default site style will be used.</p>
                 {{ $coverImg := .Details.Trip.CoverImage }}
                 {{ $coverIsURL := or (hasPrefix $coverImg "https://") (hasPrefix $coverImg "http://") }}
                 {{ $coverIsUpload := hasPrefix $coverImg "/static/uploads/covers/" }}
@@ -151,27 +158,28 @@
                 <div class="trip-settings-map-center-in-info" id="trip-map-center-settings">
                   <p class="trip-settings-section-label" id="trip-settings-map-title">Trip map</p>
                   <p class="muted trip-settings-section-hint trip-settings-map-center-lead">Center for <strong>Trip Map</strong> on the trip page. Search a place or clear the field to use the site default (Site settings → Default Map Center).</p>
-                  <label class="full">Map center (search places)
+                  <label class="full">Map Center
                     <span class="hero-trip-name-field site-settings-default-place-field">
-                      <input type="text" name="home_map_place_label" value="{{.Details.Trip.HomeMapPlaceLabel}}" placeholder="Search places or leave empty for site default" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-describedby="hint-trip-map-center" data-trip-settings-map-name>
+                      <input type="text" name="home_map_place_label" value="{{.Details.Trip.HomeMapPlaceLabel}}" placeholder="Search for a location or leave empty" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-describedby="hint-trip-map-center" data-trip-settings-map-name>
                       <input type="hidden" name="home_map_latitude" value="{{if .Details.Trip.HasHomeMapCenter}}{{printf "%.6f" .Details.Trip.HomeMapLatitude}}{{end}}" data-trip-settings-map-lat>
                       <input type="hidden" name="home_map_longitude" value="{{if .Details.Trip.HasHomeMapCenter}}{{printf "%.6f" .Details.Trip.HomeMapLongitude}}{{end}}" data-trip-settings-map-lng>
                     </span>
                   </label>
-                  <p id="hint-trip-map-center" class="settings-field-hint muted full">Uses <strong>OpenStreetMap</strong> unless Site settings has a valid Google Maps browser key.</p>
+                  <p id="hint-trip-map-center" class="settings-field-hint muted full">Sets the default center for your trip map. Leave empty to use the site default. Uses <strong>OpenStreetMap</strong> unless a Google Maps key is configured.</p>
                 </div>
               </div>
             </div>
 
+            {{if .Details.Trip.UICollaborationEnabled}}
             <div class="trip-settings-subcard tsi-main-people" aria-labelledby="trip-settings-people-title">
               <div class="trip-settings-card-head">
                 <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">group</span>
                 <h3 class="trip-settings-card-title" id="trip-settings-people-title">Trip Members</h3>
               </div>
-              <p class="muted trip-settings-section-hint"><strong>Collaborators:</strong> Users with an account who can edit the trip.<br><strong>Guests:</strong> Non-users (e.g., children) for expense splitting.</p>
+              <p class="muted trip-settings-people-lead">Manage travelers and control who can view or edit this trip.</p>
               <div class="trip-settings-people-cols">
                 <div>
-                  <h4 class="trip-settings-people-sub">Collaborators</h4>
+                  <p class="trip-settings-people-field-label">Collaborators (Editors)</p>
                   <ul class="trip-settings-people-list">
                     {{range .Party}}
                     <li class="trip-settings-people-row">
@@ -185,11 +193,27 @@
                     </li>
                     {{end}}
                   </ul>
+                  {{if .TripAccess.IsOwner}}
+                  <div class="trip-settings-collab-invite sidebar-invite-methods" data-trip-invite-methods data-trip-id="{{.Details.Trip.ID}}" data-csrf="{{.CSRFToken}}">
+                    <div class="sidebar-invite-panel" data-invite-panel="link" role="tabpanel">
+                      <div class="trip-settings-invite-link-inner">
+                        <span class="trip-settings-people-field-label">Invite via link</span>
+                        <div class="sidebar-invite-link-row sidebar-invite-link-row--tapcopy">
+                          <span class="sidebar-invite-link-field" title="Click to copy invite link">
+                            <span class="material-symbols-outlined sidebar-invite-link-icon" aria-hidden="true">content_copy</span>
+                            <input type="text" readonly class="sidebar-invite-link-url" value="" placeholder="Creating secure link…" autocomplete="off" aria-label="Invite link URL. Click to copy.">
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {{end}}
+                  <p class="muted trip-settings-people-col-foot">Collaborators can view and edit all trip details.</p>
                 </div>
                 <div data-trip-guests-editor>
-                  <h4 class="trip-settings-people-sub">Guests</h4>
+                  <p class="trip-settings-people-field-label">Guests (For Expense Splitting)</p>
                   <ul class="trip-settings-people-list" data-trip-guests-list></ul>
-                  <p class="muted trip-settings-guest-empty" data-trip-guests-empty hidden>No guests yet.</p>
+                  <p class="muted trip-settings-guest-empty" data-trip-guests-empty hidden>No guests added yet.</p>
                   <input type="hidden" name="trip_guests_patch" value="" data-trip-guests-patch-field>
                   <template id="trip-guest-row-template">
                     <li class="trip-settings-people-row" data-trip-guest-row>
@@ -198,26 +222,42 @@
                       <button type="button" class="item-action-btn danger" data-trip-guest-remove>Remove</button>
                     </li>
                   </template>
-                  <div class="form-grid trip-settings-add-guest-inline remi-trip-widget-form">
-                    <label class="full">Guest display name<input type="text" data-trip-guest-input maxlength="120" placeholder="e.g. Alex (friend)" autocomplete="off"></label>
-                    <button type="button" class="secondary-btn" data-trip-guest-add>Add guest</button>
+                  <div class="trip-settings-add-guest-row remi-trip-widget-form">
+                    <label class="trip-settings-add-guest-field">Guest Name<input type="text" data-trip-guest-input maxlength="120" placeholder="e.g. Alex (Friend)" autocomplete="off"></label>
+                    <div class="trip-settings-guest-add-action">
+                      <button type="button" class="btn" data-trip-guest-add>Add guest</button>
+                    </div>
                   </div>
+                  <p class="muted trip-settings-people-col-foot">Guests are used for expense tracking and splitting only.</p>
                 </div>
               </div>
             </div>
+            {{end}}
+
+            <section class="trip-settings-subcard" aria-labelledby="trip-cal-sync-title">
+              <div class="trip-settings-card-head">
+                <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">calendar_month</span>
+                <h3 class="trip-settings-card-title" id="trip-cal-sync-title">Calendar Sync</h3>
+              </div>
+              <p class="muted">Subscribe via a private calendar feed link in <strong>Google Calendar</strong> (<strong>From URL</strong>) or <strong>Apple Calendar</strong> (<strong>New Subscription</strong>). Updates may take time to sync (not instant).</p>
+              {{if .CalendarFeedEnabled}}<p class="muted">A subscription link is already active. Regenerate if it was leaked.</p>{{else}}<p class="muted">No subscription link generated yet. Create one to sync this trip with your calendar.</p>{{end}}
+              <div class="trip-cal-regenerate-form">
+                <button type="submit" class="btn" form="trip-cal-regenerate-form" formtarget="_blank">Generate Link</button>
+              </div>
+            </section>
 
             <div class="trip-settings-area-body tsi-body-pre">
-              <div class="trip-settings-subcard trip-settings-subcard--layout" aria-labelledby="trip-settings-layout-title">
+              <div class="trip-settings-subcard trip-settings-subcard--layout" aria-labelledby="trip-settings-section-order-title">
                 <div class="trip-settings-card-head">
                   <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">view_quilt</span>
-                  <h3 class="trip-settings-card-title" id="trip-settings-layout-title">Layout order</h3>
+                  <h3 class="trip-settings-card-title" id="trip-settings-section-order-title">Section Order</h3>
                 </div>
-                <p class="muted trip-settings-section-hint">Drag to reorder. The trip hero stays at the top; primary content sections and Quick Access Tools follow these lists on wider screens.</p>
+                <p class="muted trip-settings-section-hint">Drag to reorder sections. The trip hero always stays at the top. Primary content and Quick Access Tools follow this order on larger screens.</p>
                 <input type="hidden" name="ui_main_section_order" value="{{.UIMainSectionOrderValue}}">
                 <input type="hidden" name="ui_sidebar_widget_order" value="{{.UISidebarWidgetOrderValue}}">
                 <div class="trip-settings-layout-order-split">
                   <div class="trip-settings-layout-order-col">
-                    <p class="trip-settings-section-label" id="trip-settings-layout-main-label">Primary Content</p>
+                    <p class="trip-settings-section-label" id="trip-settings-layout-main-label">Primary Content Sections</p>
                     <ul class="trip-layout-reorder-list trip-layout-reorder-list--settings" data-trip-reorder-list="ui_main_section_order" aria-labelledby="trip-settings-layout-main-label">
                       {{range .MainSectionOrder}}
                       <li class="trip-layout-reorder-item" draggable="true" data-reorder-key="{{.}}">
@@ -238,8 +278,6 @@
                       <li class="trip-layout-reorder-item" draggable="true" data-reorder-key="{{.}}">
                         <span class="trip-layout-reorder-handle material-symbols-outlined" aria-hidden="true">drag_indicator</span>
                         <span class="trip-layout-reorder-label">{{tripSidebarWidgetLabel .}}</span>
-                        {{if and (or (eq . "budget") (eq . "quick_spends") (eq . "add_tab")) (not $.Details.Trip.UIShowSpends)}}<span class="trip-layout-reorder-note">(hidden while Expenses is off)</span>{{end}}
-                        {{if and (eq . "add_tab") (not $.Details.Trip.UIShowTheTab)}}<span class="trip-layout-reorder-note">(hidden while Group Expenses is off)</span>{{end}}
                         <span class="trip-layout-reorder-actions">
                           <button type="button" class="trip-layout-reorder-move" data-move="-1" aria-label="Move {{tripSidebarWidgetLabel .}} up"><span class="material-symbols-outlined" aria-hidden="true">expand_less</span></button>
                           <button type="button" class="trip-layout-reorder-move" data-move="1" aria-label="Move {{tripSidebarWidgetLabel .}} down"><span class="material-symbols-outlined" aria-hidden="true">expand_more</span></button>
@@ -253,19 +291,34 @@
             </div>
 
             <div class="trip-settings-area-body tsi-body-post">
+              <div class="trip-settings-subcard" aria-labelledby="trip-settings-section-labels-title">
+                <div class="trip-settings-card-head">
+                  <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">text_fields</span>
+                  <h3 class="trip-settings-card-title" id="trip-settings-section-labels-title">Section Labels</h3>
+                </div>
+                <p class="muted trip-settings-section-hint">Customize navigation labels (leave blank to use default names).</p>
+                <div class="form-grid trip-settings-form-grid remi-trip-widget-form">
+                  <label>Accommodation Label<input type="text" name="ui_label_stay" value="{{.Details.Trip.UILabelStay}}" placeholder="Accommodation" maxlength="80" autocomplete="off"></label>
+                  <label>Vehicle Rental Label<input type="text" name="ui_label_vehicle" value="{{.Details.Trip.UILabelVehicle}}" placeholder="Vehicle Rental" maxlength="80" autocomplete="off"></label>
+                  <label>Flights Label<input type="text" name="ui_label_flights" value="{{.Details.Trip.UILabelFlights}}" placeholder="Flights" maxlength="80" autocomplete="off"></label>
+                  <label>Expenses Label<input type="text" name="ui_label_spends" value="{{.Details.Trip.UILabelSpends}}" placeholder="Expenses" maxlength="80" autocomplete="off"></label>
+                  <label>Group Expenses Label<input type="text" name="ui_label_group_expenses" value="{{.Details.Trip.UILabelGroupExpenses}}" placeholder="Group Expenses" maxlength="80" autocomplete="off"></label>
+                </div>
+              </div>
+
               <div class="trip-settings-subcard" aria-labelledby="trip-settings-custom-title">
                 <div class="trip-settings-card-head">
                   <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">link</span>
-                  <h3 class="trip-settings-card-title" id="trip-settings-custom-title">Custom sidebar links</h3>
+                  <h3 class="trip-settings-card-title" id="trip-settings-custom-title">Custom Sidebar Links</h3>
                 </div>
-                <p class="muted trip-settings-section-hint">Up to three links in the trip page sidebar (desktop). <strong>https</strong> URLs only. Drag rows or use arrows to set order.</p>
+                <p class="muted trip-settings-section-hint">Add up to 3 custom links to the trip sidebar (desktop only). <strong>HTTPS</strong> URLs only. Drag to reorder.</p>
                 <input type="hidden" name="ui_custom_link_slot_order" value="1,2,3">
                 <ul class="trip-layout-reorder-list trip-custom-links-reorder trip-layout-reorder-list--settings" data-trip-reorder-list="ui_custom_link_slot_order" aria-label="Custom link order">
                   {{range .CustomLinkEditorSlots}}
                   <li class="trip-layout-reorder-item trip-custom-link-reorder-item" draggable="true" data-reorder-key="{{.N}}">
                     <span class="trip-layout-reorder-handle material-symbols-outlined" aria-hidden="true">drag_indicator</span>
                     <div class="trip-custom-link-fields remi-trip-widget-form">
-                      <label>Link Text<input type="text" name="custom_link_{{.N}}_label" value="{{.Label}}" placeholder="e.g. Hotel booking" maxlength="120" autocomplete="off"></label>
+                      <label>Link Name<input type="text" name="custom_link_{{.N}}_label" value="{{.Label}}" placeholder="e.g. Hotel booking" maxlength="120" autocomplete="off"></label>
                       <label>URL<input type="url" name="custom_link_{{.N}}_url" value="{{.URL}}" placeholder="https://…" autocomplete="off"></label>
                     </div>
                     <span class="trip-layout-reorder-actions">
@@ -277,55 +330,47 @@
                 </ul>
               </div>
 
-              <div class="trip-settings-subcard" aria-labelledby="trip-settings-rename-title">
-                <div class="trip-settings-card-head">
-                  <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">text_fields</span>
-                  <h3 class="trip-settings-card-title" id="trip-settings-rename-title">Rename sections</h3>
-                </div>
-                <p class="muted trip-settings-section-hint">Optional labels for navigation (defaults apply if left blank).</p>
-                <div class="form-grid trip-settings-form-grid remi-trip-widget-form">
-                  <label>Accommodation nav label<input type="text" name="ui_label_stay" value="{{.Details.Trip.UILabelStay}}" placeholder="Accommodation" maxlength="80" autocomplete="off"></label>
-                  <label>Vehicle rental nav label<input type="text" name="ui_label_vehicle" value="{{.Details.Trip.UILabelVehicle}}" placeholder="Vehicle Rental" maxlength="80" autocomplete="off"></label>
-                  <label>Flights nav label<input type="text" name="ui_label_flights" value="{{.Details.Trip.UILabelFlights}}" placeholder="Flights" maxlength="80" autocomplete="off"></label>
-                  <label>Expenses nav label<input type="text" name="ui_label_spends" value="{{.Details.Trip.UILabelSpends}}" placeholder="Expenses" maxlength="80" autocomplete="off"></label>
-                  <label>Group Expenses nav label<input type="text" name="ui_label_group_expenses" value="{{.Details.Trip.UILabelGroupExpenses}}" placeholder="Group Expenses" maxlength="80" autocomplete="off"></label>
-                </div>
-              </div>
-
               <div class="trip-settings-subcard" aria-labelledby="trip-settings-display-title">
                 <div class="trip-settings-card-head">
                   <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">tune</span>
-                  <h3 class="trip-settings-card-title" id="trip-settings-display-title">Display preferences</h3>
+                  <h3 class="trip-settings-card-title" id="trip-settings-display-title">Display Preferences</h3>
                 </div>
                 <div class="form-grid trip-settings-form-grid remi-trip-widget-form">
-                  <label class="full">Default expanded itinerary days
+                  <label class="full">Default Itinerary View
                     <select name="ui_itinerary_expand">
                       <option value="first" {{if eq .Details.Trip.UIItineraryExpand "first"}}selected{{end}}>Expand First Day</option>
                       <option value="all" {{if eq .Details.Trip.UIItineraryExpand "all"}}selected{{end}}>Expand All</option>
                       <option value="none" {{if eq .Details.Trip.UIItineraryExpand "none"}}selected{{end}}>Collapse All</option>
                     </select>
                   </label>
-                  <label class="full">Default expanded expense days (on trip page)
+                  <label class="full">Default Expense View
                     <select name="ui_spends_expand">
                       <option value="first" {{if eq .Details.Trip.UISpendsExpand "first"}}selected{{end}}>Expand First Day</option>
                       <option value="all" {{if eq .Details.Trip.UISpendsExpand "all"}}selected{{end}}>Expand All</option>
                       <option value="none" {{if eq .Details.Trip.UISpendsExpand "none"}}selected{{end}}>Collapse All</option>
                     </select>
                   </label>
-                  <label class="full">Time display on this trip
+                  <label class="full">Default Group Expense View
+                    <select name="ui_group_expenses_expand">
+                      <option value="first" {{if eq .Details.Trip.UITabExpand "first"}}selected{{end}}>Expand First Day</option>
+                      <option value="all" {{if eq .Details.Trip.UITabExpand "all"}}selected{{end}}>Expand All</option>
+                      <option value="none" {{if eq .Details.Trip.UITabExpand "none"}}selected{{end}}>Collapse All</option>
+                    </select>
+                  </label>
+                  <label class="full">Time Format
                     <select name="ui_time_format">
                       <option value="12h" {{if eq .Details.Trip.UITimeFormat "24h"}}{{else}}selected{{end}}>12-hour (e.g. 3:00 PM)</option>
                       <option value="24h" {{if eq .Details.Trip.UITimeFormat "24h"}}selected{{end}}>24-hour (e.g. 15:00)</option>
                     </select>
                   </label>
-                  <label class="full">Date display on this trip
+                  <label class="full">Date Format
                     <select name="ui_date_format" aria-describedby="hint-trip-ui-date">
-                      <option value="inherit" {{if or (eq .Details.Trip.UIDateFormat "inherit") (eq .Details.Trip.UIDateFormat "")}}selected{{end}}>Use unit set in Site Settings</option>
+                      <option value="inherit" {{if or (eq .Details.Trip.UIDateFormat "inherit") (eq .Details.Trip.UIDateFormat "")}}selected{{end}}>Use site default</option>
                       <option value="dmy" {{if eq .Details.Trip.UIDateFormat "dmy"}}selected{{end}}>DD-MM-YYYY (e.g. 31-12-2026)</option>
                       <option value="mdy" {{if eq .Details.Trip.UIDateFormat "mdy"}}selected{{end}}>MM-DD-YYYY (e.g. 12-31-2026)</option>
                     </select>
                   </label>
-                  <p id="hint-trip-ui-date" class="settings-field-hint muted full">Overrides the default date order from Site settings for this trip only.</p>
+                  <p id="hint-trip-ui-date" class="settings-field-hint muted full">Overrides the default date format from site settings for this trip only.</p>
                 </div>
               </div>
             </div>
@@ -343,9 +388,9 @@
                 <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">view_sidebar</span>
                 <h3 class="trip-settings-card-title" id="trip-settings-rail-features-title">Trip sections</h3>
               </div>
-                <p class="muted trip-settings-section-hint">Turn these areas on or off for this trip (navigation, pages, and layout). Custom sidebar links appear in the trip sidebar when enabled. <strong>Note:</strong> Disabling a Trip Section will also hide its corresponding block and navigation link.</p>
+                <p class="muted trip-settings-section-hint">Enable or disable sections for this trip (navigation, pages, and layout). Custom sidebar links appear when enabled. Disabling a section will also hide its related content block and navigation link.</p>
               <div class="trip-settings-toggle-list">
-                <label class="trip-settings-toggle-row">
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripMainSectionVisibilityIcon "itinerary"}}</span>
                   <span class="trip-settings-toggle-text">{{tripMainSectionLabel "itinerary"}}</span>
                   <span class="trip-settings-switch">
@@ -354,34 +399,7 @@
                     <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
                   </span>
                 </label>
-                <label class="trip-settings-toggle-row">
-                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripMainSectionVisibilityIcon "checklist"}}</span>
-                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "checklist"}}</span>
-                  <span class="trip-settings-switch">
-                    <input type="hidden" name="ui_trip_section_checklist" value="0">
-                    <input type="checkbox" name="ui_trip_section_checklist" value="1" data-vis-master="checklist" {{if .Details.Trip.UIShowChecklist}}checked{{end}}>
-                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
-                  </span>
-                </label>
-                <label class="trip-settings-toggle-row">
-                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">hotel</span>
-                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "stay"}}</span>
-                  <span class="trip-settings-switch">
-                    <input type="hidden" name="ui_trip_section_stay" value="0">
-                    <input type="checkbox" name="ui_trip_section_stay" value="1" data-vis-master="stay" {{if .Details.Trip.UIShowStay}}checked{{end}}>
-                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
-                  </span>
-                </label>
-                <label class="trip-settings-toggle-row">
-                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">directions_car</span>
-                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "vehicle"}}</span>
-                  <span class="trip-settings-switch">
-                    <input type="hidden" name="ui_trip_section_vehicle" value="0">
-                    <input type="checkbox" name="ui_trip_section_vehicle" value="1" data-vis-master="vehicle" {{if .Details.Trip.UIShowVehicle}}checked{{end}}>
-                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
-                  </span>
-                </label>
-                <label class="trip-settings-toggle-row">
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">flight</span>
                   <span class="trip-settings-toggle-text">{{tripMainSectionLabel "flights"}}</span>
                   <span class="trip-settings-switch">
@@ -390,7 +408,34 @@
                     <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
                   </span>
                 </label>
-                <label class="trip-settings-toggle-row">
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">hotel</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "stay"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_stay" value="0">
+                    <input type="checkbox" name="ui_trip_section_stay" value="1" data-vis-master="stay" {{if .Details.Trip.UIShowStay}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">directions_car</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "vehicle"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_vehicle" value="0">
+                    <input type="checkbox" name="ui_trip_section_vehicle" value="1" data-vis-master="vehicle" {{if .Details.Trip.UIShowVehicle}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripMainSectionVisibilityIcon "checklist"}}</span>
+                  <span class="trip-settings-toggle-text">{{tripMainSectionLabel "checklist"}}</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_checklist" value="0">
+                    <input type="checkbox" name="ui_trip_section_checklist" value="1" data-vis-master="checklist" {{if .Details.Trip.UIShowChecklist}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">payments</span>
                   <span class="trip-settings-toggle-text">{{tripMainSectionLabel "spends"}}</span>
                   <span class="trip-settings-switch">
@@ -399,7 +444,7 @@
                     <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
                   </span>
                 </label>
-                <label class="trip-settings-toggle-row">
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">post_add</span>
                   <span class="trip-settings-toggle-text">{{tripMainSectionLabel "the_tab"}}</span>
                   <span class="trip-settings-switch">
@@ -408,7 +453,25 @@
                     <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
                   </span>
                 </label>
-                <label class="trip-settings-toggle-row">
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">description</span>
+                  <span class="trip-settings-toggle-text">Trip Documents</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_documents" value="0">
+                    <input type="checkbox" name="ui_trip_section_documents" value="1" {{if .Details.Trip.UIShowDocuments}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
+                  <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">group</span>
+                  <span class="trip-settings-toggle-text">Enable collaboration</span>
+                  <span class="trip-settings-switch">
+                    <input type="hidden" name="ui_trip_section_collaboration" value="0">
+                    <input type="checkbox" name="ui_trip_section_collaboration" value="1" {{if .Details.Trip.UICollaborationEnabled}}checked{{end}}>
+                    <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
+                  </span>
+                </label>
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact">
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">link</span>
                   <span class="trip-settings-toggle-text">Show custom links in sidebar</span>
                   <span class="trip-settings-switch">
@@ -425,13 +488,13 @@
                 <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">visibility</span>
                 <h3 class="trip-settings-card-title" id="trip-settings-section-vis-title">Page Sections</h3>
               </div>
-              <p class="muted trip-settings-section-hint">Show or hide primary content blocks on the trip page. <strong>Trip sections</strong> above control master areas; when a section is off there, matching switches here are disabled. <strong>Quick Access Tools</strong> below control the mobile <strong>+</strong> menu and sidebar quick actions.</p>
+              <p class="muted trip-settings-section-hint">Show or hide content blocks on the trip page. If a section is disabled above, related options here will also be disabled. Quick Access Tools below control mobile and sidebar quick actions.</p>
               <div class="trip-settings-toggle-list trip-settings-toggle-list--layout-mirror" aria-label="Primary Content page sections">
                     {{range .MainSectionOrder}}
                     {{if or (eq . "itinerary") (eq . "checklist") (eq . "stay") (eq . "vehicle") (eq . "flights") (eq . "spends") (eq . "the_tab")}}
                     <label class="trip-settings-toggle-row trip-settings-toggle-row--compact trip-settings-sec-vis-column-label{{if not (tripSectionEnabled . $.Details.Trip)}} trip-settings-sec-vis-mirror-label--locked{{end}}" data-vis-main-col="{{.}}">
                       <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripMainSectionVisibilityIcon .}}</span>
-                      <span class="trip-settings-toggle-text">{{tripMainSectionLabel .}}<span class="trip-settings-vis-live-hint"{{if tripSectionEnabled . $.Details.Trip}} hidden{{end}}><span class="trip-settings-vis-lock-hint">(off in Trip sections)</span></span></span>
+                      <span class="trip-settings-toggle-text">{{tripMainSectionLabel .}}</span>
                       <span class="trip-settings-switch">
                         <input type="hidden" name="ui_vis_main_{{.}}" value="0">
                         <input type="checkbox" name="ui_vis_main_{{.}}" value="1" data-vis-main-col-key="{{.}}" {{if mainSectionVisible . $.Details.Trip}}checked{{end}} {{if not (tripSectionEnabled . $.Details.Trip)}}disabled{{end}}>
@@ -458,15 +521,15 @@
                 <span class="material-symbols-outlined trip-settings-card-icon" aria-hidden="true">widgets</span>
                 <h3 class="trip-settings-card-title" id="trip-settings-sidebar-widgets-title">Quick Access Tools</h3>
               </div>
-              <p class="muted trip-settings-section-hint">These toggles control Quick Access Tools in the sidebar and the same items in the mobile <strong>+</strong> menu. Reorder them under <strong>Layout order</strong>.</p>
+              <p class="muted trip-settings-section-hint">Control which quick actions appear in the sidebar and mobile menu.</p>
               <div class="trip-settings-toggle-list trip-settings-toggle-list--layout-mirror">
                 {{range .SidebarWidgetOrder}}
-                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact{{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}} trip-settings-toggle-row--muted{{end}}{{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}} trip-settings-toggle-row--muted{{end}}{{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}} trip-settings-toggle-row--muted{{end}}{{if and (eq . "add_tab") (or (not $.Details.Trip.UIShowSpends) (not $.Details.Trip.UIShowTheTab))}} trip-settings-toggle-row--muted{{end}}" {{if eq . "add_stop"}}data-itinerary-master-gated="1"{{end}}{{if eq . "checklist"}}data-checklist-master-gated="1"{{end}}{{if or (eq . "budget") (eq . "quick_spends")}}data-spends-master-gated="1"{{end}}{{if eq . "add_tab"}}data-add-tab-widget-gate="1"{{end}}>
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact{{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}} trip-settings-toggle-row--muted{{end}}{{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}} trip-settings-toggle-row--muted{{end}}{{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}} trip-settings-toggle-row--muted{{end}}{{if and (or (eq . "tab_total") (eq . "add_tab")) (or (not $.Details.Trip.UIShowSpends) (not $.Details.Trip.UIShowTheTab))}} trip-settings-toggle-row--muted{{end}}" {{if eq . "add_stop"}}data-itinerary-master-gated="1"{{end}}{{if eq . "checklist"}}data-checklist-master-gated="1"{{end}}{{if or (eq . "budget") (eq . "quick_spends")}}data-spends-master-gated="1"{{end}}{{if or (eq . "tab_total") (eq . "add_tab")}}data-add-tab-widget-gate="1"{{end}}>
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripSidebarWidgetVisibilityIcon .}}</span>
-                  <span class="trip-settings-toggle-text">{{tripSidebarWidgetLabel .}}{{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}} <span class="trip-settings-vis-lock-hint">(Itinerary off)</span>{{end}}{{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}} <span class="trip-settings-vis-lock-hint">(Checklist off)</span>{{end}}{{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}} <span class="trip-settings-vis-lock-hint">(Expenses off)</span>{{end}}{{if and (eq . "add_tab") (not $.Details.Trip.UIShowSpends)}} <span class="trip-settings-vis-lock-hint">(Expenses off)</span>{{end}}{{if and (eq . "add_tab") $.Details.Trip.UIShowSpends (not $.Details.Trip.UIShowTheTab)}} <span class="trip-settings-vis-lock-hint">(Group Expenses off)</span>{{end}}</span>
+                  <span class="trip-settings-toggle-text">{{tripSidebarWidgetLabel .}}</span>
                   <span class="trip-settings-switch">
                     <input type="hidden" name="ui_vis_sidebar_{{.}}" value="0">
-                    <input type="checkbox" name="ui_vis_sidebar_{{.}}" value="1" {{if sidebarWidgetVisible . $.Details.Trip}}checked{{end}} {{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}}disabled{{end}} {{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}}disabled{{end}} {{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}}disabled{{end}} {{if and (eq . "add_tab") (or (not $.Details.Trip.UIShowSpends) (not $.Details.Trip.UIShowTheTab))}}disabled{{end}}>
+                    <input type="checkbox" name="ui_vis_sidebar_{{.}}" value="1" {{if sidebarWidgetVisible . $.Details.Trip}}checked{{end}} {{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}}disabled{{end}} {{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}}disabled{{end}} {{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}}disabled{{end}} {{if and (or (eq . "tab_total") (eq . "add_tab")) (or (not $.Details.Trip.UIShowSpends) (not $.Details.Trip.UIShowTheTab))}}disabled{{end}}>
                     <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
                   </span>
                 </label>
@@ -476,8 +539,8 @@
             <div class="trip-settings-assist trip-settings-area-assist tsi-assist" aria-labelledby="trip-settings-assist-title">
               <div class="trip-settings-assist-copy">
                 <h3 class="trip-settings-assist-title" id="trip-settings-assist-title">Review &amp; Confirm</h3>
-                <p class="trip-settings-assist-text">Changes will take effect once saved. Hidden sections will be removed from navigation.</p>
-                <a class="trip-settings-assist-link" href="/">Back to dashboard</a>
+                <p class="trip-settings-assist-text">Changes apply after saving. Hidden sections will be removed from navigation.</p>
+                <a class="trip-settings-assist-link" href="/">Back to Dashboard</a>
               </div>
               <span class="trip-settings-assist-mark" aria-hidden="true">?</span>
             </div>
@@ -495,16 +558,23 @@
     </section>
   </main>
 
-  <div class="mobile-fab-wrap" data-mobile-fab>
-    <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation">
-      <span class="material-symbols-outlined" aria-hidden="true">add</span>
+  <div class="settings-mobile-fab-dock" aria-label="Mobile settings actions">
+    <button type="submit" form="trip-settings-save-form" class="mobile-fab-btn mobile-fab-btn--save" aria-label="Save all changes" title="Save all changes">
+      <span class="material-symbols-outlined" aria-hidden="true">save</span>
     </button>
-    <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
-      {{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}
+    {{if tripMobileFabHasItems .Details.Trip}}
+    <div class="mobile-fab-wrap" data-mobile-fab>
+      <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation">
+        <span class="material-symbols-outlined" aria-hidden="true">add</span>
+      </button>
+      <div class="mobile-fab-menu hidden" data-mobile-fab-menu>
+        {{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}
+      </div>
     </div>
+    {{end}}
   </div>
   {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "settings")}}
-  {{template "tripMobileProfileSheet" .}}
+  {{template "appMobileProfileSheet" .}}
   {{template "appConfirmDialog"}}
 </body>
 </html>

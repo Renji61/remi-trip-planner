@@ -68,7 +68,7 @@ func (a *app) withSession(next http.Handler) http.Handler {
 		}
 		u, sess, err := a.tripService.SessionUser(r.Context(), c.Value)
 		if err != nil {
-			http.SetCookie(w, clearSessionCookie())
+			http.SetCookie(w, a.clearSessionCookie())
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -77,34 +77,66 @@ func (a *app) withSession(next http.Handler) http.Handler {
 	})
 }
 
-func clearSessionCookie() *http.Cookie {
+func (a *app) clearSessionCookie() *http.Cookie {
 	return &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   a.env.SecureCookies,
+		SameSite: http.SameSiteStrictMode,
 	}
 }
 
-func writeSessionCookie(w http.ResponseWriter, rawToken string) {
+func (a *app) writeSessionCookie(w http.ResponseWriter, rawToken string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    rawToken,
 		Path:     "/",
 		MaxAge:   sessionCookieMaxAge,
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		// Secure: true when behind TLS — leave off for local dev
+		Secure:   a.env.SecureCookies,
+		SameSite: http.SameSiteStrictMode,
 	})
+}
+
+func csrfTokenFromRequest(r *http.Request) (string, error) {
+	if r == nil {
+		return "", nil
+	}
+	if got := strings.TrimSpace(r.Header.Get("X-CSRF-Token")); got != "" {
+		return got, nil
+	}
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	if strings.Contains(ct, "application/json") || strings.HasPrefix(r.URL.Path, "/api/") {
+		return "", nil
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if err2 := r.ParseForm(); err2 != nil {
+			return "", err2
+		}
+	}
+	return strings.TrimSpace(r.FormValue("csrf_token")), nil
+}
+
+func requestHasValidCSRF(r *http.Request) (bool, error) {
+	got, err := csrfTokenFromRequest(r)
+	if err != nil {
+		return false, err
+	}
+	want := CSRFToken(r.Context())
+	if want == "" {
+		return false, nil
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1, nil
 }
 
 func (a *app) requireRegisteredUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n, err := a.tripService.CountUsers(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, r, err)
 			return
 		}
 		if n == 0 {
@@ -122,6 +154,17 @@ func (a *app) requireRegisteredUser(next http.Handler) http.Handler {
 	})
 }
 
+func (a *app) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u := CurrentUser(r.Context())
+		if u.ID == "" || !u.IsAdmin {
+			http.Error(w, "Administrator access is required.", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (a *app) verifyCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -133,19 +176,12 @@ func (a *app) verifyCSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			next.ServeHTTP(w, r)
+		ok, err := requestHasValidCSRF(r)
+		if err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		if err := r.ParseMultipartForm(32 << 20); err != nil {
-			if err2 := r.ParseForm(); err2 != nil {
-				http.Error(w, "bad form", http.StatusBadRequest)
-				return
-			}
-		}
-		got := r.FormValue("csrf_token")
-		want := CSRFToken(r.Context())
-		if want == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		if !ok {
 			http.Error(w, "invalid security token", http.StatusForbidden)
 			return
 		}

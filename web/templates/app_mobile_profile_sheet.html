@@ -12,16 +12,37 @@
         <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">account_circle</span>
         <span class="trip-mobile-profile-sheet__link-text">Profile</span>
       </a>
-      <a class="trip-mobile-profile-sheet__link" href="/settings{{if .TripID}}?trip_id={{.TripID}}{{end}}">
-        <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">settings</span>
-        <span class="trip-mobile-profile-sheet__link-text">App settings</span>
+      <a class="trip-mobile-profile-sheet__link" href="/notifications">
+        <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">notifications</span>
+        <span class="trip-mobile-profile-sheet__link-text">Notifications{{if gt .NotificationUnreadCount 0}} ({{.NotificationUnreadCount}}){{end}}</span>
       </a>
+      {{if and .Details .Details.Trip}}
+      <a class="trip-mobile-profile-sheet__link" href="/trips/{{.Details.Trip.ID}}/settings">
+        <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">tune</span>
+        <span class="trip-mobile-profile-sheet__link-text">Trip Settings</span>
+      </a>
+      {{else if .Trip}}
+      <a class="trip-mobile-profile-sheet__link" href="/trips/{{.Trip.ID}}/settings">
+        <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">tune</span>
+        <span class="trip-mobile-profile-sheet__link-text">Trip Settings</span>
+      </a>
+      {{end}}
+      <a class="trip-mobile-profile-sheet__link" href="/settings{{if and .Details .Details.Trip}}?trip_id={{.Details.Trip.ID}}{{else if .TripID}}?trip_id={{.TripID}}{{else if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}">
+        <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">settings</span>
+        <span class="trip-mobile-profile-sheet__link-text">App Settings</span>
+      </a>
+      {{if .CurrentUser.IsAdmin}}
+      <a class="trip-mobile-profile-sheet__link" href="/admin/users">
+        <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">manage_accounts</span>
+        <span class="trip-mobile-profile-sheet__link-text">User Management</span>
+      </a>
+      {{end}}
       <hr class="trip-mobile-profile-sheet__sep" aria-hidden="true">
       <form method="post" action="/logout" class="trip-mobile-profile-sheet__logout-form">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <button type="submit" class="trip-mobile-profile-sheet__link trip-mobile-profile-sheet__link--button trip-mobile-profile-sheet__link--logout">
           <span class="material-symbols-outlined trip-mobile-profile-sheet__link-icon" aria-hidden="true">logout</span>
-          <span class="trip-mobile-profile-sheet__link-text">Log out</span>
+          <span class="trip-mobile-profile-sheet__link-text">Logout</span>
         </button>
       </form>
     </nav>

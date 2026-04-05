@@ -99,6 +99,22 @@ For production, terminate HTTPS in front of the app (Caddy, Traefik, nginx). Pro
 
 ## Backup
 
+### Online-consistent SQLite (recommended)
+
+While the app is running, use SQLite’s **`.backup`** command so readers get a consistent snapshot (safer than copying the raw `-wal` / `-shm` files while writes occur). From the host, if you have `sqlite3` and the DB file mounted or copied out:
+
+```bash
+mkdir -p ./backup
+TS=$(date -u +%Y%m%d-%H%M%S)
+sqlite3 ./path/to/trips.db ".backup './backup/remi-trips-'"$TS"'.db'"
+```
+
+Store the backup on a **different volume or machine** than the live database when you can.
+
+**Docker:** run a one-off container with `sqlite3` installed, mount the **`remi-data`** volume read-only and an output directory, then `.backup` to `/out/…` (see repo **`docker-compose.backup.yml`** for an opt-in Compose profile, or adapt volume names from `docker volume ls`).
+
+### Volume file copy (simple)
+
 - Copy the SQLite file from the volume, e.g.:
 
   ```bash
@@ -106,9 +122,13 @@ For production, terminate HTTPS in front of the app (Caddy, Traefik, nginx). Pro
     cp /data/trips.db /out/trips.db.backup
   ```
 
-  (Volume name may be prefixed with your Compose project name.)
+  (Volume name may be prefixed with your Compose project name.) Prefer stopping the app or using `.backup` above for production.
 
-- Back up `web/static/uploads/` if you use attachments (host path or a bind mount you configure).
+### Uploads
+
+- Back up **`web/static/uploads/`** (or the **`remi-uploads`** volume / bind mount) **together with** the database — attachments are not stored inside SQLite.
+
+Repo scripts (optional): **`scripts/backup-sqlite.sh`** and **`scripts/backup-sqlite.ps1`** for local/dev paths; schedule them with **cron** or **Task Scheduler** as you prefer.
 
 ## Security reminder
 

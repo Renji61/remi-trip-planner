@@ -13,6 +13,8 @@ type User struct {
 	EmailVerifiedAt time.Time // zero = not verified
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// IsAdmin grants access to instance user management (first setup user is administrator).
+	IsAdmin bool
 }
 
 // UserProfile is safe to expose in HTML (no password hash).

@@ -20,6 +20,9 @@
         </li>
         {{end}}
         <li class="nav-item{{if eq .SidebarNavActive "settings"}} active{{end}}"><a href="/settings{{if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}"{{if eq .SidebarNavActive "settings"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">settings</span>Settings</a></li>
+        {{if .CurrentUser.IsAdmin}}
+        <li class="nav-item{{if eq .SidebarNavActive "admin-users"}} active{{end}}"><a href="/admin/users"{{if eq .SidebarNavActive "admin-users"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">group</span>Users</a></li>
+        {{end}}
       </ul>
       <div class="sidebar-bottom">
         {{if eq .SidebarNavActive "profile"}}

@@ -1,7 +1,5 @@
 {{define "tripMobileHeaderProfileBtn"}}
-<button type="button" class="trip-desktop-header-profile" data-trip-mobile-profile-open aria-label="Open account menu" title="Account menu">
-  <span class="trip-desktop-header-profile-initial" aria-hidden="true">{{profileInitial .CurrentUser}}</span>
-</button>
+{{template "appHeaderProfileBtn" .}}
 {{end}}
 
 {{define "appHeaderProfileBtn"}}

@@ -1,0 +1,128 @@
+{{define "tripKeepNotesBoardInner"}}
+<div class="trip-keep-notes-board" data-trip-keep-board-root>
+  <div class="trip-keep-masonry trip-keep-masonry--notes" aria-live="polite">
+    {{range .KeepMasonry}}
+    {{if eq .Kind "note"}}
+    {{$note := .Note}}
+    <article class="trip-keep-card trip-keep-card--note trip-keep-card--color-{{$note.Color}}{{if and $note.Pinned (or (eq $.KeepView "notes") (eq $.KeepView "reminders"))}} trip-keep-pinned{{end}}">
+      <div class="trip-keep-card-head trip-keep-card-title-row">
+        <div class="trip-keep-card-title-main">
+          <h3 class="trip-keep-note-title">{{if trimSpace $note.Title}}{{$note.Title}}{{else}}Note{{end}}</h3>
+        </div>
+        {{template "tripKeepNoteTitleActions" (dict "TripID" $.Details.Trip.ID "NoteID" $note.ID "CSRFToken" $.CSRFToken "View" $.KeepView "NotePinned" $note.Pinned "ReturnTo" $.ReturnTo)}}
+      </div>
+      {{template "tripKeepNoteCardBody" (dict "Note" $note)}}
+      {{if trimSpace $note.DueAt}}<p class="muted trip-keep-note-due">Due {{formatTripUIDate $.Details.Trip $.Settings $note.DueAt}}</p>{{end}}
+      {{if eq $.KeepView "notes"}}
+      <details class="trip-keep-details" id="keep-note-details-{{$note.ID}}">
+        <summary class="trip-keep-details-summary">Edit</summary>
+        <form method="post" action="/trips/{{$.Details.Trip.ID}}/notes/note/{{$note.ID}}/update" class="trip-keep-form trip-keep-form--tight">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input class="trip-keep-input" type="text" name="title" value="{{$note.Title}}" placeholder="Note Title (e.g. Hidden gems in Tokyo)" maxlength="500">
+          <textarea class="trip-keep-textarea" name="body" rows="3" placeholder="Write your notes, links, or reminders...">{{$note.Body}}</textarea>
+          <label class="trip-keep-label">Set Reminder (optional)
+            {{template "remiDateField" (dict "name" "due_at" "value" $note.DueAt "min" "" "max" "" "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "clearable" true "input_class" "trip-keep-input")}}
+          </label>
+          {{$leg := ""}}
+          {{if and (ne $note.Color "") (not (keepNoteColorInPicker $note.Color))}}{{$leg = $note.Color}}{{end}}
+          {{template "tripKeepNoteColorSwatches" (dict "Colors" $.KeepNoteColors "Selected" $note.Color "LegacyColor" $leg "PickerID" $note.ID)}}
+          <div class="trip-keep-note-edit-actions">
+            <button type="submit" class="btn">Save</button>
+            <button type="button" class="btn secondary-btn" data-trip-keep-note-edit-cancel>Cancel</button>
+          </div>
+        </form>
+      </details>
+      <div class="trip-keep-note-mobile-slide-wrap">
+        <div class="remi-slide-actions-row trip-keep-note-mobile-slide">
+          <div class="remi-slide-actions-main">
+            <div class="remi-slide-actions-main-inner trip-keep-note-mobile-slide-hit"></div>
+            <div class="remi-slide-actions-fade" aria-hidden="true"></div>
+          </div>
+          <div class="remi-slide-actions-group remi-checklist-item-actions">
+            <button type="button" class="remi-action-btn remi-action-btn--edit remi-checklist-action-btn remi-checklist-action-btn--secondary" data-trip-keep-note-open-edit="{{$note.ID}}" aria-label="Edit note">Edit</button>
+          </div>
+        </div>
+      </div>
+      {{end}}
+    </article>
+    {{else if eq .Kind "checklist"}}
+    <article class="reminder-checklist-card remi-checklist-category-panel{{if and .CategoryPinned (or (eq $.KeepView "notes") (eq $.KeepView "reminders"))}} trip-keep-pinned{{end}}">
+      <header class="trip-keep-card-title-row remi-checklist-card-title-row">
+        <h4 class="remi-checklist-category-title">{{if trimSpace .Category}}{{.Category}}{{else}}Checklist{{end}}</h4>
+        {{template "tripKeepChecklistBatchTitleActions" (dict "TripID" $.Details.Trip.ID "CSRFToken" $.CSRFToken "Items" .Items "View" $.KeepView "Category" .Category "CategoryPinned" .CategoryPinned "ReturnTo" $.ReturnTo)}}
+      </header>
+      <ul class="list reminder-checklist-list remi-checklist-items">
+        {{range .Items}}
+        <li class="list-item reminder-checklist-item remi-checklist-item">
+          <div id="keep-checklist-view-{{.ID}}" class="item-view checklist-view remi-checklist-item-view">
+            <form method="post" action="/checklist/{{.ID}}/toggle" class="inline-form check-row remi-checklist-toggle-form" data-ajax-submit data-toast-message="Checklist updated.">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+              <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+              <input type="hidden" name="done" value="{{if .Done}}false{{else}}true{{end}}">
+              <button type="submit" class="check-btn remi-checklist-check-btn{{if .Done}} remi-checklist-check-btn--done{{end}}" aria-pressed="{{if .Done}}true{{else}}false{{end}}" aria-label="{{if .Done}}Mark not done{{else}}Mark done{{end}}: {{.Text}}" title="{{if .Done}}Mark not done{{else}}Mark done{{end}}"><span class="material-symbols-outlined remi-checklist-check-icon" aria-hidden="true">{{if .Done}}check{{end}}</span></button>
+            </form>
+            <div class="remi-checklist-item-body">
+            {{if eq $.KeepView "notes"}}
+            <div class="remi-slide-actions-row">
+              <div class="remi-slide-actions-main">
+                <div class="remi-slide-actions-main-inner">
+                  <div role="button" tabindex="0" class="remi-checklist-item-open-edit" data-inline-edit-open="keep-checklist-edit-{{.ID}}" aria-label="Edit checklist item: {{.Text}}">
+                    <span class="remi-checklist-item-text{{if .Done}} done{{end}}">{{.Text}}</span>
+                    {{if trimSpace .DueAt}}<span class="muted checklist-due-hint remi-checklist-due-hint">Due {{formatTripUIDate $.Details.Trip $.Settings .DueAt}}</span>{{end}}
+                  </div>
+                </div>
+                <div class="remi-slide-actions-fade" aria-hidden="true"></div>
+              </div>
+              {{template "remiEditDeleteActionButtons" (dict "editTarget" (printf "keep-checklist-edit-%v" .ID) "itemID" .ID "csrfToken" $.CSRFToken "returnTo" $.ReturnTo)}}
+            </div>
+            {{else}}
+            <div class="remi-checklist-item-open-edit--static">
+              <span class="remi-checklist-item-text{{if .Done}} done{{end}}">{{.Text}}</span>
+              {{if trimSpace .DueAt}}<span class="muted checklist-due-hint remi-checklist-due-hint">Due {{formatTripUIDate $.Details.Trip $.Settings .DueAt}}</span>{{end}}
+            </div>
+            {{end}}
+            </div>
+          </div>
+          {{if eq $.KeepView "notes"}}
+          <form id="keep-checklist-edit-{{.ID}}" method="post" action="/checklist/{{.ID}}/update" class="form-grid trip-keep-form trip-keep-form--tight remi-checklist-edit-form remi-checklist-inline-edit-form hidden full" data-ajax-submit data-toast-message="Checklist item updated.">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+            <div class="full remi-checklist-inline-edit-head">
+              <h3 class="remi-checklist-inline-edit-heading">Edit Checklist Item</h3>
+              <p class="muted remi-checklist-inline-edit-sub">Update category or wording; saves for everyone on this trip.</p>
+            </div>
+            {{$curCat := .Category}}
+            <label class="full trip-keep-label">Category
+              <select class="trip-keep-select" name="category" required>
+                {{range $.ReminderCategories}}
+                <option value="{{.}}" {{if eq . $curCat}}selected{{end}}>{{.}}</option>
+                {{end}}
+                {{if and $curCat (not (listContains $.ReminderCategories $curCat))}}
+                <option value="{{$curCat}}" selected>{{$curCat}}</option>
+                {{end}}
+              </select>
+            </label>
+            <label class="full trip-keep-label">Item
+              <input class="trip-keep-input" type="text" name="text" value="{{.Text}}" maxlength="2000" placeholder="e.g. Buy sunscreen" required>
+            </label>
+            <label class="full trip-keep-label">Set Reminder (optional)
+              {{template "remiDateField" (dict "name" "due_at" "value" .DueAt "min" "" "max" "" "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "clearable" true "input_class" "trip-keep-input")}}
+            </label>
+            <div class="full expense-edit-actions remi-checklist-edit-actions">
+              <button type="submit" class="btn">Save</button>
+              <button type="button" class="btn secondary-btn" data-inline-edit-cancel="keep-checklist-edit-{{.ID}}">Cancel</button>
+            </div>
+          </form>
+          {{end}}
+        </li>
+        {{end}}
+      </ul>
+    </article>
+    {{end}}
+    {{end}}
+  </div>
+  {{if eq (len .KeepMasonry) 0}}
+  <p class="muted trip-keep-empty">Nothing here yet</p>
+  {{end}}
+</div>
+{{end}}

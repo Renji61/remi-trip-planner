@@ -4,6 +4,9 @@
 {{- $inputClass := index . "input_class" -}}
 <span class="remi-time-field" data-remi-time>
   <input type="hidden" name="{{$name}}" value="{{$value}}" class="remi-time-iso" autocomplete="off">
-  <input type="text" class="remi-time-visible{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="hh:mm AM" spellcheck="false" readonly{{if index . "required"}} required{{end}} aria-label="Time">
+  <input type="text" class="remi-time-visible{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="hh:mm AM" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Time">
+  <button type="button" class="remi-time-clock-btn" aria-label="Open time picker" tabindex="-1">
+    <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
+  </button>
 </span>
 {{end}}
