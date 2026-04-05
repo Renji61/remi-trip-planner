@@ -1109,8 +1109,12 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if vals, ok := r.PostForm["clear_google_maps_key"]; ok && len(vals) > 0 && vals[len(vals)-1] == "1" {
 		app.GoogleMapsAPIKey = ""
+		app.GoogleMapsMapID = ""
 	} else if v := strings.TrimSpace(r.FormValue("google_maps_api_key")); v != "" {
 		app.GoogleMapsAPIKey = v
+	}
+	if _, ok := r.PostForm["google_maps_map_id"]; ok {
+		app.GoogleMapsMapID = strings.TrimSpace(r.FormValue("google_maps_map_id"))
 	}
 	geoKey := strings.TrimSpace(app.GoogleMapsAPIKey)
 	app.AppTitle = defaultIfEmpty(r.FormValue("app_title"), "REMI Trip Planner")

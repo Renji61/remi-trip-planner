@@ -10,14 +10,14 @@ func TestHighestStableReleaseTag(t *testing.T) {
 	releases := []ghReleaseListItem{
 		{TagName: "v1.40.0", Draft: false, Prerelease: false},
 		{TagName: "v1.47.0", Draft: false, Prerelease: false},
-		{TagName: "v1.49.3", Draft: false, Prerelease: false},
+		{TagName: "v1.49.4", Draft: false, Prerelease: false},
 		{TagName: "v1.45.0", Draft: false, Prerelease: false},
 	}
 	got := highestStableReleaseTag(releases)
-	if got != "1.49.3" {
-		t.Fatalf("got %q want 1.49.3", got)
+	if got != "1.49.4" {
+		t.Fatalf("got %q want 1.49.4", got)
 	}
-	if version.Compare(got, "1.49.3") != 0 {
+	if version.Compare(got, "1.49.4") != 0 {
 		t.Fatalf("compare")
 	}
 }
@@ -35,10 +35,10 @@ func TestHighestStableReleaseTagSkipsDraftAndPrerelease(t *testing.T) {
 }
 
 func TestHighestSemverFromGitTagNames(t *testing.T) {
-	names := []string{"v1.40.0", "v1.49.3", "v1.45.0", "not-a-version", "v2.0.0-rc1"}
+	names := []string{"v1.40.0", "v1.49.4", "v1.45.0", "not-a-version", "v2.0.0-rc1"}
 	got := highestSemverFromGitTagNames(names)
-	if got != "1.49.3" {
-		t.Fatalf("got %q want 1.49.3", got)
+	if got != "1.49.4" {
+		t.Fatalf("got %q want 1.49.4", got)
 	}
 }
 
@@ -46,10 +46,10 @@ func TestLatestUpstreamSemverTagsWinWhenReleasesStale(t *testing.T) {
 	releases := []ghReleaseListItem{
 		{TagName: "v1.40.0", Draft: false, Prerelease: false},
 	}
-	tags := []string{"v1.49.3"}
+	tags := []string{"v1.49.4"}
 	got := latestUpstreamSemver(releases, tags)
-	if got != "1.49.3" {
-		t.Fatalf("got %q want 1.49.3 (tags must lift above old release)", got)
+	if got != "1.49.4" {
+		t.Fatalf("got %q want 1.49.4 (tags must lift above old release)", got)
 	}
 }
 

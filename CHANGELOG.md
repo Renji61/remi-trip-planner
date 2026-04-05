@@ -10,6 +10,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.49.4] - 2026-04-06
+
+### Added
+
+- **Google Maps Map ID (site settings):** optional `google_maps_map_id` stored with app settings (SQLite migration). Together with a browser Maps API key, trip maps use a **vector map** and **`AdvancedMarkerElement`** pins (same custom marker artwork as before) instead of deprecated `google.maps.Marker`.
+
+### Changed
+
+- **Maps JavaScript bootstrap:** loader URL includes `loading=async` per current Maps platform guidance.
+- **Service worker:** intercept **same-origin** requests only so third-party fetches (e.g. Maps) are not wrapped; cache **`put`** only when the response is OK; clearer fallbacks when the network fails.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.49.4`** (and the **GHCR** image tag when CI builds) so **About** / `GET /api/about/update-check` shows the new version.
+- **Advanced markers:** create a [Map ID](https://developers.google.com/maps/documentation/javascript/advanced-markers#map-id) in Google Cloud (same project as the API key) and paste it into **Site settings**; leave blank to keep classic raster markers (Google may still show a deprecation notice).
+
 ## [1.49.3] - 2026-04-05
 
 ### Fixed
@@ -367,7 +383,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.3...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.4...HEAD
+[1.49.4]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.3...v1.49.4
 [1.49.3]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.2...v1.49.3
 [1.49.2]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.1...v1.49.2
 [1.49.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.0...v1.49.1

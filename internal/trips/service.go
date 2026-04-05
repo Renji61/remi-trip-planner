@@ -352,6 +352,8 @@ type AppSettings struct {
 	DashboardHeroBackground string // default, pattern:*, or https image URL
 	// GoogleMapsAPIKey: optional Places/Geocoding/Maps JS (stored server-side; browser key may be exposed only when needed for maps).
 	GoogleMapsAPIKey string
+	// GoogleMapsMapID: optional Map ID from Google Cloud (same project as the API key) for vector maps + AdvancedMarkerElement on trip maps.
+	GoogleMapsMapID string
 	// DefaultDistanceUnit: km | mi for the whole instance when user/trip do not override.
 	DefaultDistanceUnit string
 	// UserDistanceUnit: merged from user_settings (per-user override); not a DB column on app_settings.

@@ -148,6 +148,9 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	if _, err = db.Exec(`ALTER TABLE app_settings ADD COLUMN default_ui_date_format TEXT NOT NULL DEFAULT 'dmy'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}
+	if _, err = db.Exec(`ALTER TABLE app_settings ADD COLUMN google_maps_map_id TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
 	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN budget_cap REAL NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}

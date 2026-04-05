@@ -118,6 +118,10 @@
                 >
                   <span class="gmaps-api-key-section__label">Google Maps API key <span class="muted">(optional)</span></span>
                   <p id="hint-gmaps" class="settings-field-hint muted full">When provided, Google Maps is used for location suggestions and trip maps. Otherwise, OpenStreetMap is used. Changes apply after saving.</p>
+                  <label class="full">Google Maps Map ID <span class="muted">(optional)</span>
+                    <input type="text" name="google_maps_map_id" value="{{trimSpace .Settings.GoogleMapsMapID}}" placeholder="e.g. from Google Cloud → Map Management" autocomplete="off" aria-describedby="hint-gmaps-map-id">
+                  </label>
+                  <p id="hint-gmaps-map-id" class="settings-field-hint muted full">Create a <a href="https://developers.google.com/maps/documentation/javascript/advanced-markers#map-id" target="_blank" rel="noopener noreferrer">Map ID</a> in the same Google Cloud project as your API key to use vector maps and modern markers on trip maps. Leave blank to keep classic raster markers (deprecated by Google).</p>
 
                   <div class="gmaps-key-edit-wrap" data-gmaps-key-edit hidden>
                     <input

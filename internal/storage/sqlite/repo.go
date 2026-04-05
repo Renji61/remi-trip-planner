@@ -1143,6 +1143,7 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 		       COALESCE(theme_preference, 'system'), COALESCE(dashboard_trip_layout, 'grid'), COALESCE(dashboard_trip_sort, 'name'), COALESCE(dashboard_hero_background, 'default'),
 		       COALESCE(NULLIF(TRIM(trip_dashboard_heading), ''), 'Trip Dashboard'),
 		       COALESCE(TRIM(google_maps_api_key), ''),
+		       COALESCE(TRIM(google_maps_map_id), ''),
 		       COALESCE(NULLIF(TRIM(default_distance_unit), ''), 'km'),
 		       COALESCE(max_upload_file_size_mb, 5),
 		       COALESCE(NULLIF(TRIM(default_ui_date_format), ''), 'dmy')
@@ -1164,6 +1165,7 @@ func (r *Repository) GetAppSettings(ctx context.Context) (trips.AppSettings, err
 			&settings.DashboardHeroBackground,
 			&settings.TripDashboardHeading,
 			&settings.GoogleMapsAPIKey,
+			&settings.GoogleMapsMapID,
 			&settings.DefaultDistanceUnit,
 			&settings.MaxUploadFileSizeMB,
 			&settings.DefaultUIDateFormat,
@@ -1182,9 +1184,9 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO app_settings
 			(id, app_title, default_currency_name, default_currency_symbol, map_default_place_label, map_default_latitude, map_default_longitude, map_default_zoom, enable_location_lookup,
-			 registration_enabled, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background, trip_dashboard_heading, google_maps_api_key, default_distance_unit, max_upload_file_size_mb, default_ui_date_format, updated_at)
+			 registration_enabled, theme_preference, dashboard_trip_layout, dashboard_trip_sort, dashboard_hero_background, trip_dashboard_heading, google_maps_api_key, google_maps_map_id, default_distance_unit, max_upload_file_size_mb, default_ui_date_format, updated_at)
 		VALUES
-			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			app_title = excluded.app_title,
 			default_currency_name = excluded.default_currency_name,
@@ -1201,6 +1203,7 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 			dashboard_hero_background = excluded.dashboard_hero_background,
 			trip_dashboard_heading = excluded.trip_dashboard_heading,
 			google_maps_api_key = excluded.google_maps_api_key,
+			google_maps_map_id = excluded.google_maps_map_id,
 			default_distance_unit = excluded.default_distance_unit,
 			max_upload_file_size_mb = excluded.max_upload_file_size_mb,
 			default_ui_date_format = excluded.default_ui_date_format,
@@ -1221,6 +1224,7 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 		settings.DashboardHeroBackground,
 		settings.TripDashboardHeading,
 		settings.GoogleMapsAPIKey,
+		settings.GoogleMapsMapID,
 		settings.DefaultDistanceUnit,
 		settings.MaxUploadFileSizeMB,
 		trips.NormalizeUIDateFormat(settings.DefaultUIDateFormat),

@@ -1,4 +1,4 @@
-const CACHE = "remi-trip-planner-v15";
+const CACHE = "remi-trip-planner-v16";
 // Do not precache "/" — HTML must always come from the network so UI updates (templates) are not stuck on an old install snapshot.
 const CORE_ASSETS = [
   "/static/app.css",
@@ -23,6 +23,14 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const reqURL = new URL(event.request.url);
+  const ownOrigin = new URL(self.registration.scope).origin;
+
+  // Third-party requests (Google Maps, fonts, etc.): do not intercept. Passing them through
+  // the default handler caused unhandled "Failed to fetch" when fetch failed (blocked, offline,
+  // or non-cacheable cross-origin responses).
+  if (reqURL.origin !== ownOrigin) {
+    return;
+  }
 
   // Network-first for navigations; never fall back to a stale cached "/" dashboard.
   if (event.request.mode === "navigate") {
@@ -37,8 +45,10 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((res) => {
-          const clone = res.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+          }
           return res;
         })
         .catch(() => caches.match(event.request))
@@ -48,11 +58,16 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((res) => {
-        const clone = res.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, clone));
-        return res;
-      });
+      if (cached) return cached;
+      return fetch(event.request)
+        .then((res) => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+          }
+          return res;
+        })
+        .catch(() => new Response("", { status: 503, statusText: "Network Unavailable" }));
     })
   );
 });

@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js?v=248"></script>
+  <script defer src="/static/app.js?v=250"></script>
 </head>
 <body class="trip-details-body">
   <main class="app-shell trip-details-page" data-long-press-sheet-root data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
@@ -135,7 +135,7 @@
           {{if eq . "map"}}
           <section class="card map-card" id="map-section">
             <h3>Trip Map</h3>
-            <div id="map" class="map" data-map-lat="{{$.MapViewLatitude}}" data-map-lng="{{$.MapViewLongitude}}" data-map-zoom="{{$.MapViewZoom}}" data-google-maps-key="{{$.Settings.GoogleMapsAPIKey}}"></div>
+            <div id="map" class="map" data-map-lat="{{$.MapViewLatitude}}" data-map-lng="{{$.MapViewLongitude}}" data-map-zoom="{{$.MapViewZoom}}" data-google-maps-key="{{$.Settings.GoogleMapsAPIKey}}" data-google-map-id="{{$.Settings.GoogleMapsMapID}}"></div>
           </section>
           {{end}}
           {{if eq . "itinerary"}}

@@ -19,6 +19,7 @@ func DefaultAppSettings() AppSettings {
 		DashboardHeroBackground: "default",
 		DefaultDistanceUnit:     "km",
 		GoogleMapsAPIKey:        "",
+		GoogleMapsMapID:         "",
 		MaxUploadFileSizeMB:     5,
 		DefaultUIDateFormat:     "dmy",
 	}

@@ -6680,7 +6680,9 @@ window.addEventListener("load", () => {
     /* no trip map */
   } else {
   const gMapKey = (mapEl.getAttribute("data-google-maps-key") || "").trim();
+  const gMapId = (mapEl.getAttribute("data-google-map-id") || "").trim();
   const useGoogleMaps = /^AIza[0-9A-Za-z_-]{20,}$/.test(gMapKey);
+  const wantGoogleAdvancedMarkers = useGoogleMaps && gMapId.length > 0;
   const defaultLat = parseFloat(mapEl.getAttribute("data-map-lat") || "35.6762");
   const defaultLng = parseFloat(mapEl.getAttribute("data-map-lng") || "139.6503");
   const defaultZoom = parseInt(mapEl.getAttribute("data-map-zoom") || "6", 10);
@@ -7153,8 +7155,7 @@ window.addEventListener("load", () => {
   }
 
   if (useGoogleMaps) {
-    /* Dark basemap via styled maps. Google’s colorScheme only applies at Map construction;
-       setOptions({ colorScheme }) after create is ignored (Edge/Chrome), so theme toggles must use styles. */
+    /* Raster maps: dark mode via JSON styles. Vector maps (Map ID + AdvancedMarkerElement) use map colorScheme. */
     const remiGmapDarkStyles = [
       { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
       { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
@@ -7171,35 +7172,11 @@ window.addEventListener("load", () => {
 
     let remiGoogleTripMap = null;
     const remiGoogleTripMarkerEntries = [];
+    let remiGoogleTripUsesAdvancedMarkers = false;
 
     const googleTripMapDarkNow = () => document.documentElement.classList.contains("theme-dark");
 
-    const syncGoogleTripMapTheme = (darkOverride) => {
-      if (!remiGoogleTripMap || !window.google || !google.maps) return;
-      const dark =
-        typeof darkOverride === "boolean" ? darkOverride : googleTripMapDarkNow();
-      remiGoogleTripMap.setOptions({
-        styles: dark ? remiGmapDarkStyles : []
-      });
-      remiGoogleTripMarkerEntries.forEach(({ marker, point }) => {
-        const ring = ringForDay(Math.max(1, point.day));
-        const bmp = remiGoogleMapMarkerBitmap(ring, point.kind, dark);
-        if (!bmp.url) return;
-        marker.setIcon({
-          url: bmp.url,
-          scaledSize: new google.maps.Size(bmp.size, bmp.size),
-          anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
-        });
-      });
-      if (google.maps.event && typeof google.maps.event.trigger === "function") {
-        google.maps.event.trigger(remiGoogleTripMap, "resize");
-        requestAnimationFrame(() => {
-          if (remiGoogleTripMap) {
-            google.maps.event.trigger(remiGoogleTripMap, "resize");
-          }
-        });
-      }
-    };
+    let syncGoogleTripMapTheme = () => {};
 
     document.addEventListener("remi:themechange", (ev) => {
       const d =
@@ -7209,27 +7186,48 @@ window.addEventListener("load", () => {
       syncGoogleTripMapTheme(d);
     });
 
-    const initGoogleTripMap = () => {
+    const initGoogleTripMap = async () => {
       if (!window.google || !google.maps) return;
-      const dark = googleTripMapDarkNow();
-      const mapOpts = {
-        center: { lat: startLat, lng: startLng },
-        zoom: startZoom,
-        mapTypeControl: true,
-        streetViewControl: true,
-        fullscreenControl: true,
-        styles: dark ? remiGmapDarkStyles : []
+
+      let AdvancedMarkerElement = null;
+      if (wantGoogleAdvancedMarkers && typeof google.maps.importLibrary === "function") {
+        try {
+          const markerLib = await google.maps.importLibrary("marker");
+          AdvancedMarkerElement = markerLib.AdvancedMarkerElement;
+        } catch (e) {
+          AdvancedMarkerElement = null;
+        }
+      }
+      const useAdv = Boolean(AdvancedMarkerElement && wantGoogleAdvancedMarkers);
+      remiGoogleTripUsesAdvancedMarkers = useAdv;
+
+      const markerContentFromBmp = (bmp) => {
+        const root = document.createElement("div");
+        root.style.cssText = "width:0;height:0;overflow:visible;position:relative;pointer-events:none;";
+        if (!bmp.url) return root;
+        const img = document.createElement("img");
+        img.src = bmp.url;
+        img.width = bmp.size;
+        img.height = bmp.size;
+        img.alt = "";
+        img.draggable = false;
+        img.style.cssText = `position:absolute;left:50%;bottom:0;width:${bmp.size}px;height:${bmp.size}px;transform:translate(-50%,0);display:block;`;
+        root.appendChild(img);
+        return root;
       };
-      remiGoogleTripMap = new google.maps.Map(mapEl, mapOpts);
-      const gMap = remiGoogleTripMap;
-      remiGoogleTripMarkerEntries.length = 0;
-      const googleMarkersByDay = new Map();
-      const googleMarkerByItemId = new Map();
-      uniqueDays.forEach((d) => googleMarkersByDay.set(d, []));
-      const darkMarkers = googleTripMapDarkNow();
-      points.forEach((p) => {
+
+      const createGoogleTripMarker = (p, darkMarkers) => {
         const ring = ringForDay(Math.max(1, p.day));
         const bmp = remiGoogleMapMarkerBitmap(ring, p.kind, darkMarkers);
+        if (useAdv) {
+          return new AdvancedMarkerElement({
+            map: null,
+            position: { lat: p.lat, lng: p.lng },
+            title: `${p.title} · Day ${p.day}`,
+            content: markerContentFromBmp(bmp),
+            gmpClickable: true
+          });
+        }
         const iconOpts =
           bmp.url && typeof google.maps.Size === "function" && typeof google.maps.Point === "function"
             ? {
@@ -7238,12 +7236,114 @@ window.addEventListener("load", () => {
                 anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
               }
             : undefined;
-        const marker = new google.maps.Marker({
+        return new google.maps.Marker({
           position: { lat: p.lat, lng: p.lng },
           map: null,
           title: `${p.title} · Day ${p.day}`,
           ...(iconOpts ? { icon: iconOpts } : {})
         });
+      };
+
+      const setGoogleTripMarkerMap = (m, map) => {
+        if (useAdv) {
+          m.map = map;
+        } else {
+          m.setMap(map);
+        }
+      };
+
+      const getGoogleTripMarkerLatLng = (m) => {
+        if (useAdv) {
+          const pos = m.position;
+          if (pos == null) return null;
+          if (typeof pos.lat === "function") return pos;
+          return new google.maps.LatLng(pos.lat, pos.lng);
+        }
+        return m.getPosition();
+      };
+
+      const setGoogleTripMarkerPosition = (m, lat, lng) => {
+        if (useAdv) {
+          m.position = { lat, lng };
+        } else {
+          m.setPosition({ lat, lng });
+        }
+      };
+
+      const setGoogleTripMarkerTitle = (m, t) => {
+        if (useAdv) {
+          m.title = t;
+        } else {
+          m.setTitle(t);
+        }
+      };
+
+      const applyGoogleTripMarkerAppearance = (m, ring, kind, isDark) => {
+        const bmp = remiGoogleMapMarkerBitmap(ring, kind, isDark);
+        if (useAdv) {
+          m.content = markerContentFromBmp(bmp);
+          return;
+        }
+        if (bmp.url && typeof google.maps.Size === "function" && typeof google.maps.Point === "function") {
+          m.setIcon({
+            url: bmp.url,
+            scaledSize: new google.maps.Size(bmp.size, bmp.size),
+            anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
+          });
+        }
+      };
+
+      syncGoogleTripMapTheme = (darkOverride) => {
+        if (!remiGoogleTripMap || !window.google || !google.maps) return;
+        const dark = typeof darkOverride === "boolean" ? darkOverride : googleTripMapDarkNow();
+        if (remiGoogleTripUsesAdvancedMarkers && google.maps.ColorScheme) {
+          remiGoogleTripMap.setOptions({
+            colorScheme: dark ? google.maps.ColorScheme.DARK : google.maps.ColorScheme.LIGHT
+          });
+        } else {
+          remiGoogleTripMap.setOptions({
+            styles: dark ? remiGmapDarkStyles : []
+          });
+        }
+        remiGoogleTripMarkerEntries.forEach(({ marker, point }) => {
+          const ring = ringForDay(Math.max(1, point.day));
+          applyGoogleTripMarkerAppearance(marker, ring, point.kind, dark);
+        });
+        if (google.maps.event && typeof google.maps.event.trigger === "function") {
+          google.maps.event.trigger(remiGoogleTripMap, "resize");
+          requestAnimationFrame(() => {
+            if (remiGoogleTripMap) {
+              google.maps.event.trigger(remiGoogleTripMap, "resize");
+            }
+          });
+        }
+      };
+
+      const dark = googleTripMapDarkNow();
+      const mapOpts = {
+        center: { lat: startLat, lng: startLng },
+        zoom: startZoom,
+        mapTypeControl: true,
+        streetViewControl: true,
+        fullscreenControl: true
+      };
+      if (useAdv) {
+        mapOpts.mapId = gMapId;
+        if (google.maps.ColorScheme) {
+          mapOpts.colorScheme = dark ? google.maps.ColorScheme.DARK : google.maps.ColorScheme.LIGHT;
+        }
+      } else {
+        mapOpts.styles = dark ? remiGmapDarkStyles : [];
+      }
+      remiGoogleTripMap = new google.maps.Map(mapEl, mapOpts);
+      const gMap = remiGoogleTripMap;
+      remiGoogleTripMarkerEntries.length = 0;
+      const googleMarkersByDay = new Map();
+      const googleMarkerByItemId = new Map();
+      uniqueDays.forEach((d) => googleMarkersByDay.set(d, []));
+      const darkMarkers = googleTripMapDarkNow();
+      points.forEach((p) => {
+        const marker = createGoogleTripMarker(p, darkMarkers);
         remiGoogleTripMarkerEntries.push({ marker, point: p });
         const dNum = Math.max(1, p.day);
         if (!googleMarkersByDay.has(dNum)) googleMarkersByDay.set(dNum, []);
@@ -7262,12 +7362,12 @@ window.addEventListener("load", () => {
         selectedDays.forEach((d) => {
           (googleMarkersByDay.get(d) || []).forEach((m) => {
             vis.push(m);
-            m.setMap(gMap);
+            setGoogleTripMarkerMap(m, gMap);
           });
         });
         googleMarkersByDay.forEach((markers, d) => {
           if (selectedDays.has(d)) return;
-          markers.forEach((m) => m.setMap(null));
+          markers.forEach((m) => setGoogleTripMarkerMap(m, null));
         });
         if (vis.length === 0) {
           gMap.setCenter({ lat: startLat, lng: startLng });
@@ -7275,7 +7375,7 @@ window.addEventListener("load", () => {
           return;
         }
         if (vis.length === 1) {
-          const pos = vis[0].getPosition();
+          const pos = getGoogleTripMarkerLatLng(vis[0]);
           if (pos) {
             gMap.setCenter(pos);
             gMap.setZoom(Math.max(startZoom, 12));
@@ -7284,7 +7384,7 @@ window.addEventListener("load", () => {
         }
         const bounds = new google.maps.LatLngBounds();
         vis.forEach((m) => {
-          const pos = m.getPosition();
+          const pos = getGoogleTripMarkerLatLng(m);
           if (pos) bounds.extend(pos);
         });
         gMap.fitBounds(bounds, 48);
@@ -7300,22 +7400,7 @@ window.addEventListener("load", () => {
           seen.add(p.itemId);
           let ent = googleMarkerByItemId.get(p.itemId);
           if (!ent) {
-            const ring = ringForDay(Math.max(1, p.day));
-            const bmp = remiGoogleMapMarkerBitmap(ring, p.kind, darkM);
-            const iconOpts =
-              bmp.url && typeof google.maps.Size === "function" && typeof google.maps.Point === "function"
-                ? {
-                    url: bmp.url,
-                    scaledSize: new google.maps.Size(bmp.size, bmp.size),
-                    anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
-                  }
-                : undefined;
-            const marker = new google.maps.Marker({
-              position: { lat: p.lat, lng: p.lng },
-              map: null,
-              title: `${p.title} · Day ${p.day}`,
-              ...(iconOpts ? { icon: iconOpts } : {})
-            });
+            const marker = createGoogleTripMarker(p, darkM);
             const pointRef = { ...p };
             const iw = new google.maps.InfoWindow({
               content: `<div><b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${p.day}</span><br>${escapeHtmlMap(p.location)}</div>`
@@ -7325,17 +7410,10 @@ window.addEventListener("load", () => {
             googleMarkerByItemId.set(p.itemId, ent);
           } else {
             Object.assign(ent.point, p);
-            ent.marker.setPosition({ lat: p.lat, lng: p.lng });
-            ent.marker.setTitle(`${p.title} · Day ${p.day}`);
+            setGoogleTripMarkerPosition(ent.marker, p.lat, p.lng);
+            setGoogleTripMarkerTitle(ent.marker, `${p.title} · Day ${p.day}`);
             const ring = ringForDay(Math.max(1, p.day));
-            const bmp = remiGoogleMapMarkerBitmap(ring, p.kind, darkM);
-            if (bmp.url && typeof google.maps.Size === "function" && typeof google.maps.Point === "function") {
-              ent.marker.setIcon({
-                url: bmp.url,
-                scaledSize: new google.maps.Size(bmp.size, bmp.size),
-                anchor: new google.maps.Point(bmp.anchorX, bmp.anchorY)
-              });
-            }
+            applyGoogleTripMarkerAppearance(ent.marker, ring, p.kind, darkM);
             ent.iw.setContent(
               `<div><b>${escapeHtmlMap(p.title)}</b><br><span class="trip-map-popup-day">Day ${p.day}</span><br>${escapeHtmlMap(p.location)}</div>`
             );
@@ -7343,7 +7421,7 @@ window.addEventListener("load", () => {
         });
         googleMarkerByItemId.forEach((ent, id) => {
           if (seen.has(id)) return;
-          ent.marker.setMap(null);
+          setGoogleTripMarkerMap(ent.marker, null);
           googleMarkerByItemId.delete(id);
         });
         googleMarkersByDay.clear();
@@ -7386,26 +7464,21 @@ window.addEventListener("load", () => {
     };
 
     if (window.google && google.maps) {
-      try {
-        initGoogleTripMap();
-        googleInitDone = true;
-      } catch (e) {
-        fallbackToLeaflet("google-init-error");
-      }
+      googleInitDone = true;
+      initGoogleTripMap().catch(() => fallbackToLeaflet("google-init-error"));
     } else {
       window.remiGoogleTripMapInit = () => {
         if (fallbackTried) return;
         googleInitDone = true;
-        try {
-          initGoogleTripMap();
-        } catch (e) {
-          fallbackToLeaflet("google-init-error");
-        }
-        try {
-          delete window.remiGoogleTripMapInit;
-        } catch (e) {
-          window.remiGoogleTripMapInit = undefined;
-        }
+        initGoogleTripMap()
+          .then(() => {
+            try {
+              delete window.remiGoogleTripMapInit;
+            } catch (e) {
+              window.remiGoogleTripMapInit = undefined;
+            }
+          })
+          .catch(() => fallbackToLeaflet("google-init-error"));
       };
       const gs = document.createElement("script");
       gs.async = true;
@@ -7414,7 +7487,7 @@ window.addEventListener("load", () => {
       };
       gs.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
         gMapKey
-      )}&callback=remiGoogleTripMapInit&v=weekly`;
+      )}&callback=remiGoogleTripMapInit&v=weekly&loading=async`;
       document.head.appendChild(gs);
       window.setTimeout(() => {
         if (!googleInitDone) {
