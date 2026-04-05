@@ -1749,7 +1749,8 @@ func (s *Service) SyncExpenseForFlight(ctx context.Context, f Flight) error {
 			if err := s.repo.UpdateExpense(ctx, existing); err != nil {
 				return err
 			}
-			return s.repo.UpdateFlight(ctx, f)
+			// Keep booking updated_at stable when only the linked expense row changed.
+			return nil
 		}
 	}
 	id := uuid.NewString()
@@ -1765,6 +1766,7 @@ func (s *Service) SyncExpenseForFlight(ctx context.Context, f Flight) error {
 		return err
 	}
 	f.ExpenseID = id
+	// Persist the generated expense ID on the flight row.
 	return s.repo.UpdateFlight(ctx, f)
 }
 
@@ -1813,6 +1815,10 @@ func (s *Service) SyncExpenseForVehicleRental(ctx context.Context, v VehicleRent
 	insuranceExpenseID, err := upsert(v.InsuranceExpenseID, v.InsuranceCost, "Insurance Cost")
 	if err != nil {
 		return err
+	}
+	if rentalExpenseID == v.RentalExpenseID && insuranceExpenseID == v.InsuranceExpenseID {
+		// Keep booking updated_at stable when only linked expense rows changed.
+		return nil
 	}
 	v.RentalExpenseID = rentalExpenseID
 	v.InsuranceExpenseID = insuranceExpenseID

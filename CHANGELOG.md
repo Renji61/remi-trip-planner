@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.49.3] - 2026-04-05
+
+### Fixed
+
+- **False optimistic-lock conflicts on booking edits:** syncing linked expense rows from page loads no longer bumps booking `updated_at` when expense link IDs are unchanged. This prevents “someone else updated this entry” errors for single-editor flows on **Vehicle Rental** and **Flights**.
+- **Mobile spacing below Invite via link:** adjusted `tripMembersPanel` spacing on **Notes**, **Flights**, and **Vehicle Rental** pages so the section below the invite-link block no longer appears cramped.
+
 ## [1.49.2] - 2026-04-08
 
 ### Fixed
@@ -360,7 +367,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.2...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.3...HEAD
+[1.49.3]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.2...v1.49.3
 [1.49.2]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.1...v1.49.2
 [1.49.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.0...v1.49.1
 [1.49.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.48.0...v1.49.0

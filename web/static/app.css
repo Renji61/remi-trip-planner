@@ -10152,6 +10152,12 @@ html.theme-dark .trip-invite-flash {
     margin-top: 4px;
     margin-bottom: 0;
   }
+  /* Notes / Flights / Vehicle pages: keep clear gap below invite-link card. */
+  .page-trip-notes .trip-members-mobile-shell,
+  .flights-redesign > .trip-members-mobile-shell,
+  .vehicle-redesign > .trip-members-mobile-shell {
+    margin-bottom: 12px;
+  }
   /* Trip settings: invite link sits above accordion cards — keep clear separation from first section (Trip Information). */
   .page-trip-settings .trip-members-mobile-shell {
     margin-bottom: 20px;
