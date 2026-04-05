@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.49.1] - 2026-04-06
+
+### Fixed
+
+- **Docker:** fresh named volumes no longer leave SQLite unable to write (`readonly database`) for the non-root app user — one-shot **`remi-volume-perms`** in Compose (all shipped compose variants) plus an image **entrypoint** (`docker-entrypoint.sh`) that `chown`s `/app/data` and `/app/web/static/uploads` before **`su-exec`** to `remi`.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.49.1`** (and GHCR tag **`v1.49.1`** when CI builds) so instances on **1.49.0** see an update on About / `GET /api/about/update-check`. **Rebuild or pull** the image — the fix is in the image and compose files together.
+
 ## [1.49.0] - 2026-04-05
 
 ### Added
@@ -336,7 +346,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.0...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.1...HEAD
+[1.49.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.0...v1.49.1
 [1.49.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.48.0...v1.49.0
 [1.48.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.47.0...v1.48.0
 [1.47.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.46.0...v1.47.0

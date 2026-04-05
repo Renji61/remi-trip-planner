@@ -10,6 +10,20 @@
 # Default host port is 4122 → container 8080 (override with REMI_PORT in .env).
 
 services:
+  # One-shot: named volumes often mount as root:root; app runs as remi — fix ownership before remi starts.
+  remi-volume-perms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: remi-trip-planner:latest
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R remi:remi /app/data /app/web/static/uploads"]
+    volumes:
+      - remi-data:/app/data
+      - remi-uploads:/app/web/static/uploads
+    restart: "no"
+
   remi:
     build:
       context: .
@@ -17,6 +31,9 @@ services:
     image: remi-trip-planner:latest
     container_name: remi-trip-planner
     restart: unless-stopped
+    depends_on:
+      remi-volume-perms:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp
