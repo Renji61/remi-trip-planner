@@ -19,10 +19,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **First-trip setup wizard** (trip owners): multi-step modal + `POST /trips/{id}/first-trip-setup` for name, dates, description, cover upload or built-in presets, currency, and related defaults until `setup_complete` is set.
 - **Unified expense quick-add:** shared `trip_unified_expense_form.html` for sidebar, mobile flyouts, and calendar flows — personal expense or **split with group** (participant pickers, paid-by, receipt) in one form when group expenses are enabled.
 
-### Changed
-
-- **In-app trip notifications:** eligibility now requires the trip’s **start–end dates** (local midnight bounds) to include **today** and the trip not to be archived, matching “actively traveling” rather than all non-archived trips.
-
 ### Notes for self-hosters
 
 - **Update notification:** publish GitHub Release **`v1.50.0`** (and the **GHCR** image tag when CI builds) so **About** / `GET /api/about/update-check` shows the new version for installs on **1.49.4** or older.

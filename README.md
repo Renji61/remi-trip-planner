@@ -53,7 +53,6 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - **First-trip setup** (owners): guided modal for a new trip until onboarding is complete — basics, cover image or preset, currency, and related defaults (`POST /trips/{id}/first-trip-setup`).
 - **Dashboard sidebar & mobile bottom bar:** up to **two** shortcuts to trips that are **in progress** or **upcoming** (in that priority order), in addition to **My Trip**, **Profile**, and **Settings**.
 - **Dashboard customization:** grid vs list cards, sort order, hero background style, heading text (app settings).
-- **In-app notifications** for a trip are limited to **active travel dates** (today within the trip’s start and end, local time) and non-archived trips, so drafts and future trips stay out of the bell until you are on the road.
 - Per-trip: name, description, dates, **cover image URL**, **currency**, archive/delete.
 
 ### Itinerary & map
