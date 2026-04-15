@@ -1,6 +1,7 @@
 {{define "tripMobileFabLinks"}}
 {{- $t := index . "Trip" -}}
-{{if and $t.UIShowItinerary (sidebarWidgetVisible "add_stop" $t)}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}?open=stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>Add Stop</a>{{end}}
+{{if and $t.UIShowItinerary (sidebarWidgetVisible "add_stop" $t)}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}?open=stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>{{tripSidebarWidgetLabel "add_stop"}}</a>{{end}}
+{{if and $t.UIShowItinerary (sidebarWidgetVisible "add_commute" $t)}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}?open=commute"><span class="material-symbols-outlined" aria-hidden="true">directions</span>{{tripSidebarWidgetLabel "add_commute"}}</a>{{end}}
 {{if $t.UIShowFlights}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}/flights"><span class="material-symbols-outlined" aria-hidden="true">flight</span>Add Flights</a>{{end}}
 {{if $t.UIShowStay}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}/accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add Accommodation</a>{{end}}
 {{if $t.UIShowVehicle}}<a class="mobile-fab-option" href="/trips/{{$t.ID}}/vehicle-rental"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add Vehicle Rental</a>{{end}}

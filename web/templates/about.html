@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=268">
+  <link rel="stylesheet" href="/static/app.css?v=280">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=246"></script>
+  <script defer src="/static/app.js?v=272"></script>
 </head>
 <body class="page-about">
   <main class="app-shell" aria-label="About">
@@ -73,11 +73,12 @@
           <h3 id="about-features-title">What you can do with REMI Trip Planner</h3>
           <ul class="about-features-list">
             <li>Create and organize trips with dates, description, cover image, and currency.</li>
+            <li>For <strong>new trips you own</strong>, use the optional <strong>first-trip setup</strong> wizard (name, dates, description, cover image or preset, currency, and travel defaults) until onboarding is complete.</li>
             <li>See trips grouped as active, draft, or archived on your personal dashboard.</li>
             <li>Invite others by email or shareable link and plan together.</li>
-            <li>Build a day-by-day itinerary with stops, notes, optional costs, and an interactive map (OpenStreetMap or optional Google Maps) with pins, day filters, and travel hints between stops.</li>
+            <li>Build a day-by-day itinerary with stops, notes, optional costs, and an interactive map (OpenStreetMap or optional Google Maps) with pins, day filters, and travel hints between stops. Add <strong>same-day commute / travel legs</strong> between two stops (transport mode, timeline order, sidebar, and <strong>calendar subscription / ICS</strong>); duplicate pairs are rejected and deleting a neighbor clears links. Optional <strong>Open in Google Maps</strong> directions between endpoints use the commute’s mode when both have coordinates.</li>
             <li>Turn location lookup on or off when adding places; geocoding and place suggestions can be cached server-side for faster repeat lookups.</li>
-            <li>Track spending against a budget, with categories, Expenses and Group expenses views per trip, and splits that stay consistent when participants leave — amounts are stored in <strong>whole minor units</strong> (e.g. cents) for accurate arithmetic.</li>
+            <li>Track spending against a budget, with categories, Expenses and Group expenses views per trip, and splits that stay consistent when participants leave — amounts are stored in <strong>whole minor units</strong> (e.g. cents) for accurate arithmetic. <strong>Quick-add</strong> entry points use a <strong>unified expense form</strong>: save a personal expense or, when group expenses are enabled and the trip has someone to split with, toggle <strong>split with group</strong> and pick participants in the same flow.</li>
             <li>When collaborators edit the same trip, <strong>optimistic concurrency</strong> can return a clear <strong>conflict</strong> instead of silently overwriting another person’s save; refresh and try again with the latest data.</li>
             <li>Record accommodations, vehicle rentals, and flights with details and attachments; saves that touch itinerary lines use <strong>atomic transactions</strong> so linked data does not end up half-updated.</li>
             <li>Open <strong>Trip Documents</strong> from the trip sidebar to upload files, search and filter every attachment in one place (including documents from stays, rentals, flights, and group expenses), with a configurable max file size in app settings and upload checks for safer file types.</li>
@@ -85,6 +86,7 @@
             <li>Customize each trip: which sections appear, labels, layout order, 12h/24h clock, and DD/MM/YYYY or MM/DD/YYYY date display.</li>
             <li>Add custom links in the trip sidebar for quick references.</li>
             <li>Stay in sync while a trip is open: the app can use a <strong>live event stream</strong> of changes so lists and panels refresh without reloading the whole page.</li>
+            <li><strong>In-app notifications</strong> for a trip are shown when the trip is <strong>not archived</strong> and <strong>today’s date falls within the trip’s start and end dates</strong> (local time), so drafts and far-future trips stay quiet until you are actually traveling.</li>
             <li>Export a <strong>JSON snapshot</strong> of your visible data from Profile (no password material; app secrets redacted) and use optional <strong>backup scripts</strong> or Compose profile for SQLite snapshots.</li>
             <li>Use the <strong>About</strong> page to see your installed version and check for updates on self-hosted installs: the app compares against the latest stable version from <strong>GitHub Releases and version tags</strong> (not only formal release posts), and can tell you if you are on a build newer than the latest published tag.</li>
             <li>Install as an app (PWA) for a more app-like experience on your device.</li>

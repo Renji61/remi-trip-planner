@@ -1,0 +1,139 @@
+{{define "tripUnifiedExpenseForm"}}
+{{- $trip := index . "Trip" -}}
+{{- $settings := index . "Settings" -}}
+{{- $categories := index . "ExpenseCategories" -}}
+{{- $sym := index . "CurrencySymbol" -}}
+{{- $defDate := index . "ExpenseFormDefaultDateISO" -}}
+{{- $party := index . "Party" -}}
+{{- $guests := index . "TripGuests" -}}
+{{- $departed := index . "TabDepartedParticipants" -}}
+{{- $uid := index . "CurrentUserID" -}}
+{{- $variant := index . "Variant" -}}
+{{- $returnTo := index . "ReturnTo" -}}
+{{- $suffix := index . "FormSuffix" -}}
+{{- $subtitle := index . "Subtitle" -}}
+{{- $formClass := index . "FormClass" -}}
+{{- if not $formClass -}}{{- $formClass = "" -}}{{- end -}}
+{{- $tabEnabled := index . "TabSectionEnabled" -}}
+{{- $splitMemberCount := add (len $party) (len $guests) -}}
+{{- $canSplit := and $tabEnabled (gt $splitMemberCount 1) -}}
+{{- $toggleReason := "" -}}
+{{- if not $tabEnabled -}}{{- $toggleReason = "tab_disabled" -}}{{- end -}}
+{{- if and $tabEnabled (le $splitMemberCount 1) -}}{{- $toggleReason = "single_member" -}}{{- end -}}
+<form
+  method="post"
+  action="/trips/{{$trip.ID}}/expenses"
+  class="form-grid remi-unified-expense-form remi-unified-expense-form--{{$variant}}{{if $formClass}} {{$formClass}}{{else}} remi-trip-widget-form{{end}}"
+  id="remi-unified-expense-form-{{$suffix}}"
+  enctype="multipart/form-data"
+  data-ajax-submit
+  data-remi-unified-expense-add-form
+  data-remi-default-spent-on="{{$defDate}}"
+  data-unified-expense-tab-enabled="{{if $tabEnabled}}1{{end}}"
+  data-unified-expense-can-split="{{if $canSplit}}1{{end}}"
+  data-unified-expense-toggle-reason="{{$toggleReason}}"
+>
+  <input type="hidden" name="return_to" value="{{$returnTo}}">
+  <input type="hidden" name="from_tab" value="1" class="remi-unified-expense-from-tab" disabled>
+  <input type="hidden" name="split_mode" value="equal" class="remi-unified-expense-split-mode" disabled>
+  <input type="hidden" name="split_json" value="" class="remi-unified-expense-split-json" disabled>
+
+  <div class="remi-unified-expense-hero">
+    <span class="remi-unified-expense-hero-label">Amount</span>
+    <div class="remi-unified-expense-hero-input">
+      <span class="tab-amount-prefix" aria-hidden="true">{{$sym}}</span>
+      <input type="number" step="0.01" min="0" name="amount" autocomplete="transaction-amount" {{template "remiPmIgnoreExt"}} class="remi-unified-expense-amount-input" placeholder="0.00" required inputmode="decimal" aria-label="Expense amount">
+    </div>
+  </div>
+
+  {{if $subtitle}}<p class="remi-unified-expense-flyout-sub muted">{{$subtitle}}</p>{{end}}
+
+  <div class="remi-unified-expense-grid2">
+    <label>Category
+      <select name="category" required class="remi-unified-expense-category">
+        <option value="" disabled selected>Select a category</option>
+        {{range $categories}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+    </label>
+    <label>Title (optional)<input type="text" name="title" maxlength="200" autocomplete="off" placeholder="e.g. Dinner at Ichiran or airport train"></label>
+  </div>
+  <div class="remi-unified-expense-grid2">
+    <label>Payment Method
+      <select name="payment_method" required>
+        <option value="" disabled selected>Select a payment method</option>
+        <option value="Cash">Cash</option>
+        <option value="Credit Card">Credit Card</option>
+        <option value="Crypto">Crypto</option>
+        <option value="Debit Card">Debit Card</option>
+        <option value="Digital Wallet">Digital Wallet</option>
+        <option value="Mobile Payment">Mobile Payment</option>
+      </select>
+    </label>
+    <label>Date{{template "remiDateField" (dict "name" "spent_on" "value" $defDate "mdy" (effectiveUIDateIsMDY $trip $settings))}}</label>
+  </div>
+  <label class="full">Notes<input type="text" name="notes" placeholder="Add any notes"></label>
+
+  <div class="remi-unified-expense-split-toggle-wrap{{if not $tabEnabled}} remi-unified-expense-split-toggle-wrap--disabled{{end}}{{if and $tabEnabled (le $splitMemberCount 1)}} remi-unified-expense-split-toggle-wrap--disabled{{end}}" {{if eq $toggleReason "tab_disabled"}}title="Group expenses are turned off for this trip in Trip settings."{{end}}{{if eq $toggleReason "single_member"}}title="Add another trip member or guest to split expenses with the group."{{end}}>
+    <div class="remi-unified-expense-split-toggle-row">
+      <span class="material-symbols-outlined remi-unified-expense-split-icon" aria-hidden="true">group_add</span>
+      <div class="remi-unified-expense-split-toggle-text">
+        <span class="remi-unified-expense-split-toggle-label" id="remi-split-label-{{$suffix}}">Split with group?</span>
+        <span class="muted small remi-unified-expense-split-toggle-hint">Divide cost between selected trip members</span>
+      </div>
+      <label class="remi-unified-expense-switch">
+        <input type="checkbox" value="1" class="remi-unified-expense-split-checkbox" role="switch" aria-labelledby="remi-split-label-{{$suffix}}" {{if not $canSplit}}disabled{{end}}>
+        <span class="remi-unified-expense-switch-track" aria-hidden="true"></span>
+      </label>
+    </div>
+  </div>
+
+  <fieldset class="remi-unified-expense-split-fieldset full hidden" disabled aria-labelledby="remi-split-members-legend-{{$suffix}}">
+    <legend id="remi-split-members-legend-{{$suffix}}" class="remi-unified-expense-split-legend">
+      <span>Split with</span>
+      <button type="button" class="link-btn remi-unified-expense-select-all">Select all</button>
+    </legend>
+    <ul class="remi-unified-expense-member-list" role="list">
+      {{range $party}}
+      <li class="remi-unified-expense-member-row">
+        <label class="remi-unified-expense-member-label">
+          <span class="remi-unified-expense-member-avatar" aria-hidden="true">
+            {{if ne (tabAvatarURL .AvatarPath) ""}}<img src="{{tabAvatarURL .AvatarPath}}" alt="">{{else}}<span class="remi-unified-expense-member-initial">{{.InitialForAvatar}}</span>{{end}}
+          </span>
+          <span class="remi-unified-expense-member-name">{{.PublicDisplayName}}{{if eq .ID $uid}} (you){{end}}</span>
+          <input type="checkbox" class="remi-unified-expense-participant-cb" value="{{printf "user:%s" .ID}}" data-participant-key="{{printf "user:%s" .ID}}" checked>
+        </label>
+      </li>
+      {{end}}
+      {{range $guests}}
+      <li class="remi-unified-expense-member-row">
+        <label class="remi-unified-expense-member-label">
+          <span class="remi-unified-expense-member-avatar remi-unified-expense-member-avatar--guest" aria-hidden="true"><span class="remi-unified-expense-member-initial">{{guestInitial .DisplayName}}</span></span>
+          <span class="remi-unified-expense-member-name">{{.DisplayName}} (guest)</span>
+          <input type="checkbox" class="remi-unified-expense-participant-cb" value="{{printf "guest:%s" .ID}}" data-participant-key="{{printf "guest:%s" .ID}}" checked>
+        </label>
+      </li>
+      {{end}}
+    </ul>
+    <label class="full remi-unified-expense-paid-by-label">Who paid?
+      <select name="paid_by" class="remi-unified-expense-paid-by" required>
+        {{range $party}}
+        <option value="{{printf "user:%s" .ID}}" {{if eq .ID $uid}}selected{{end}}>{{.PublicDisplayName}}{{if eq .ID $trip.OwnerUserID}} (owner){{end}}</option>
+        {{end}}
+        {{range $guests}}
+        <option value="{{printf "guest:%s" .ID}}">{{.DisplayName}} (guest)</option>
+        {{end}}
+        {{range $departed}}
+        <option value="{{.ParticipantKey}}">{{.RowLabel}}{{if .IsGuestKey}} (guest){{end}} (left trip)</option>
+        {{end}}
+      </select>
+    </label>
+    <label class="full">Receipt<input type="file" name="tab_attachment" accept=".pdf,image/*" class="remi-unified-expense-receipt"></label>
+  </fieldset>
+
+  <div class="full remi-expense-add-actions remi-unified-expense-actions">
+    <button class="btn" type="submit"><span class="remi-unified-expense-submit-personal">Save expense</span><span class="remi-unified-expense-submit-group hidden">Save group expense</span></button>
+    {{if or (eq $variant "mobile") (eq $variant "flyout")}}<button type="button" class="secondary-btn remi-unified-expense-cancel">Cancel</button>{{end}}
+    <button class="secondary-btn remi-unified-expense-save-another" type="submit" data-remi-save-expense-another="1" data-remi-save-group-expense-another="1">Save &amp; add another</button>
+  </div>
+</form>
+{{end}}

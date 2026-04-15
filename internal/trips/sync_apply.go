@@ -185,6 +185,7 @@ type tripSyncPatch struct {
 	UISidebarWidgetHidden  *string  `json:"ui_sidebar_widget_hidden"`
 	UIShowCustomLinks      *bool    `json:"ui_show_custom_links"`
 	UICustomSidebarLinks   *string  `json:"ui_custom_sidebar_links"`
+	SetupComplete          *bool    `json:"setup_complete"`
 }
 
 func (s *Service) syncApplyTrip(ctx context.Context, tripID string, acc TripAccess, oper string, op SyncOpInput) error {
@@ -322,6 +323,9 @@ func (s *Service) syncApplyTrip(ctx context.Context, tripID string, acc TripAcce
 		}
 		if patch.UICustomSidebarLinks != nil {
 			t.UICustomSidebarLinks = strings.TrimSpace(*patch.UICustomSidebarLinks)
+		}
+		if patch.SetupComplete != nil && acc.IsOwner {
+			t.SetupComplete = *patch.SetupComplete
 		}
 		if !t.UIShowSpends {
 			t.UIShowTheTab = false

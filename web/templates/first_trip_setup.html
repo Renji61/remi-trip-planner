@@ -1,0 +1,233 @@
+{{define "firstTripSetupModal"}}
+<div class="first-trip-setup" id="first-trip-setup" role="dialog" aria-modal="true" aria-labelledby="fts-heading" data-first-trip-setup data-trip-id="{{.Details.Trip.ID}}" data-currency-code="{{.Details.Trip.CurrencyName}}" data-currency-symbol="{{.Details.Trip.CurrencySymbol}}" data-trip-cover="{{.Details.Trip.CoverImage}}">
+  <div class="first-trip-setup__backdrop" aria-hidden="true"></div>
+  <div class="first-trip-setup__frame">
+    <div class="first-trip-setup__layout">
+      <aside class="first-trip-setup__sidebar" aria-hidden="true" data-fts-sidebar>
+        <p class="first-trip-setup__eyebrow" data-fts-sidebar-step>STEP 01</p>
+        <h2 class="first-trip-setup__sidebar-title" data-fts-sidebar-title>Trip basics</h2>
+        <p class="first-trip-setup__sidebar-desc muted" data-fts-sidebar-desc>Name your adventure and capture the story you want to remember.</p>
+        <div class="first-trip-setup__progress-meta">
+          <span>Progress</span>
+          <span data-fts-progress-pct>33% Complete</span>
+        </div>
+        <div class="first-trip-setup__progress-bar" aria-hidden="true"><span data-fts-progress-fill></span></div>
+        <div class="first-trip-setup__dots" data-fts-dots role="presentation"></div>
+      </aside>
+      <div class="first-trip-setup__main">
+        <header class="first-trip-setup__mobile-brand">
+          <span class="first-trip-setup__logo">REMI</span>
+          <div class="first-trip-setup__segbar" data-fts-segbar role="presentation"></div>
+          <p class="first-trip-setup__mobile-step muted" data-fts-mobile-step>STEP 01 — BASICS</p>
+        </header>
+        <form id="first-trip-setup-form" class="first-trip-setup__form" method="post" action="/trips/{{.Details.Trip.ID}}/first-trip-setup" enctype="multipart/form-data" data-fts-form>
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+          <fieldset class="first-trip-setup__step" data-fts-step="0">
+            <legend class="sr-only">Basics</legend>
+            <h2 class="first-trip-setup__heading" id="fts-heading">Welcome — let’s set up this trip</h2>
+            <p class="first-trip-setup__lede muted">Add a name, dates, and a short description so your workspace feels like yours.</p>
+            <div class="first-trip-setup__card">
+              <h3 class="first-trip-setup__card-title">Trip basics</h3>
+              <label class="first-trip-setup__field full">
+                <span class="first-trip-setup__label">Trip name</span>
+                <input type="text" name="name" value="{{.Details.Trip.Name}}" placeholder="e.g. Kyoto spring" required autocomplete="off">
+              </label>
+              <label class="first-trip-setup__field full">
+                <span class="first-trip-setup__label">Description</span>
+                <textarea name="description" rows="3" placeholder="A few words about this trip">{{.Details.Trip.Description}}</textarea>
+              </label>
+              <div class="first-trip-setup__two">
+                <label class="first-trip-setup__field">
+                  <span class="first-trip-setup__label">Start date</span>
+                  {{template "remiDateField" (dict "name" "start_date" "value" .Details.Trip.StartDate "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings))}}
+                </label>
+                <label class="first-trip-setup__field">
+                  <span class="first-trip-setup__label">End date</span>
+                  {{template "remiDateField" (dict "name" "end_date" "value" .Details.Trip.EndDate "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings))}}
+                </label>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="first-trip-setup__step first-trip-setup__step--hidden" data-fts-step="1" hidden>
+            <legend class="sr-only">Cover image</legend>
+            <h2 class="first-trip-setup__heading">Cover image</h2>
+            <p class="first-trip-setup__lede muted">Personalize your trip header with a photo or a built-in style — you can always change this later in trip settings.</p>
+            <input type="hidden" name="cover_image_mode" value="keep" data-fts-cover-mode>
+            <input type="hidden" name="cover_image_existing" value="{{.Details.Trip.CoverImage}}">
+            <div class="first-trip-setup__card first-trip-setup__card--cover">
+              <div
+                class="first-trip-setup__cover-drop"
+                data-fts-cover-drop
+                tabindex="0"
+                role="button"
+                aria-label="Upload a cover image. JPEG, PNG, WebP, or GIF."
+              >
+                <input type="file" name="cover_image_upload" class="sr-only" accept="image/jpeg,image/png,image/webp,image/gif" data-fts-cover-file>
+                <span class="first-trip-setup__cover-drop-icon" aria-hidden="true"><span class="material-symbols-outlined">add_a_photo</span></span>
+                <strong class="first-trip-setup__cover-drop-title">Drag or click to upload</strong>
+                <p class="first-trip-setup__cover-drop-hint muted">JPEG, PNG, WebP, or GIF. Max {{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}MB.</p>
+                <p class="first-trip-setup__cover-file-name muted" data-fts-cover-filename hidden></p>
+                <div class="first-trip-setup__cover-preview" data-fts-cover-preview hidden></div>
+              </div>
+              <p class="first-trip-setup__cover-presets-label muted">Or choose a style</p>
+              <div class="first-trip-setup__cover-presets" role="group" aria-label="Preset cover styles">
+                <button type="button" class="first-trip-setup__cover-preset first-trip-setup__cover-preset--default" data-fts-cover-preset="default" title="Default photo">
+                  <span class="sr-only">Default optimized photo</span>
+                </button>
+                <button type="button" class="first-trip-setup__cover-preset first-trip-setup__cover-preset--dots" data-fts-cover-preset="pattern:dots" title="Dots pattern">
+                  <span class="sr-only">Muted dots pattern</span>
+                </button>
+                <button type="button" class="first-trip-setup__cover-preset first-trip-setup__cover-preset--grid" data-fts-cover-preset="pattern:grid" title="Grid pattern">
+                  <span class="sr-only">Muted grid pattern</span>
+                </button>
+                <button type="button" class="first-trip-setup__cover-preset first-trip-setup__cover-preset--waves" data-fts-cover-preset="pattern:waves" title="Waves pattern">
+                  <span class="sr-only">Muted waves pattern</span>
+                </button>
+                <button type="button" class="first-trip-setup__cover-preset first-trip-setup__cover-preset--noise" data-fts-cover-preset="pattern:noise" title="Noise pattern">
+                  <span class="sr-only">Muted noise pattern</span>
+                </button>
+              </div>
+              <button type="button" class="first-trip-setup__cover-clear link-btn" data-fts-cover-clear>No cover image</button>
+            </div>
+          </fieldset>
+
+          <fieldset class="first-trip-setup__step first-trip-setup__step--hidden" data-fts-step="2" hidden>
+            <legend class="sr-only">Locals</legend>
+            <h2 class="first-trip-setup__heading">Dates &amp; currency</h2>
+            <p class="first-trip-setup__lede muted">We’ll use this for budgets, distances, and how amounts read on the trip page.</p>
+            <div class="first-trip-setup__card">
+              <h3 class="first-trip-setup__card-title">Locals</h3>
+              <input type="hidden" name="currency_symbol" value="{{.Details.Trip.CurrencySymbol}}" data-fts-currency-symbol-post>
+              <label class="first-trip-setup__field full">
+                <span class="first-trip-setup__label first-trip-setup__label--eyebrow">Preferred currency</span>
+                <select name="currency_name" id="fts-currency-name" data-fts-currency-select>
+                  <option value="USD" data-symbol="$" {{if eq .FirstTripSetupCurrencySelect "USD"}}selected{{end}}>USD ($) — US Dollar</option>
+                  <option value="EUR" data-symbol="€" {{if eq .FirstTripSetupCurrencySelect "EUR"}}selected{{end}}>EUR (€) — Euro</option>
+                  <option value="GBP" data-symbol="£" {{if eq .FirstTripSetupCurrencySelect "GBP"}}selected{{end}}>GBP (£) — British Pound</option>
+                  <option value="JPY" data-symbol="¥" {{if eq .FirstTripSetupCurrencySelect "JPY"}}selected{{end}}>JPY (¥) — Japanese Yen</option>
+                  <option value="THB" data-symbol="฿" {{if eq .FirstTripSetupCurrencySelect "THB"}}selected{{end}}>THB (฿) — Thai Baht</option>
+                  <option value="AUD" data-symbol="A$" {{if eq .FirstTripSetupCurrencySelect "AUD"}}selected{{end}}>AUD (A$) — Australian Dollar</option>
+                  <option value="CAD" data-symbol="C$" {{if eq .FirstTripSetupCurrencySelect "CAD"}}selected{{end}}>CAD (C$) — Canadian Dollar</option>
+                  <option value="CHF" data-symbol="Fr" {{if eq .FirstTripSetupCurrencySelect "CHF"}}selected{{end}}>CHF (Fr) — Swiss Franc</option>
+                  <option value="NZD" data-symbol="NZ$" {{if eq .FirstTripSetupCurrencySelect "NZD"}}selected{{end}}>NZD (NZ$) — New Zealand Dollar</option>
+                  <option value="SGD" data-symbol="S$" {{if eq .FirstTripSetupCurrencySelect "SGD"}}selected{{end}}>SGD (S$) — Singapore Dollar</option>
+                  <option value="PHP" data-symbol="₱" {{if eq .FirstTripSetupCurrencySelect "PHP"}}selected{{end}}>PHP (₱) — Philippine Peso</option>
+                  <option value="INR" data-symbol="₹" {{if eq .FirstTripSetupCurrencySelect "INR"}}selected{{end}}>INR (₹) — Indian Rupee</option>
+                  <option value="MXN" data-symbol="MX$" {{if eq .FirstTripSetupCurrencySelect "MXN"}}selected{{end}}>MXN (MX$) — Mexican Peso</option>
+                  <option value="__OTHER__" {{if eq .FirstTripSetupCurrencySelect "__OTHER__"}}selected{{end}}>Other Currency</option>
+                </select>
+              </label>
+              <p class="first-trip-setup__hint muted first-trip-setup__hint--tight">Presets set this trip’s currency code and symbol automatically. Choose Other Currency to type your own.</p>
+              <div class="first-trip-setup__currency-other-block" data-fts-currency-other-wrap {{if ne .FirstTripSetupCurrencySelect "__OTHER__"}}hidden{{end}}>
+                <label class="first-trip-setup__currency-custom-label">
+                  <span class="first-trip-setup__label">Currency name</span>
+                  <input type="text" name="currency_name_custom" data-fts-currency-custom value="{{if eq .FirstTripSetupCurrencySelect "__OTHER__"}}{{.Details.Trip.CurrencyName}}{{end}}" placeholder="e.g. SEK, KRW" maxlength="12" autocomplete="off" inputmode="text">
+                </label>
+                <label class="first-trip-setup__currency-custom-label">
+                  <span class="first-trip-setup__label">Symbol</span>
+                  <input type="text" data-fts-currency-symbol-edit value="{{if eq .FirstTripSetupCurrencySelect "__OTHER__"}}{{.Details.Trip.CurrencySymbol}}{{end}}" maxlength="8" autocomplete="off" placeholder="e.g. kr, ₩">
+                </label>
+              </div>
+              <div class="first-trip-setup__field full">
+                <span class="first-trip-setup__label" id="fts-dist-label">Distance units</span>
+                <div class="first-trip-setup__segmented" role="group" aria-labelledby="fts-dist-label">
+                  <label class="first-trip-setup__seg"><input type="radio" name="distance_unit" value="" {{if eq .Details.Trip.DistanceUnit ""}}checked{{end}}><span>Site default</span></label>
+                  <label class="first-trip-setup__seg"><input type="radio" name="distance_unit" value="km" {{if eq .Details.Trip.DistanceUnit "km"}}checked{{end}}><span>Kilometres</span></label>
+                  <label class="first-trip-setup__seg"><input type="radio" name="distance_unit" value="mi" {{if eq .Details.Trip.DistanceUnit "mi"}}checked{{end}}><span>Miles</span></label>
+                </div>
+              </div>
+              <div class="first-trip-setup__callout">
+                <span class="material-symbols-outlined first-trip-setup__callout-icon" aria-hidden="true">info</span>
+                <div>
+                  <strong>Local logic</strong>
+                  <p class="muted">We’ll respect these choices when showing distances and money on this trip.</p>
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="first-trip-setup__step first-trip-setup__step--hidden" data-fts-step="3" hidden>
+            <legend class="sr-only">Personalization</legend>
+            <h2 class="first-trip-setup__heading">Choose your tools</h2>
+            <p class="first-trip-setup__lede muted">Tell us how you prefer to travel to tailor your workspace.</p>
+            <p class="first-trip-setup__section-label">Solo or group?</p>
+            <div class="first-trip-setup__mode-row">
+              <label class="first-trip-setup__mode-card">
+                <input type="radio" name="trip_travel_mode" value="solo" class="sr-only" {{if eq .FirstTripSetupTravelMode "solo"}}checked{{end}} data-fts-mode="solo">
+                <span class="first-trip-setup__mode-icon first-trip-setup__mode-icon--solo" aria-hidden="true"><span class="material-symbols-outlined">person</span></span>
+                <span class="first-trip-setup__mode-title">Solo Explorer</span>
+                <span class="first-trip-setup__mode-sub muted">Just me and the world</span>
+              </label>
+              <label class="first-trip-setup__mode-card">
+                <input type="radio" name="trip_travel_mode" value="group" class="sr-only" {{if eq .FirstTripSetupTravelMode "group"}}checked{{end}} data-fts-mode="group">
+                <span class="first-trip-setup__mode-icon first-trip-setup__mode-icon--group" aria-hidden="true"><span class="material-symbols-outlined">groups</span></span>
+                <span class="first-trip-setup__mode-title">Group Trip</span>
+                <span class="first-trip-setup__mode-sub muted">Friends, family, or crews</span>
+              </label>
+            </div>
+            <div class="first-trip-setup__sections-head">
+              <h3 class="first-trip-setup__sections-title">Trip sections</h3>
+              <span class="first-trip-setup__pill" data-fts-group-pill {{if eq .FirstTripSetupTravelMode "solo"}}hidden{{end}}>Recommended for groups</span>
+            </div>
+            <div class="first-trip-setup__toggle-grid">
+              {{template "ftsSectionToggle" (dict "id" "fts-itin" "name" "section_itinerary" "title" "Itinerary" "desc" "Daily schedules & maps" "icon" "calendar_month" "on" .Details.Trip.UIShowItinerary)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-flights" "name" "section_flights" "title" "Flights" "desc" "Tickets & airport details" "icon" "flight" "on" .Details.Trip.UIShowFlights)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-hotels" "name" "section_hotels" "title" "Hotels" "desc" "Stays & lodging" "icon" "hotel" "on" .Details.Trip.UIShowStay)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-exp" "name" "section_group_expenses" "title" "Group expenses" "desc" "Track common costs" "icon" "payments" "on" .Details.Trip.UIShowSpends "groupOnly" true)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-tab" "name" "section_the_tab" "title" "The Tab" "desc" "Split bills effortlessly" "icon" "credit_card" "on" .Details.Trip.UIShowTheTab "groupOnly" true)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-docs" "name" "section_documents" "title" "Documents" "desc" "Passports & reservations" "icon" "folder" "on" .Details.Trip.UIShowDocuments)}}
+            </div>
+            <div class="first-trip-setup__card first-trip-setup__card--compact">
+              <h3 class="first-trip-setup__card-title">Formats</h3>
+              <label class="first-trip-setup__field full">
+                <span class="first-trip-setup__label">Time</span>
+                <select name="ui_time_format">
+                  <option value="12h" {{if eq .Details.Trip.UITimeFormat "24h"}}{{else}}selected{{end}}>12-hour</option>
+                  <option value="24h" {{if eq .Details.Trip.UITimeFormat "24h"}}selected{{end}}>24-hour</option>
+                </select>
+              </label>
+              <label class="first-trip-setup__field full">
+                <span class="first-trip-setup__label">Dates</span>
+                <select name="ui_date_format">
+                  <option value="inherit" {{if or (eq .Details.Trip.UIDateFormat "inherit") (eq .Details.Trip.UIDateFormat "")}}selected{{end}}>Use site default</option>
+                  <option value="dmy" {{if eq .Details.Trip.UIDateFormat "dmy"}}selected{{end}}>DD-MM-YYYY</option>
+                  <option value="mdy" {{if eq .Details.Trip.UIDateFormat "mdy"}}selected{{end}}>MM-DD-YYYY</option>
+                </select>
+              </label>
+            </div>
+          </fieldset>
+          <footer class="first-trip-setup__footer">
+            <p class="first-trip-setup__next-hint muted" data-fts-next-hint></p>
+            <div class="first-trip-setup__footer-row">
+              <button type="button" class="first-trip-setup__skip link-btn" data-fts-skip>Skip for now</button>
+              <div class="first-trip-setup__nav-btns">
+                <button type="button" class="btn secondary-btn first-trip-setup__back" data-fts-back hidden>Back</button>
+                <button type="button" class="btn first-trip-setup__continue" data-fts-continue>Continue <span aria-hidden="true">→</span></button>
+                <button type="submit" class="btn first-trip-setup__save" data-fts-save hidden>Ready to explore <span aria-hidden="true">→</span></button>
+              </div>
+            </div>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "ftsSectionToggle"}}
+<div class="first-trip-setup__toggle-cell" {{if .groupOnly}}data-fts-group-only{{end}}>
+  <div class="first-trip-setup__toggle-card">
+    <span class="material-symbols-outlined first-trip-setup__toggle-icon" aria-hidden="true">{{.icon}}</span>
+    <div class="first-trip-setup__toggle-text">
+      <span class="first-trip-setup__toggle-title">{{.title}}</span>
+      <span class="first-trip-setup__toggle-desc muted">{{.desc}}</span>
+    </div>
+    <label class="first-trip-setup__switch">
+      <input type="checkbox" name="{{.name}}" value="1" id="{{.id}}" {{if .on}}checked{{end}}>
+      <span class="first-trip-setup__switch-ui" aria-hidden="true"></span>
+    </label>
+  </div>
+</div>
+{{end}}

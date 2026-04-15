@@ -10,6 +10,32 @@ import (
 
 // googleMapsSearchURL builds a Google Maps search URL: coordinates when valid,
 // otherwise the trimmed hint string.
+func googleMapsDirectionsURL(fromLat, fromLng, toLat, toLng float64, transportMode string) string {
+	has := func(lat, lng float64) bool {
+		return !math.IsNaN(lat) && !math.IsNaN(lng) && (math.Abs(lat) > 1e-7 || math.Abs(lng) > 1e-7)
+	}
+	if !has(fromLat, fromLng) || !has(toLat, toLng) {
+		return ""
+	}
+	tm := strings.TrimSpace(strings.ToLower(transportMode))
+	mode := "driving"
+	switch tm {
+	case "walk", "walking":
+		mode = "walking"
+	case "transit", "train", "bus", "ferry":
+		mode = "transit"
+	case "bicycle", "cycling":
+		mode = "bicycling"
+	case "drive", "driving", "taxi", "car", "":
+		mode = "driving"
+	default:
+		mode = "driving"
+	}
+	o := fmt.Sprintf("%g,%g", fromLat, fromLng)
+	d := fmt.Sprintf("%g,%g", toLat, toLng)
+	return "https://www.google.com/maps/dir/?api=1&origin=" + url.QueryEscape(o) + "&destination=" + url.QueryEscape(d) + "&travelmode=" + url.QueryEscape(mode)
+}
+
 func googleMapsSearchURL(lat, lng float64, hint string) string {
 	hint = strings.TrimSpace(hint)
 	hasCoords := !math.IsNaN(lat) && !math.IsNaN(lng) && (math.Abs(lat) > 1e-7 || math.Abs(lng) > 1e-7)

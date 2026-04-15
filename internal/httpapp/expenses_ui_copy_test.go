@@ -30,6 +30,14 @@ func TestExpensesPageAndFormsCopy(t *testing.T) {
 	}
 	trip := string(tripB)
 
+	unifiedB, err := os.ReadFile(filepath.Join(root, "web", "templates", "trip_unified_expense_form.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unifiedExpenseTpl := string(unifiedB)
+	budgetAndUnified := budget + unifiedExpenseTpl
+	tripAndUnified := trip + unifiedExpenseTpl
+
 	tabB, err := os.ReadFile(filepath.Join(root, "web", "templates", "the_tab.html"))
 	if err != nil {
 		t.Fatal(err)
@@ -65,8 +73,8 @@ func TestExpensesPageAndFormsCopy(t *testing.T) {
 		`<h3 id="budget-mobile-expense-edit-title">Edit Expense</h3>`,
 	}
 	for _, s := range budgetWant {
-		if !strings.Contains(budget, s) {
-			t.Errorf("budget.html missing %q", s)
+		if !strings.Contains(budgetAndUnified, s) {
+			t.Errorf("budget.html + trip_unified_expense_form.html missing %q", s)
 		}
 	}
 	budgetAvoid := []string{
@@ -109,11 +117,17 @@ func TestExpensesPageAndFormsCopy(t *testing.T) {
 		`<option value="" disabled selected>Select a payment method</option>`,
 		`>Save Changes</button>`,
 		`<h3 id="tab-mobile-expense-edit-title">Edit Expense</h3>`,
-		`Creates a shared Tab entry; totals are included in {{$.Details.Trip.SpendsSectionTitle}}.`,
+		`Use <strong>Add expense</strong> above for personal spends and group splits.`,
 		`View {{$.Details.Trip.GroupExpensesSectionTitle}}</a> to add or edit entries.`,
 		`Add a spend without leaving this trip.`,
 	}
 	for _, s := range tripWant {
+		if strings.Contains(s, "placeholder=") || strings.Contains(s, "<option value=\"\"") {
+			if !strings.Contains(tripAndUnified, s) {
+				t.Errorf("trip.html + trip_unified_expense_form.html (expenses) missing %q", s)
+			}
+			continue
+		}
 		if !strings.Contains(trip, s) {
 			t.Errorf("trip.html (expenses) missing %q", s)
 		}

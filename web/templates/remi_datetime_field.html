@@ -6,19 +6,29 @@
 {{- $mdy := index . "mdy" -}}
 {{- $inputClass := index . "input_class" -}}
 {{- $dph := "DD-MM-YYYY" -}}{{if $mdy}}{{$dph = "MM-DD-YYYY"}}{{end}}
-<span class="remi-datetime-field" data-remi-datetime data-mdy="{{if $mdy}}1{{else}}0{{end}}"{{if $min}} data-min="{{$min}}"{{end}}{{if $max}} data-max="{{$max}}"{{end}}>
+{{- $t24 := index . "time24h" -}}
+{{- $tph := "hh:mm AM" -}}{{if $t24}}{{$tph = "HH:mm"}}{{end}}
+<span class="remi-datetime-field" data-remi-datetime data-mdy="{{if $mdy}}1{{else}}0{{end}}" data-time-24h="{{if $t24}}1{{else}}0{{end}}"{{if $min}} data-min="{{$min}}"{{end}}{{if $max}} data-max="{{$max}}"{{end}}>
   <input type="hidden" name="{{$name}}" value="{{$value}}" class="remi-datetime-iso" autocomplete="off">
-  <span class="remi-datetime-date-wrap">
-    <input type="text" class="remi-date-visible remi-datetime-date-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$dph}}" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Date">
-    <button type="button" class="remi-date-calendar-btn" aria-label="Open calendar" tabindex="-1">
+  <span class="remi-datetime-desktop-wrap">
+    <input type="text" class="remi-date-visible remi-datetime-combined-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$dph}}, {{$tph}}" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Date and time">
+    <button type="button" class="remi-date-calendar-btn remi-datetime-desktop-calendar-btn" aria-label="Open calendar" tabindex="-1">
       <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
     </button>
   </span>
-  <span class="remi-datetime-time-wrap">
-    <input type="text" class="remi-datetime-time-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="hh:mm AM" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Time">
-    <button type="button" class="remi-time-clock-btn" aria-label="Open time picker" tabindex="-1">
-      <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
-    </button>
+  <span class="remi-datetime-mobile-parts">
+    <span class="remi-datetime-date-wrap">
+      <input type="text" class="remi-date-visible remi-datetime-date-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$dph}}" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Date">
+      <button type="button" class="remi-date-calendar-btn" aria-label="Open calendar" tabindex="-1">
+        <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
+      </button>
+    </span>
+    <span class="remi-datetime-time-wrap">
+      <input type="text" class="remi-datetime-time-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$tph}}" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Time">
+      <button type="button" class="remi-time-clock-btn" aria-label="Open time picker" tabindex="-1">
+        <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
+      </button>
+    </span>
   </span>
 </span>
 {{end}}

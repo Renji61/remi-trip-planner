@@ -43,6 +43,7 @@ var mainSectionSet = map[string]struct{}{
 // Sidebar widget keys (desktop/tablet right column).
 const (
 	SidebarAddStop      = "add_stop"
+	SidebarAddCommute   = "add_commute"
 	SidebarBudget       = "budget"
 	SidebarQuickSpends  = "quick_spends"
 	SidebarTabTotal     = "tab_total"
@@ -52,6 +53,7 @@ const (
 
 var DefaultSidebarWidgetOrder = []string{
 	SidebarAddStop,
+	SidebarAddCommute,
 	SidebarAddChecklist,
 	SidebarQuickSpends,
 	SidebarTabTotal,
@@ -61,6 +63,7 @@ var DefaultSidebarWidgetOrder = []string{
 
 var sidebarWidgetSet = map[string]struct{}{
 	SidebarAddStop:      {},
+	SidebarAddCommute:   {},
 	SidebarBudget:       {},
 	SidebarQuickSpends:  {},
 	SidebarTabTotal:     {},
@@ -211,7 +214,7 @@ func MainSectionVisible(key string, t Trip) bool {
 
 // SidebarWidgetVisible returns whether a sidebar widget should render.
 func SidebarWidgetVisible(key string, t Trip) bool {
-	if !t.UIShowItinerary && key == SidebarAddStop {
+	if !t.UIShowItinerary && (key == SidebarAddStop || key == SidebarAddCommute) {
 		return false
 	}
 	if !t.UIShowChecklist && key == SidebarAddChecklist {
@@ -235,13 +238,10 @@ func SidebarWidgetVisible(key string, t Trip) bool {
 // TripMobileFabHasItems is true when the trip FAB menu would list at least one action
 // (must match web/templates/trip_mobile_fab_links.html).
 func TripMobileFabHasItems(t Trip) bool {
-	if t.UIShowItinerary && SidebarWidgetVisible(SidebarAddStop, t) {
+	if t.UIShowItinerary && (SidebarWidgetVisible(SidebarAddStop, t) || SidebarWidgetVisible(SidebarAddCommute, t)) {
 		return true
 	}
-	if t.UIShowSpends && SidebarWidgetVisible(SidebarQuickSpends, t) {
-		return true
-	}
-	if t.SectionEnabledTheTab() && SidebarWidgetVisible(SidebarAddTab, t) {
+	if TripExpenseQuickAddVisible(t) {
 		return true
 	}
 	if t.UIShowStay {
@@ -262,10 +262,22 @@ func TripMobileFabHasItems(t Trip) bool {
 	return false
 }
 
+// TripExpenseQuickAddVisible is true when the unified Add expense entry (sidebar / mobile / calendar)
+// should be offered on trip details (quick_spends widget and/or add_tab when The Tab is enabled).
+func TripExpenseQuickAddVisible(t Trip) bool {
+	if t.UIShowSpends && SidebarWidgetVisible(SidebarQuickSpends, t) {
+		return true
+	}
+	if t.SectionEnabledTheTab() && SidebarWidgetVisible(SidebarAddTab, t) {
+		return true
+	}
+	return false
+}
+
 // TripDesktopCalendarFlyoutHasActions is true when the itinerary calendar “quick add” flyout
 // would show at least one button (trip.html desktop-calendar-flyout).
 func TripDesktopCalendarFlyoutHasActions(t Trip) bool {
-	if t.UIShowItinerary && SidebarWidgetVisible(SidebarAddStop, t) {
+	if t.UIShowItinerary && (SidebarWidgetVisible(SidebarAddStop, t) || SidebarWidgetVisible(SidebarAddCommute, t)) {
 		return true
 	}
 	if t.UIShowStay {
@@ -309,6 +321,8 @@ func SidebarWidgetVisibilityIcon(key string) string {
 	switch key {
 	case SidebarAddStop:
 		return "pin_drop"
+	case SidebarAddCommute:
+		return "directions"
 	case SidebarBudget:
 		return "account_balance_wallet"
 	case SidebarQuickSpends:
@@ -353,6 +367,8 @@ func SidebarWidgetLabel(key string) string {
 	switch key {
 	case SidebarAddStop:
 		return "Add Stop"
+	case SidebarAddCommute:
+		return "Add commute leg"
 	case SidebarBudget:
 		return "Budget Limit"
 	case SidebarQuickSpends:

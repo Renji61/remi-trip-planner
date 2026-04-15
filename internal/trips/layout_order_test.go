@@ -110,6 +110,9 @@ func TestSidebarWidgetVisible(t *testing.T) {
 	if SidebarWidgetVisible(SidebarAddStop, trNoIt) {
 		t.Fatal("add_stop hidden when itinerary off")
 	}
+	if SidebarWidgetVisible(SidebarAddCommute, trNoIt) {
+		t.Fatal("add_commute hidden when itinerary off")
+	}
 	trNoCk := Trip{UIShowSpends: true, UIShowItinerary: true, UIShowChecklist: false}
 	if SidebarWidgetVisible(SidebarAddChecklist, trNoCk) {
 		t.Fatal("sidebar checklist hidden when checklist section off")
@@ -149,9 +152,13 @@ func TestTripMobileFabHasItems(t *testing.T) {
 	if !TripMobileFabHasItems(docsOnly) {
 		t.Fatal("trip documents alone should show FAB")
 	}
-	itinHiddenStop := Trip{UIShowItinerary: true, UISidebarWidgetHidden: "add_stop"}
+	itinHiddenStop := Trip{UIShowItinerary: true, UISidebarWidgetHidden: "add_stop,add_commute"}
 	if TripMobileFabHasItems(itinHiddenStop) {
-		t.Fatal("add_stop widget hidden: no stop link, and nothing else on")
+		t.Fatal("add_stop and add_commute hidden: no itinerary FAB entries")
+	}
+	itinStopHiddenCommuteOn := Trip{UIShowItinerary: true, UISidebarWidgetHidden: "add_stop"}
+	if !TripMobileFabHasItems(itinStopHiddenCommuteOn) {
+		t.Fatal("add_commute still visible should keep FAB")
 	}
 	checklistWidgetHidden := Trip{UIShowChecklist: true, UISidebarWidgetHidden: "checklist"}
 	if TripMobileFabHasItems(checklistWidgetHidden) {
@@ -178,6 +185,10 @@ func TestTripDesktopCalendarFlyoutHasActions(t *testing.T) {
 	checklistOnly := Trip{UIShowChecklist: true, UIShowItinerary: false}
 	if TripDesktopCalendarFlyoutHasActions(checklistOnly) {
 		t.Fatal("checklist-only visibility should not enable calendar flyout")
+	}
+	commuteOnly := Trip{UIShowItinerary: true, UISidebarWidgetHidden: "add_stop"}
+	if !TripDesktopCalendarFlyoutHasActions(commuteOnly) {
+		t.Fatal("add_commute visible without add_stop should still enable calendar flyout")
 	}
 }
 
@@ -208,6 +219,9 @@ func TestSidebarWidgetLabel_renames(t *testing.T) {
 	}
 	if got := SidebarWidgetLabel(SidebarAddChecklist); got != "Add Note / Checklist" {
 		t.Fatalf("checklist: %q", got)
+	}
+	if got := SidebarWidgetLabel(SidebarAddCommute); got != "Add commute leg" {
+		t.Fatalf("add_commute: %q", got)
 	}
 }
 

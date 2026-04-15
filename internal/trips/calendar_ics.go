@@ -6,11 +6,26 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	ics "github.com/arran4/golang-ical"
 )
+
+// iCal DATE-TIME without trailing Z (used with TZID parameter).
+const icsDateTimeLocalLayout = "20060102T150405"
+
+// icsFeedTimezoneIANA returns an IANA zone name for labeling calendar events.
+// If empty, BuildTripICSBytes emits UTC (Z) timestamps (legacy behavior).
+// Prefer REMI_ICS_TIMEZONE; else TZ. The name should match the zone used for
+// time.Local where the server runs, or wall times will be mislabeled in Google Calendar.
+func icsFeedTimezoneIANA() string {
+	if v := strings.TrimSpace(os.Getenv("REMI_ICS_TIMEZONE")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("TZ"))
+}
 
 // CalendarFeedTokenHash returns SHA-256 hex of the plaintext feed token (matches sqlite hashToken).
 func CalendarFeedTokenHash(plain string) string {
@@ -79,11 +94,29 @@ func (s *Service) BuildTripICSBytes(ctx context.Context, tripID string) ([]byte,
 	cal.SetVersion("2.0")
 	cal.SetName(trip.Name + " — REMI")
 
+	tzIANA := icsFeedTimezoneIANA()
+	if tzIANA != "" {
+		if _, err := time.LoadLocation(tzIANA); err != nil {
+			tzIANA = ""
+		}
+	}
+	if tzIANA != "" {
+		cal.SetXWRTimezone(tzIANA)
+	}
+
 	addEvent := func(uid, summary, loc string, start, end time.Time) {
 		ev := ics.NewEvent(uid)
 		ev.SetDtStampTime(time.Now().UTC())
-		ev.SetStartAt(start)
-		ev.SetEndAt(end)
+		if tzIANA != "" {
+			// Wall clock in time.Local (how REMI interprets stored times); tag with IANA for subscribers.
+			s := start.In(time.Local)
+			e := end.In(time.Local)
+			ev.AddProperty(ics.ComponentPropertyDtStart, s.Format(icsDateTimeLocalLayout), ics.WithTZID(tzIANA))
+			ev.AddProperty(ics.ComponentPropertyDtEnd, e.Format(icsDateTimeLocalLayout), ics.WithTZID(tzIANA))
+		} else {
+			ev.SetStartAt(start)
+			ev.SetEndAt(end)
+		}
 		ev.SetSummary(summary)
 		if strings.TrimSpace(loc) != "" {
 			ev.SetLocation(loc)

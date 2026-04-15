@@ -4,6 +4,43 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+/** Login: avoid first-submit with an empty password when the browser/password manager has not filled the field yet (Enter in username, or very fast submit). */
+(function remiLoginAutofillGuard() {
+  const run = () => {
+    document.querySelectorAll('form[action="/login"]').forEach((form) => {
+      const pw = form.querySelector('input[name="password"]');
+      const ident = form.querySelector('input[name="identifier"]');
+      if (!pw || pw.dataset.remiLoginGuard === "1") return;
+      pw.dataset.remiLoginGuard = "1";
+      const unlock = () => {
+        pw.removeAttribute("readonly");
+      };
+      if (!pw.value) {
+        pw.setAttribute("readonly", "");
+      }
+      ident?.addEventListener("focus", unlock);
+      ident?.addEventListener("input", unlock);
+      pw.addEventListener("focus", unlock);
+      pw.addEventListener("pointerdown", unlock);
+      form.addEventListener(
+        "submit",
+        (e) => {
+          if (pw.value !== "") return;
+          e.preventDefault();
+          unlock();
+          pw.focus();
+        },
+        true
+      );
+    });
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", run);
+  } else {
+    run();
+  }
+})();
+
 (function syncVisualViewportHeightVar() {
   const setAppVVh = () => {
     const vv = window.visualViewport;
@@ -312,8 +349,22 @@ if ("serviceWorker" in navigator) {
   }
 
   function normalizeTimeHM(raw) {
-    const src = String(raw || "").trim().replace(/\s+/g, " ");
+    const src = String(raw || "")
+      .trim()
+      .replace(/\b(a\.?m\.?)\b/gi, "am")
+      .replace(/\b(p\.?m\.?)\b/gi, "pm")
+      .replace(/\s+/g, " ");
     if (!src) return "";
+    const compact12 = src.match(/^(\d{1,2})(\d{2})(am|pm)$/i);
+    if (compact12) {
+      let h = parseInt(compact12[1], 10);
+      const mm = parseInt(compact12[2], 10);
+      const ap = compact12[3].toLowerCase();
+      if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 1 || h > 12 || mm < 0 || mm > 59) return "";
+      if (ap === "am") h = h === 12 ? 0 : h;
+      else h = h === 12 ? 12 : h + 12;
+      return `${pad2(h)}:${pad2(mm)}`;
+    }
     const m12 = src.match(/^(\d{1,2}):(\d{1,2})\s*(am|pm)$/i);
     if (m12) {
       let h = parseInt(m12[1], 10);
@@ -333,10 +384,24 @@ if ("serviceWorker" in navigator) {
       else h = h === 12 ? 12 : h + 12;
       return `${pad2(h)}:00`;
     }
-    const p = src.split(":");
-    if (p.length < 2) return "";
-    const h = parseInt(p[0], 10);
-    const mm = parseInt(p[1], 10);
+    const compact24 = src.match(/^(\d{3,4})$/);
+    if (compact24) {
+      const token = compact24[1];
+      const hh = token.length === 3 ? parseInt(token.slice(0, 1), 10) : parseInt(token.slice(0, 2), 10);
+      const mm = parseInt(token.slice(-2), 10);
+      if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return "";
+      return `${pad2(hh)}:${pad2(mm)}`;
+    }
+    const h24only = src.match(/^(\d{1,2})$/);
+    if (h24only) {
+      const hh = parseInt(h24only[1], 10);
+      if (!Number.isFinite(hh) || hh < 0 || hh > 23) return "";
+      return `${pad2(hh)}:00`;
+    }
+    const m24 = src.match(/^(\d{1,2}):(\d{1,2})$/);
+    if (!m24) return "";
+    const h = parseInt(m24[1], 10);
+    const mm = parseInt(m24[2], 10);
     if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 0 || h > 23 || mm < 0 || mm > 59) return "";
     return `${pad2(h)}:${pad2(mm)}`;
   }
@@ -405,6 +470,308 @@ if ("serviceWorker" in navigator) {
     return `${pad2(h)}:${m} ${isPm ? "PM" : "AM"}`;
   }
 
+  function timeHMToDisplay24(raw) {
+    const t = normalizeTimeHM(raw);
+    return t || "";
+  }
+
+  function dateTimeLocalToDisplay(raw, mdy, uiTime24h) {
+    const sp = splitIsoLocalDateTime(raw);
+    if (!sp.dateIso || !sp.time) return "";
+    const timeDisp = uiTime24h ? timeHMToDisplay24(sp.time) : timeHMToDisplay(sp.time);
+    return `${isoToDisplay(sp.dateIso, mdy)}, ${timeDisp}`;
+  }
+
+  function digitsOnly(s) {
+    return String(s || "").replace(/\D/g, "");
+  }
+
+  /**
+   * Hyphens between MM-DD-YYYY groups; when isDelete is true, omit a trailing separator
+   * that has no digits in the following group yet (so backspace can remove the last digit).
+   */
+  function formatDateDigitsWithSeparators(digs, isDelete) {
+    const d = digs.slice(0, 8);
+    if (!d) return "";
+    if (d.length <= 2) {
+      let out = d;
+      if (d.length === 2 && !isDelete) out += "-";
+      return out;
+    }
+    let out = `${d.slice(0, 2)}-`;
+    if (d.length <= 4) {
+      out += d.slice(2, 4);
+      if (d.length === 4 && !isDelete) out += "-";
+      return out;
+    }
+    return `${d.slice(0, 2)}-${d.slice(2, 4)}-${d.slice(4)}`;
+  }
+
+  function formatTimeDigitsWithColon(digs, isDelete) {
+    const d = digs.slice(0, 4);
+    if (!d) return "";
+    if (d.length <= 2) {
+      let out = d;
+      if (d.length === 2 && !isDelete) out += ":";
+      return out;
+    }
+    if (d.length === 3) return `${d[0]}:${d.slice(1)}`;
+    return `${d.slice(0, 2)}:${d.slice(2, 4)}`;
+  }
+
+  /**
+   * Preserves a user-typed ":" while still auto-inserting ":" for digit-only times (e.g. 1400 → 14:00).
+   * Without this, "14:" collapses to "14" and the user cannot type minutes.
+   */
+  function formatTimePartTypingFromRest(rest, isDelete) {
+    const r = String(rest || "");
+    if (!r.trim()) return "";
+    const ci = r.indexOf(":");
+    if (ci >= 0) {
+      const h = digitsOnly(r.slice(0, ci)).slice(0, 2);
+      const m = digitsOnly(r.slice(ci + 1)).slice(0, 2);
+      return `${h}:${m}`;
+    }
+    return formatTimeDigitsWithColon(digitsOnly(r).slice(0, 4), isDelete);
+  }
+
+  /** After typing a digit, move caret past an auto-inserted - or : so the next key goes in the next group. */
+  function skipCaretPastSeparatorRun(segment, caretInSegment) {
+    let c = Math.min(Math.max(0, caretInSegment | 0), segment.length);
+    while (c < segment.length && /[-/:]/.test(segment[c])) c++;
+    return c;
+  }
+
+  /** Map Nth digit position (1-based count) to cursor index after that digit in formatted date. */
+  function cursorAfterNthDigitInDate(formatted, n) {
+    if (n <= 0) return 0;
+    let seen = 0;
+    for (let i = 0; i < formatted.length; i++) {
+      if (/\d/.test(formatted[i])) {
+        seen++;
+        if (seen === n) return i + 1;
+      }
+    }
+    return formatted.length;
+  }
+
+  function caretInCombinedFromDigitIndex(dateFmt, timeFmt, digitIndex) {
+    const sep = ", ";
+    if (digitIndex <= 8) {
+      const c0 = cursorAfterNthDigitInDate(dateFmt, digitIndex);
+      return skipCaretPastSeparatorRun(dateFmt, c0);
+    }
+    const td = digitIndex - 8;
+    const inner0 = cursorAfterNthDigitInDate(timeFmt, td);
+    const inner = skipCaretPastSeparatorRun(timeFmt, inner0);
+    return dateFmt.length + sep.length + inner;
+  }
+
+  /** Date-only typing mask used by split mobile date part. */
+  function remiFormatDatePartTypingMask(raw, oldCaret, isDelete) {
+    const src = String(raw || "");
+    const pos = Math.min(Math.max(0, oldCaret | 0), src.length);
+    const digsBefore = digitsOnly(src.slice(0, pos)).length;
+    const dateFmt = formatDateDigitsWithSeparators(digitsOnly(src), isDelete);
+    let caret = cursorAfterNthDigitInDate(dateFmt, digsBefore);
+    caret = skipCaretPastSeparatorRun(dateFmt, caret);
+    return { text: dateFmt, caret: Math.min(Math.max(0, caret), dateFmt.length) };
+  }
+
+  /**
+   * Inserts "-" in the date segment and ":" in the time segment while typing the combined field.
+   * isDelete: from InputEvent.inputType so trailing separators are not re-added on backspace.
+   * Returns { text, caret }.
+   */
+  function remiFormatCombinedDateTimeTypingMask(raw, mdy, oldCaret, isDelete) {
+    const src = String(raw || "");
+    const pos = Math.min(Math.max(0, oldCaret | 0), src.length);
+    const digsAll = digitsOnly(src);
+    const cidx = src.indexOf(",");
+
+    if (cidx < 0 && digsAll.length === 8 && !isDelete) {
+      const dateFmt = formatDateDigitsWithSeparators(digsAll, false);
+      const out = `${dateFmt}, `;
+      return { text: out, caret: out.length };
+    }
+
+    if (cidx < 0 && digsAll.length > 8) {
+      const dateD = digsAll.slice(0, 8);
+      const timeD = digsAll.slice(8, 12);
+      const dateFmt = formatDateDigitsWithSeparators(dateD, isDelete);
+      const timeFmt = formatTimeDigitsWithColon(timeD, isDelete);
+      const out = `${dateFmt}, ${timeFmt}`;
+      const digitBefore = digitsOnly(src.slice(0, pos)).length;
+      const caret = Math.min(caretInCombinedFromDigitIndex(dateFmt, timeFmt, digitBefore), out.length);
+      return { text: out, caret };
+    }
+
+    if (cidx < 0) {
+      const head = src;
+      const digsBefore = digitsOnly(head.slice(0, pos)).length;
+      const dateFmt = formatDateDigitsWithSeparators(digitsOnly(head), isDelete);
+      let caret = cursorAfterNthDigitInDate(dateFmt, digsBefore);
+      caret = skipCaretPastSeparatorRun(dateFmt, caret);
+      return { text: dateFmt, caret };
+    }
+
+    const dateRaw = src.slice(0, cidx);
+    const afterComma = src.slice(cidx + 1);
+    const spMatch = afterComma.match(/^\s*/);
+    const lead = spMatch ? spMatch[0] : "";
+    const rest0 = afterComma.slice(lead.length);
+    const apmM = rest0.match(/\s*([ap]m)\s*$/i);
+    let rest = rest0;
+    let apm = "";
+    if (apmM) {
+      apm = ` ${apmM[1].toUpperCase()}`;
+      rest = rest0.slice(0, apmM.index).trimEnd();
+    }
+    const dateFmt = formatDateDigitsWithSeparators(digitsOnly(dateRaw), isDelete);
+    const timeFmt = formatTimePartTypingFromRest(rest, isDelete);
+    if (isDelete && !timeFmt && !apm) {
+      const caret0 = Math.min(Math.max(0, pos), dateFmt.length);
+      return { text: dateFmt, caret: caret0 };
+    }
+    const out = `${dateFmt}, ${timeFmt}${apm}`;
+    const timeStart = dateFmt.length + 2;
+    let caret = out.length;
+    if (pos <= cidx) {
+      const digsBefore = digitsOnly(dateRaw.slice(0, pos)).length;
+      let c = cursorAfterNthDigitInDate(dateFmt, digsBefore);
+      caret = skipCaretPastSeparatorRun(dateFmt, c);
+    } else {
+      const timeSegStart = cidx + 1 + lead.length;
+      const coreEndInSrc = timeSegStart + rest.length;
+      if (pos >= coreEndInSrc) {
+        caret = Math.min(timeStart + timeFmt.length + Math.max(0, pos - coreEndInSrc), out.length);
+      } else {
+        const rel = Math.max(0, pos - timeSegStart);
+        const digsInTimeBefore = digitsOnly(rest.slice(0, Math.min(rel, rest.length))).length;
+        let inner = cursorAfterNthDigitInDate(timeFmt, digsInTimeBefore);
+        inner = skipCaretPastSeparatorRun(timeFmt, inner);
+        caret = timeStart + inner;
+      }
+    }
+    caret = Math.min(Math.max(0, caret), out.length);
+    return { text: out, caret };
+  }
+
+  function splitCombinedDisplayDateTimeParts(raw, mdy) {
+    const src = String(raw || "")
+      .trim()
+      .replace("T", " ")
+      .replace(/\s+/g, " ");
+    const commaIdx = src.indexOf(",");
+    if (commaIdx >= 0) {
+      return { datePart: src.slice(0, commaIdx).trim(), timePart: src.slice(commaIdx + 1).trim() };
+    }
+    const digs = digitsOnly(src);
+    if (digs.length > 8) {
+      const dateStr = formatDateDigitsWithSeparators(digs.slice(0, 8), false);
+      const timeStr = formatTimeDigitsWithColon(digs.slice(8, 12));
+      return { datePart: dateStr, timePart: timeStr };
+    }
+    const m = src.match(/^(.+?)\s+(\d{1,2}([:.]\d{0,2})?.*)$/i);
+    if (m) return { datePart: m[1].trim(), timePart: m[2].trim() };
+    return { datePart: src, timePart: "" };
+  }
+
+  /** Avoid snapping "1" or "12" to HH:00 while the user is still typing the time portion. */
+  function isTimePartIncompleteForCombinedInput(timePartRaw) {
+    const t = String(timePartRaw || "").trim();
+    if (!t) return true;
+    if (/am|pm/i.test(t)) return !normalizeTimeHM(t);
+    if (/^\d{1,2}$/.test(t.replace(/\s/g, ""))) return true;
+    if (/^\d{3,4}$/.test(t.replace(/\s/g, ""))) return false;
+    if (!t.includes(":")) return true;
+    const colonIdx = t.indexOf(":");
+    const after = t.slice(colonIdx + 1).replace(/\s*(am|pm).*$/i, "").trim();
+    const mDigits = after.replace(/\D/g, "");
+    if (mDigits.length === 0) return true;
+    if (mDigits.length === 1) return true;
+    return false;
+  }
+
+  /** In 12h mode, once a complete time is present without AM/PM, canon to explicit AM/PM display. */
+  function combinedTimeNeeds12hCanonVisual(timePartRaw) {
+    const tp = String(timePartRaw || "").trim();
+    if (!tp || /am|pm/i.test(tp)) return false;
+    if (isTimePartIncompleteForCombinedInput(tp)) return false;
+    const hm = normalizeTimeHM(tp);
+    return Boolean(hm);
+  }
+
+  function setHMPeriod(hmRaw, targetPeriod) {
+    const hm = normalizeTimeHM(hmRaw);
+    const period = String(targetPeriod || "").toLowerCase() === "pm" ? "pm" : "am";
+    if (!hm) return "";
+    let hh = parseInt(hm.slice(0, 2), 10);
+    if (!Number.isFinite(hh)) return "";
+    if (period === "am") {
+      if (hh >= 12) hh -= 12;
+    } else if (hh < 12) {
+      hh += 12;
+    }
+    return `${pad2(hh)}:${hm.slice(3, 5)}`;
+  }
+
+  /**
+   * Product rule: when users type explicit 24h time in 12h UI (e.g. 14:34 / 1434),
+   * normalize minutes to :00 before converting to AM/PM display.
+   */
+  function maybeForceTopOfHourForTyped24h(timePartRaw, hmRaw) {
+    const hm = normalizeTimeHM(hmRaw);
+    if (!hm) return "";
+    const tp = String(timePartRaw || "").trim();
+    if (!tp || /am|pm/i.test(tp)) return hm;
+    const compact = tp.replace(/\s/g, "");
+    if (/^\d{3,4}$/.test(compact)) return `${hm.slice(0, 2)}:00`;
+    const m = compact.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return hm;
+    const hh = parseInt(m[1], 10);
+    if (!Number.isFinite(hh)) return hm;
+    if (hh === 0 || hh >= 13) return `${pad2(hh)}:00`;
+    return hm;
+  }
+
+  /** Standalone time visible field (mobile): insert ":" between hour and minute digits. */
+  function remiFormatTimePartTypingMask(raw, oldCaret, isDelete) {
+    const src = String(raw || "");
+    const pos = Math.min(Math.max(0, oldCaret | 0), src.length);
+    const apmM = src.match(/\s*([ap]m)\s*$/i);
+    const apmStart = apmM ? apmM.index : src.length;
+    let rest = (apmM ? src.slice(0, apmM.index) : src).trimEnd();
+    const apm = apmM ? ` ${apmM[1].toUpperCase()}` : "";
+    const timeFmt = formatTimePartTypingFromRest(rest, isDelete);
+    const out = `${timeFmt}${apm}`;
+    let caret = out.length;
+    if (pos >= apmStart) {
+      caret = Math.min(timeFmt.length + Math.max(0, pos - apmStart), out.length);
+    } else {
+      const digsBefore = digitsOnly(rest.slice(0, Math.min(pos, rest.length))).length;
+      let inner = cursorAfterNthDigitInDate(timeFmt, digsBefore);
+      inner = skipCaretPastSeparatorRun(timeFmt, inner);
+      caret = inner;
+    }
+    return { text: out, caret: Math.min(Math.max(0, caret), out.length) };
+  }
+
+  /** requireCompleteTime: when true (live typing), do not snap bare hours like "1" to 01:00. */
+  function parseCombinedDateTimeDisplay(raw, mdy, requireCompleteTime) {
+    const src = String(raw || "")
+      .trim()
+      .replace("T", " ")
+      .replace(/\s+/g, " ");
+    if (!src) return "";
+    const { datePart, timePart } = splitCombinedDisplayDateTimeParts(src, mdy);
+    if (requireCompleteTime && isTimePartIncompleteForCombinedInput(timePart)) return "";
+    const dateIso = parseDisplayToIso(datePart, mdy);
+    const hm = normalizeTimeHM(timePart);
+    if (!dateIso || !hm) return "";
+    return `${dateIso}T${hm}`;
+  }
+
   function splitIsoLocalDateTime(dt) {
     const m = String(dt || "").trim().match(ISO_DT_RE);
     if (!m) return { dateIso: "", time: "" };
@@ -436,6 +803,121 @@ if ("serviceWorker" in navigator) {
     vis.setCustomValidity("");
   }
 
+  function remiUpdateUnifiedSplitJSON(form) {
+    if (!(form instanceof HTMLFormElement)) return;
+    const splitJson = form.querySelector(".remi-unified-expense-split-json");
+    const fromTab = form.querySelector(".remi-unified-expense-from-tab");
+    if (!(splitJson instanceof HTMLInputElement) || !fromTab || fromTab.disabled) return;
+    const keys = Array.from(form.querySelectorAll(".remi-unified-expense-participant-cb:checked"))
+      .map((el) => (el instanceof HTMLInputElement ? (el.getAttribute("data-participant-key") || "").trim() : ""))
+      .filter(Boolean);
+    splitJson.value = keys.length ? JSON.stringify({ participants: keys }) : "";
+  }
+
+  function remiSyncUnifiedExpenseGroupMode(form, on) {
+    if (!(form instanceof HTMLFormElement)) return;
+    if (form.dataset.unifiedExpenseCanSplit !== "1") return;
+    const fromTab = form.querySelector(".remi-unified-expense-from-tab");
+    const splitMode = form.querySelector(".remi-unified-expense-split-mode");
+    const splitJson = form.querySelector(".remi-unified-expense-split-json");
+    const fieldset = form.querySelector(".remi-unified-expense-split-fieldset");
+    if (!(fromTab instanceof HTMLInputElement) || !(splitMode instanceof HTMLInputElement) || !(splitJson instanceof HTMLInputElement)) {
+      return;
+    }
+    const personalLabel = form.querySelector(".remi-unified-expense-submit-personal");
+    const groupLabel = form.querySelector(".remi-unified-expense-submit-group");
+    if (on) {
+      fromTab.removeAttribute("disabled");
+      splitMode.removeAttribute("disabled");
+      splitJson.removeAttribute("disabled");
+      if (fieldset instanceof HTMLFieldSetElement) {
+        fieldset.classList.remove("hidden");
+        fieldset.removeAttribute("disabled");
+      }
+    } else {
+      fromTab.setAttribute("disabled", "");
+      splitMode.setAttribute("disabled", "");
+      splitJson.setAttribute("disabled", "");
+      if (fieldset instanceof HTMLFieldSetElement) {
+        fieldset.classList.add("hidden");
+        fieldset.setAttribute("disabled", "");
+      }
+    }
+    remiUpdateUnifiedSplitJSON(form);
+    if (personalLabel instanceof HTMLElement) personalLabel.classList.toggle("hidden", on);
+    if (groupLabel instanceof HTMLElement) groupLabel.classList.toggle("hidden", !on);
+  }
+
+  function remiWireUnifiedExpenseForm(form) {
+    if (!(form instanceof HTMLFormElement) || !form.matches("[data-remi-unified-expense-add-form]")) return;
+    if (form.dataset.remiUnifiedExpenseWired === "1") return;
+    form.dataset.remiUnifiedExpenseWired = "1";
+    const splitCb = form.querySelector(".remi-unified-expense-split-checkbox");
+    const selectAllBtn = form.querySelector(".remi-unified-expense-select-all");
+    const cancelBtn = form.querySelector(".remi-unified-expense-cancel");
+    if (splitCb instanceof HTMLInputElement) {
+      splitCb.addEventListener("change", () => {
+        remiSyncUnifiedExpenseGroupMode(form, splitCb.checked);
+      });
+    }
+    form.querySelectorAll(".remi-unified-expense-participant-cb").forEach((el) => {
+      el.addEventListener("change", () => remiUpdateUnifiedSplitJSON(form));
+    });
+    if (selectAllBtn instanceof HTMLElement) {
+      selectAllBtn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        const cbs = form.querySelectorAll(".remi-unified-expense-participant-cb");
+        const anyUnchecked = Array.from(cbs).some((c) => c instanceof HTMLInputElement && !c.checked);
+        cbs.forEach((c) => {
+          if (c instanceof HTMLInputElement) c.checked = anyUnchecked;
+        });
+        remiUpdateUnifiedSplitJSON(form);
+      });
+    }
+    form.addEventListener(
+      "submit",
+      (ev) => {
+        const fromTab = form.querySelector(".remi-unified-expense-from-tab");
+        if (fromTab instanceof HTMLInputElement && !fromTab.disabled) {
+          remiUpdateUnifiedSplitJSON(form);
+          const splitJson = form.querySelector(".remi-unified-expense-split-json");
+          const raw = splitJson instanceof HTMLInputElement ? splitJson.value.trim() : "";
+          if (!raw) {
+            ev.preventDefault();
+            (window.remiShowToast || alert)("Choose at least one person to split with.");
+            return;
+          }
+          try {
+            const o = JSON.parse(raw);
+            if (!o.participants || !o.participants.length) {
+              ev.preventDefault();
+              (window.remiShowToast || alert)("Choose at least one person to split with.");
+            }
+          } catch {
+            ev.preventDefault();
+            (window.remiShowToast || alert)("Split selection is invalid. Try again.");
+          }
+        }
+      },
+      true
+    );
+    if (cancelBtn instanceof HTMLElement) {
+      cancelBtn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        remiResetExpenseAddForm(form);
+        const fly = form.closest("[data-desktop-expense-flyout]");
+        if (fly instanceof HTMLElement) {
+          fly.classList.add("hidden");
+          fly.setAttribute("aria-hidden", "true");
+          return;
+        }
+        const sheet = form.closest(".mobile-sheet");
+        const closer = sheet?.querySelector("[data-mobile-sheet-close]");
+        if (closer instanceof HTMLElement) closer.click();
+      });
+    }
+  }
+
   function remiResetExpenseAddForm(form) {
     if (!(form instanceof HTMLFormElement)) return;
     const titleInp = form.querySelector('input[name="title"]');
@@ -444,6 +926,8 @@ if ("serviceWorker" in navigator) {
     if (notesInp instanceof HTMLInputElement) notesInp.value = "";
     const amtInp = form.querySelector('input[name="amount"]');
     if (amtInp instanceof HTMLInputElement) amtInp.value = "";
+    const amtHero = form.querySelector(".remi-unified-expense-amount-input");
+    if (amtHero instanceof HTMLInputElement) amtHero.value = "";
     form.querySelectorAll('select[name="category"], select[name="payment_method"]').forEach((el) => {
       if (el instanceof HTMLSelectElement) el.selectedIndex = 0;
     });
@@ -451,10 +935,27 @@ if ("serviceWorker" in navigator) {
     if (def) remiSetFormDateIso(form, def);
     const tabFile = form.querySelector('input[type="file"][name="tab_attachment"]');
     if (tabFile instanceof HTMLInputElement) tabFile.value = "";
+    if (form.matches("[data-remi-unified-expense-add-form]")) {
+      const splitCb = form.querySelector(".remi-unified-expense-split-checkbox");
+      if (splitCb instanceof HTMLInputElement && !splitCb.disabled) {
+        splitCb.checked = false;
+        window.remiSyncUnifiedExpenseGroupMode?.(form, false);
+      }
+      form.querySelectorAll(".remi-unified-expense-participant-cb").forEach((el) => {
+        if (el instanceof HTMLInputElement) el.checked = true;
+      });
+      window.remiUpdateUnifiedSplitJSON?.(form);
+    }
+    if (form.closest(".mobile-sheet")) {
+      window.remiNotifyMobileSheetFormSaved?.(form);
+    }
   }
 
   window.remiSetFormDateIso = remiSetFormDateIso;
   window.remiResetExpenseAddForm = remiResetExpenseAddForm;
+  window.remiWireUnifiedExpenseForm = remiWireUnifiedExpenseForm;
+  window.remiSyncUnifiedExpenseGroupMode = remiSyncUnifiedExpenseGroupMode;
+  window.remiUpdateUnifiedSplitJSON = remiUpdateUnifiedSplitJSON;
 
   function clampDateTimeLocal(isoDt, min, max) {
     if (!isoDt) return isoDt;
@@ -462,6 +963,14 @@ if ("serviceWorker" in navigator) {
     if (min && v < min) v = min;
     if (max && v > max) v = max;
     return v;
+  }
+
+  function isDateTimeWithinBounds(isoDt, min, max) {
+    const v = String(isoDt || "").trim();
+    if (!v) return false;
+    if (min && v < min) return false;
+    if (max && v > max) return false;
+    return true;
   }
 
   function parseISODate(iso) {
@@ -1022,6 +1531,71 @@ if ("serviceWorker" in navigator) {
     const clearBtn = wrap.querySelector("[data-remi-date-clear]");
     if (!(hidden instanceof HTMLInputElement) || !(vis instanceof HTMLInputElement)) return;
     if (!(calBtn instanceof HTMLButtonElement)) return;
+    if (!isMobileLayout()) {
+      const requiredNative = vis.required;
+      vis.type = "date";
+      vis.readOnly = false;
+      vis.removeAttribute("placeholder");
+      if (min) vis.min = min;
+      if (max) vis.max = max;
+      const syncNative = () => {
+        const v = clampIso((hidden.value || "").trim(), min, max);
+        hidden.value = v;
+        vis.value = v || "";
+        vis.setCustomValidity("");
+        if (clearBtn instanceof HTMLButtonElement) {
+          const has = Boolean((hidden.value || "").trim());
+          clearBtn.hidden = !clearable || !has;
+          clearBtn.setAttribute("aria-hidden", has ? "false" : "true");
+        }
+      };
+      const validateNative = () => {
+        vis.setCustomValidity("");
+        if (requiredNative && !(hidden.value || "").trim()) {
+          vis.setCustomValidity("Select a date");
+          return false;
+        }
+        return true;
+      };
+      syncNative();
+      hidden.addEventListener("change", () => syncNative());
+      const pushNative = () => {
+        const raw = (vis.value || "").trim();
+        hidden.value = raw ? clampIso(raw, min, max) : "";
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+        syncNative();
+      };
+      vis.addEventListener("change", pushNative);
+      vis.addEventListener("input", pushNative);
+      calBtn.hidden = true;
+      calBtn.setAttribute("aria-hidden", "true");
+      if (clearBtn instanceof HTMLButtonElement && clearable) {
+        clearBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          hidden.value = "";
+          syncNative();
+          hidden.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+      }
+      const formNative = wrap.closest("form");
+      if (formNative) {
+        formNative.addEventListener(
+          "submit",
+          (e) => {
+            if (!validateNative()) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              vis.reportValidity();
+              return;
+            }
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          },
+          true
+        );
+      }
+      return;
+    }
     const required = vis.required;
     const sync = () => {
       vis.value = isoToDisplay(hidden.value, mdy);
@@ -1105,6 +1679,59 @@ if ("serviceWorker" in navigator) {
     const hidden = wrap.querySelector(".remi-time-iso");
     const vis = wrap.querySelector(".remi-time-visible");
     if (!(hidden instanceof HTMLInputElement) || !(vis instanceof HTMLInputElement)) return;
+    if (!isMobileLayout()) {
+      const requiredNativeT = vis.required;
+      vis.type = "time";
+      vis.readOnly = false;
+      vis.removeAttribute("placeholder");
+      vis.step = "60";
+      const syncNativeT = () => {
+        const normalized = normalizeTimeHM(hidden.value);
+        hidden.value = normalized;
+        vis.value = normalized || "";
+        vis.setCustomValidity("");
+      };
+      const validateNativeT = () => {
+        vis.setCustomValidity("");
+        if (requiredNativeT && !(hidden.value || "").trim()) {
+          vis.setCustomValidity("Select a time");
+          return false;
+        }
+        return true;
+      };
+      syncNativeT();
+      hidden.addEventListener("change", () => syncNativeT());
+      const pushNativeT = () => {
+        const raw = (vis.value || "").trim();
+        hidden.value = raw ? normalizeTimeHM(raw) : "";
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+        syncNativeT();
+      };
+      vis.addEventListener("change", pushNativeT);
+      vis.addEventListener("input", pushNativeT);
+      const clockBtnNative = wrap.querySelector(".remi-time-clock-btn");
+      if (clockBtnNative instanceof HTMLElement) {
+        clockBtnNative.hidden = true;
+        clockBtnNative.setAttribute("aria-hidden", "true");
+      }
+      const formNativeT = wrap.closest("form");
+      if (formNativeT) {
+        formNativeT.addEventListener(
+          "submit",
+          (e) => {
+            if (!validateNativeT()) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              vis.reportValidity();
+              return;
+            }
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          },
+          true
+        );
+      }
+      return;
+    }
     const required = vis.required;
     const sync = () => {
       const normalized = normalizeTimeHM(hidden.value);
@@ -1178,67 +1805,483 @@ if ("serviceWorker" in navigator) {
     const mdy = wrap.getAttribute("data-mdy") === "1";
     const min = wrap.getAttribute("data-min") || "";
     const max = wrap.getAttribute("data-max") || "";
+    const uiTime24h = wrap.getAttribute("data-time-24h") === "1";
     const hidden = wrap.querySelector(".remi-datetime-iso");
+    const combinedVis = wrap.querySelector(".remi-datetime-combined-part");
+    const desktopCalBtn = wrap.querySelector(".remi-datetime-desktop-calendar-btn");
     const dateVis = wrap.querySelector(".remi-datetime-date-part");
     const timeVis = wrap.querySelector(".remi-datetime-time-part");
-    if (!(hidden instanceof HTMLInputElement) || !(dateVis instanceof HTMLInputElement) || !(timeVis instanceof HTMLInputElement)) return;
-    const required = dateVis.required || timeVis.required;
+    if (!(hidden instanceof HTMLInputElement)) return;
+    const hasDesktopCombined = combinedVis instanceof HTMLInputElement;
+    const hasMobileParts = dateVis instanceof HTMLInputElement && timeVis instanceof HTMLInputElement;
+    if (!hasDesktopCombined && !hasMobileParts) return;
+    const required =
+      (combinedVis instanceof HTMLInputElement && combinedVis.required) ||
+      (dateVis instanceof HTMLInputElement && dateVis.required) ||
+      (timeVis instanceof HTMLInputElement && timeVis.required);
+    const formForWrap = wrap.closest("form");
+    const formAction = formForWrap instanceof HTMLFormElement ? (formForWrap.getAttribute("action") || "") : "";
+    const isTripBoundDateTime = /\/trips(\/|$)/i.test(formAction);
+    const minDateIso = min ? min.slice(0, 10) : "";
+    const maxDateIso = max ? max.slice(0, 10) : "";
+    const rangeMessage =
+      minDateIso && maxDateIso
+        ? `This date is outside your trip (${isoToDisplay(minDateIso, mdy)} – ${isoToDisplay(maxDateIso, mdy)}).`
+        : "This date is outside your trip.";
+    const useRangeValidation = isTripBoundDateTime && Boolean(minDateIso && maxDateIso);
+    let inlineErr = null;
+    if (useRangeValidation) {
+      inlineErr = wrap.querySelector(".remi-datetime-inline-error");
+      if (!(inlineErr instanceof HTMLElement)) {
+        inlineErr = document.createElement("div");
+        inlineErr.className = "location-hint error remi-datetime-inline-error";
+        inlineErr.hidden = true;
+        wrap.appendChild(inlineErr);
+      }
+    }
+    const setRangeError = (on) => {
+      if (!useRangeValidation || !(inlineErr instanceof HTMLElement)) return;
+      inlineErr.textContent = on ? rangeMessage : "";
+      inlineErr.hidden = !on;
+      wrap.classList.toggle("remi-datetime-field--has-error", Boolean(on));
+    };
+    const isMobileLayout = () => window.matchMedia(`(max-width: ${MOBILE_BP}px)`).matches;
     const sync = () => {
       const sp = splitIsoLocalDateTime(hidden.value);
-      dateVis.value = sp.dateIso ? isoToDisplay(sp.dateIso, mdy) : "";
-      timeVis.value = timeHMToDisplay(sp.time);
-      dateVis.setCustomValidity("");
-      timeVis.setCustomValidity("");
+      if (dateVis instanceof HTMLInputElement) {
+        dateVis.value = sp.dateIso ? isoToDisplay(sp.dateIso, mdy) : "";
+        dateVis.setCustomValidity("");
+      }
+      if (timeVis instanceof HTMLInputElement) {
+        timeVis.value = sp.time ? (uiTime24h ? timeHMToDisplay24(sp.time) : timeHMToDisplay(sp.time)) : "";
+        timeVis.setCustomValidity("");
+      }
+      if (combinedVis instanceof HTMLInputElement) {
+        combinedVis.value = dateTimeLocalToDisplay(hidden.value, mdy, uiTime24h);
+        combinedVis.setCustomValidity("");
+      }
+      if (useRangeValidation) {
+        const hasOutOfRange = sp.dateIso && sp.time && !isDateTimeWithinBounds(`${sp.dateIso}T${sp.time}`, min, max);
+        setRangeError(Boolean(hasOutOfRange));
+      }
     };
-    if (!(hidden.value || "").trim()) {
-      const now = new Date();
-      const todayLocal = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
-      let value = `${todayLocal}T${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
-      if (min && value < min) value = min;
-      if (max && value > max) value = max;
-      hidden.value = value;
-    }
-    const updateDate = (dateIso) => {
+    const syncModeDisabled = () => {
+      const mobile = isMobileLayout();
+      if (combinedVis instanceof HTMLInputElement) combinedVis.disabled = mobile;
+      if (dateVis instanceof HTMLInputElement) dateVis.disabled = !mobile;
+      if (timeVis instanceof HTMLInputElement) timeVis.disabled = !mobile;
+    };
+    const getVisibleDateIso = () => {
+      if (dateVis instanceof HTMLInputElement) {
+        const iso = parseDisplayToIso((dateVis.value || "").trim(), mdy);
+        if (iso) return iso;
+      }
+      if (combinedVis instanceof HTMLInputElement) {
+        const parsed = parseCombinedDateTimeDisplay(combinedVis.value, mdy, false);
+        const sp = splitIsoLocalDateTime(parsed);
+        if (sp.dateIso) return sp.dateIso;
+      }
       const sp = splitIsoLocalDateTime(hidden.value);
-      const t = normalizeTimeHM(sp.time || "08:30");
+      return sp.dateIso || "";
+    };
+    const getVisibleTimeHM = () => {
+      if (timeVis instanceof HTMLInputElement) {
+        const hm = normalizeTimeHM((timeVis.value || "").trim());
+        if (hm) return hm;
+      }
+      if (combinedVis instanceof HTMLInputElement) {
+        const parsed = parseCombinedDateTimeDisplay(combinedVis.value, mdy, false);
+        const sp = splitIsoLocalDateTime(parsed);
+        if (sp.time) return sp.time;
+      }
+      const sp = splitIsoLocalDateTime(hidden.value);
+      return normalizeTimeHM(sp.time || "") || "";
+    };
+    const updateDate = (dateIso) => {
+      const t = normalizeTimeHM(getVisibleTimeHM() || "08:30");
       const next = dateIso ? `${dateIso}T${t}` : "";
-      hidden.value = clampDateTimeLocal(next, min, max);
+      if (useRangeValidation && next && !isDateTimeWithinBounds(next, min, max)) {
+        setRangeError(true);
+        return;
+      }
+      setRangeError(false);
+      hidden.value = useRangeValidation ? next : clampDateTimeLocal(next, min, max);
       sync();
       hidden.dispatchEvent(new Event("change", { bubbles: true }));
     };
     const updateTime = (hm) => {
-      const sp = splitIsoLocalDateTime(hidden.value);
-      if (!sp.dateIso) {
+      let dateIso = getVisibleDateIso();
+      if (!dateIso) {
         const now = new Date();
-        sp.dateIso = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+        dateIso = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
       }
-      const next = `${sp.dateIso}T${normalizeTimeHM(hm)}`;
-      hidden.value = clampDateTimeLocal(next, min, max);
+      const next = `${dateIso}T${normalizeTimeHM(hm)}`;
+      if (useRangeValidation && !isDateTimeWithinBounds(next, min, max)) {
+        setRangeError(true);
+        return;
+      }
+      setRangeError(false);
+      hidden.value = useRangeValidation ? next : clampDateTimeLocal(next, min, max);
       sync();
       hidden.dispatchEvent(new Event("change", { bubbles: true }));
     };
     const validate = () => {
-      dateVis.setCustomValidity("");
-      timeVis.setCustomValidity("");
+      if (dateVis instanceof HTMLInputElement) dateVis.setCustomValidity("");
+      if (timeVis instanceof HTMLInputElement) timeVis.setCustomValidity("");
+      if (combinedVis instanceof HTMLInputElement) combinedVis.setCustomValidity("");
+      setRangeError(false);
+      if (!isMobileLayout() && combinedVis instanceof HTMLInputElement) {
+        const raw = (combinedVis.value || "").trim();
+        if (raw) {
+          const parsed = parseCombinedDateTimeDisplay(raw, mdy, false);
+          if (parsed) {
+            if (useRangeValidation) {
+              if (!isDateTimeWithinBounds(parsed, min, max)) {
+                combinedVis.setCustomValidity(rangeMessage);
+                setRangeError(true);
+                return false;
+              }
+              hidden.value = parsed;
+            } else {
+              hidden.value = clampDateTimeLocal(parsed, min, max);
+            }
+          } else {
+            combinedVis.setCustomValidity("Enter date and time");
+            return false;
+          }
+        }
+      }
       if (!required) return true;
       const sp = splitIsoLocalDateTime(hidden.value);
-      if (!sp.dateIso) dateVis.setCustomValidity("Select a date");
-      if (!sp.time) timeVis.setCustomValidity("Select a time");
+      if (isMobileLayout()) {
+        if (!sp.dateIso && dateVis instanceof HTMLInputElement) dateVis.setCustomValidity("Select a date");
+        if (!sp.time && timeVis instanceof HTMLInputElement) timeVis.setCustomValidity("Select a time");
+      } else if ((!sp.dateIso || !sp.time) && combinedVis instanceof HTMLInputElement) {
+        combinedVis.setCustomValidity("Enter date and time");
+      }
       return !!(sp.dateIso && sp.time);
     };
     sync();
+    syncModeDisabled();
+    window.addEventListener("resize", syncModeDisabled);
+    if (dateVis instanceof HTMLInputElement) dateVis.readOnly = false;
+    if (timeVis instanceof HTMLInputElement) timeVis.readOnly = false;
+    if (combinedVis instanceof HTMLInputElement) combinedVis.readOnly = false;
+    if (combinedVis instanceof HTMLInputElement) {
+      let lastCombinedDigitCount = -1;
+      let lastCombinedValueLen = -1;
+      combinedVis.addEventListener("focus", () => {
+        lastCombinedDigitCount = digitsOnly(combinedVis.value).length;
+        lastCombinedValueLen = combinedVis.value.length;
+      });
+      combinedVis.addEventListener("beforeinput", (ev) => {
+        if (isMobileLayout()) return;
+        const t = String(ev.inputType || "");
+        if (
+          t === "deleteContentBackward" ||
+          t === "deleteContentForward" ||
+          t === "deleteByCut" ||
+          t === "deleteCompositionText"
+        ) {
+          combinedVis.dataset.remiDatetimeDelete = "1";
+        }
+      });
+      /*
+       * Acceptance guardrails for combined desktop datetime typing:
+       * 1) Full text entry must remain deletable from the right via backspace.
+       * 2) Explicit AM/PM intent (A/P keys) must persist and not be auto-reverted.
+       * 3) In 12h UI, explicit 24h entry like 14:34/1434 canonicalizes to 02:00 PM.
+       */
+      combinedVis.addEventListener("input", (ev) => {
+        if (isMobileLayout()) return;
+        const pos0 = combinedVis.selectionStart ?? combinedVis.value.length;
+        const vlen = combinedVis.value.length;
+        const dcnt = digitsOnly(combinedVis.value).length;
+        const fromBeforeInput = combinedVis.dataset.remiDatetimeDelete === "1";
+        if (fromBeforeInput) delete combinedVis.dataset.remiDatetimeDelete;
+        const isDel =
+          fromBeforeInput ||
+          ev.inputType === "deleteContentBackward" ||
+          ev.inputType === "deleteContentForward" ||
+          ev.inputType === "deleteByCut" ||
+          ev.inputType === "deleteCompositionText" ||
+          (lastCombinedDigitCount >= 0 && dcnt < lastCombinedDigitCount) ||
+          (lastCombinedValueLen >= 0 && vlen < lastCombinedValueLen);
+        const masked = remiFormatCombinedDateTimeTypingMask(combinedVis.value, mdy, pos0, isDel);
+        if (masked.text !== combinedVis.value) {
+          combinedVis.value = masked.text;
+          combinedVis.setSelectionRange(masked.caret, masked.caret);
+        }
+        lastCombinedDigitCount = digitsOnly(combinedVis.value).length;
+        lastCombinedValueLen = combinedVis.value.length;
+        let isoDt = parseCombinedDateTimeDisplay(combinedVis.value, mdy, true);
+        if (isoDt) {
+          const { timePart } = splitCombinedDisplayDateTimeParts(combinedVis.value, mdy);
+          if (!uiTime24h) {
+            const spTyped = splitIsoLocalDateTime(isoDt);
+            const hmAdj = maybeForceTopOfHourForTyped24h(timePart, spTyped.time);
+            if (spTyped.dateIso && hmAdj) isoDt = `${spTyped.dateIso}T${hmAdj}`;
+          }
+          if (useRangeValidation && !isDateTimeWithinBounds(isoDt, min, max)) {
+            setRangeError(true);
+            return;
+          }
+          setRangeError(false);
+          const nextIso = useRangeValidation ? isoDt : clampDateTimeLocal(isoDt, min, max);
+          hidden.value = nextIso;
+          hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          /* Never sync() here while focused: if clamped !== isoDt (outside trip min/max), sync() would
+           * replace the visible text with the clamped value and feel like the edit "reverted". Blur still normalizes. */
+          /* Do not canonicalize during delete; otherwise trailing tokens can reappear and block backspace flow. */
+          if (nextIso === isoDt && !uiTime24h && !isDel) {
+            if (combinedTimeNeeds12hCanonVisual(timePart)) {
+              const canon = dateTimeLocalToDisplay(nextIso, mdy, uiTime24h);
+              if (canon && canon.replace(/\s+/g, " ").trim() !== combinedVis.value.replace(/\s+/g, " ").trim()) {
+                combinedVis.value = canon;
+                combinedVis.setSelectionRange(canon.length, canon.length);
+              }
+            }
+          }
+        }
+      });
+      combinedVis.addEventListener("keydown", (ev) => {
+        if (isMobileLayout() || uiTime24h) return;
+        const k = String(ev.key || "");
+        const lower = k.toLowerCase();
+        const explicitPeriod = lower === "a" ? "am" : lower === "p" ? "pm" : "";
+        if (!explicitPeriod) return;
+        const raw = String(combinedVis.value || "");
+        const parts = splitCombinedDisplayDateTimeParts(raw, mdy);
+        const datePart = String(parts.datePart || "").trim();
+        const timePart = String(parts.timePart || "").trim();
+        if (!datePart || !timePart) return;
+        const hm = normalizeTimeHM(timePart);
+        if (!hm) return;
+        const nextHm = setHMPeriod(hm, explicitPeriod);
+        if (!nextHm) return;
+        const nextTimeDisp = timeHMToDisplay(nextHm);
+        const nextText = `${datePart}, ${nextTimeDisp}`;
+        combinedVis.value = nextText;
+        combinedVis.setSelectionRange(nextText.length, nextText.length);
+        lastCombinedDigitCount = digitsOnly(nextText).length;
+        lastCombinedValueLen = nextText.length;
+        const parsed = parseCombinedDateTimeDisplay(nextText, mdy, false);
+        if (parsed) {
+          if (useRangeValidation && !isDateTimeWithinBounds(parsed, min, max)) {
+            setRangeError(true);
+            ev.preventDefault();
+            return;
+          }
+          setRangeError(false);
+          const nextIso = useRangeValidation ? parsed : clampDateTimeLocal(parsed, min, max);
+          if (nextIso === parsed) {
+            hidden.value = nextIso;
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+        ev.preventDefault();
+      });
+      combinedVis.addEventListener("blur", () => {
+        if (isMobileLayout()) return;
+        combinedVis.setCustomValidity("");
+        const raw = (combinedVis.value || "").trim();
+        if (!raw) {
+          setRangeError(false);
+          hidden.value = "";
+          hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          sync();
+          return;
+        }
+        const isoDt = parseCombinedDateTimeDisplay(raw, mdy);
+        if (isoDt) {
+          if (useRangeValidation) {
+            if (!isDateTimeWithinBounds(isoDt, min, max)) {
+              combinedVis.setCustomValidity(rangeMessage);
+              setRangeError(true);
+              return;
+            }
+            setRangeError(false);
+            hidden.value = isoDt;
+          } else {
+            hidden.value = clampDateTimeLocal(isoDt, min, max);
+          }
+          hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          sync();
+          return;
+        }
+        setRangeError(false);
+        combinedVis.setCustomValidity("Enter date and time");
+      });
+    }
+    if (dateVis instanceof HTMLInputElement) {
+      let lastDateDigitCount = -1;
+      let lastDateValueLen = -1;
+      dateVis.addEventListener("focus", () => {
+        lastDateDigitCount = digitsOnly(dateVis.value).length;
+        lastDateValueLen = dateVis.value.length;
+      });
+      dateVis.addEventListener("beforeinput", (ev) => {
+        if (!isMobileLayout()) return;
+        const t = String(ev.inputType || "");
+        if (
+          t === "deleteContentBackward" ||
+          t === "deleteContentForward" ||
+          t === "deleteByCut" ||
+          t === "deleteCompositionText"
+        ) {
+          dateVis.dataset.remiDatetimeDelete = "1";
+        }
+      });
+      dateVis.addEventListener("input", (ev) => {
+        if (!isMobileLayout()) return;
+        const p0 = dateVis.selectionStart ?? dateVis.value.length;
+        const vlen = dateVis.value.length;
+        const dcnt = digitsOnly(dateVis.value).length;
+        const fromBeforeInput = dateVis.dataset.remiDatetimeDelete === "1";
+        if (fromBeforeInput) delete dateVis.dataset.remiDatetimeDelete;
+        const isDel =
+          fromBeforeInput ||
+          ev.inputType === "deleteContentBackward" ||
+          ev.inputType === "deleteContentForward" ||
+          ev.inputType === "deleteByCut" ||
+          ev.inputType === "deleteCompositionText" ||
+          (lastDateDigitCount >= 0 && dcnt < lastDateDigitCount) ||
+          (lastDateValueLen >= 0 && vlen < lastDateValueLen);
+        const dMasked = remiFormatDatePartTypingMask(dateVis.value, p0, isDel);
+        if (dMasked.text !== dateVis.value) {
+          dateVis.value = dMasked.text;
+          dateVis.setSelectionRange(dMasked.caret, dMasked.caret);
+        }
+        lastDateDigitCount = digitsOnly(dateVis.value).length;
+        lastDateValueLen = dateVis.value.length;
+        const iso = parseDisplayToIso(dateVis.value.trim(), mdy);
+        if (iso) {
+          const sp = splitIsoLocalDateTime(hidden.value);
+          const tPart = normalizeTimeHM(sp.time || "08:30");
+          hidden.value = clampDateTimeLocal(`${iso}T${tPart}`, min, max);
+          hidden.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        if (typeof activeDatePickerSync === "function") activeDatePickerSync(dateVis.value);
+      });
+      dateVis.addEventListener("blur", () => {
+        if (!isMobileLayout()) return;
+        const iso = parseDisplayToIso(dateVis.value.trim(), mdy);
+        if (iso) {
+          const sp = splitIsoLocalDateTime(hidden.value);
+          const tPart = normalizeTimeHM(sp.time || "08:30");
+          hidden.value = clampDateTimeLocal(`${iso}T${tPart}`, min, max);
+        } else if (!(dateVis.value || "").trim()) {
+          updateDate("");
+        }
+        sync();
+      });
+    }
+    if (timeVis instanceof HTMLInputElement) {
+      let lastTimeDigitCount = -1;
+      let lastTimeValueLen = -1;
+      timeVis.addEventListener("focus", () => {
+        lastTimeDigitCount = digitsOnly(timeVis.value).length;
+        lastTimeValueLen = timeVis.value.length;
+      });
+      timeVis.addEventListener("beforeinput", (ev) => {
+        if (!isMobileLayout()) return;
+        const t = String(ev.inputType || "");
+        if (
+          t === "deleteContentBackward" ||
+          t === "deleteContentForward" ||
+          t === "deleteByCut" ||
+          t === "deleteCompositionText"
+        ) {
+          timeVis.dataset.remiDatetimeDelete = "1";
+        }
+      });
+      /* Same normalization rules as combined field, but for mobile split time input. */
+      timeVis.addEventListener("input", (ev) => {
+        if (!isMobileLayout()) return;
+        const t0 = timeVis.selectionStart ?? timeVis.value.length;
+        const vlen = timeVis.value.length;
+        const dcnt = digitsOnly(timeVis.value).length;
+        const fromBeforeInput = timeVis.dataset.remiDatetimeDelete === "1";
+        if (fromBeforeInput) delete timeVis.dataset.remiDatetimeDelete;
+        const isDel =
+          fromBeforeInput ||
+          ev.inputType === "deleteContentBackward" ||
+          ev.inputType === "deleteContentForward" ||
+          ev.inputType === "deleteByCut" ||
+          ev.inputType === "deleteCompositionText" ||
+          (lastTimeDigitCount >= 0 && dcnt < lastTimeDigitCount) ||
+          (lastTimeValueLen >= 0 && vlen < lastTimeValueLen);
+        const tMasked = remiFormatTimePartTypingMask(timeVis.value, t0, isDel);
+        if (tMasked.text !== timeVis.value) {
+          timeVis.value = tMasked.text;
+          timeVis.setSelectionRange(tMasked.caret, tMasked.caret);
+        }
+        lastTimeDigitCount = digitsOnly(timeVis.value).length;
+        lastTimeValueLen = timeVis.value.length;
+        const tv = timeVis.value.trim();
+        if (isTimePartIncompleteForCombinedInput(tv)) {
+          if (typeof activeTimePickerSync === "function") activeTimePickerSync(timeVis.value);
+          return;
+        }
+        const hm = normalizeTimeHM(tv);
+        if (hm) {
+          const hmAdj = uiTime24h ? hm : maybeForceTopOfHourForTyped24h(tv, hm);
+          if (hmAdj) updateTime(hmAdj);
+        }
+        if (typeof activeTimePickerSync === "function") activeTimePickerSync(timeVis.value);
+      });
+      timeVis.addEventListener("keydown", (ev) => {
+        if (!isMobileLayout() || uiTime24h) return;
+        const k = String(ev.key || "");
+        const lower = k.toLowerCase();
+        const explicitPeriod = lower === "a" ? "am" : lower === "p" ? "pm" : "";
+        if (!explicitPeriod) return;
+        const raw = String(timeVis.value || "").trim();
+        if (isTimePartIncompleteForCombinedInput(raw)) return;
+        const hm = normalizeTimeHM(raw);
+        if (!hm) return;
+        const nextHm = setHMPeriod(hm, explicitPeriod);
+        if (!nextHm) return;
+        const nextDisp = timeHMToDisplay(nextHm);
+        timeVis.value = nextDisp;
+        const dateIso = getVisibleDateIso();
+        if (dateIso) {
+          const nextIsoRaw = `${dateIso}T${nextHm}`;
+          const nextIso = clampDateTimeLocal(nextIsoRaw, min, max);
+          if (nextIso === nextIsoRaw) {
+            hidden.value = nextIso;
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+        ev.preventDefault();
+      });
+      timeVis.addEventListener("blur", () => {
+        if (!isMobileLayout()) return;
+        const hm = normalizeTimeHM(timeVis.value.trim());
+        if (hm) updateTime(hm);
+        else sync();
+      });
+    }
     const dateCalBtn = wrap.querySelector(".remi-datetime-date-wrap .remi-date-calendar-btn");
-    dateVis.readOnly = false;
     const openDateCal = () => {
-      const sp = splitIsoLocalDateTime(hidden.value);
-      openDatePicker(dateVis, {
-        value: sp.dateIso,
+      const dateIso = getVisibleDateIso();
+      const anchor = !isMobileLayout() && combinedVis instanceof HTMLInputElement ? combinedVis : dateVis;
+      if (!(anchor instanceof HTMLInputElement)) return;
+      openDatePicker(anchor, {
+        value: dateIso,
         min: min ? min.slice(0, 10) : "",
         max: max ? max.slice(0, 10) : "",
         mdy,
         onConfirm: (iso) => updateDate(iso)
       });
     };
+    if (desktopCalBtn instanceof HTMLButtonElement) {
+      desktopCalBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openDateCal();
+      });
+    }
     if (dateCalBtn instanceof HTMLButtonElement) {
       dateCalBtn.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1246,36 +2289,18 @@ if ("serviceWorker" in navigator) {
         openDateCal();
       });
     } else {
-      makeFieldOpenable(dateVis, openDateCal);
+      if (dateVis instanceof HTMLInputElement) makeFieldOpenable(dateVis, openDateCal);
     }
-    hidden.addEventListener("change", () => sync());
-    dateVis.addEventListener("input", () => {
-      const iso = parseDisplayToIso(dateVis.value.trim(), mdy);
-      if (iso) {
-        const sp = splitIsoLocalDateTime(hidden.value);
-        const tPart = normalizeTimeHM(sp.time || "08:30");
-        hidden.value = clampDateTimeLocal(`${iso}T${tPart}`, min, max);
-        hidden.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      if (typeof activeDatePickerSync === "function") activeDatePickerSync(dateVis.value);
-    });
-    dateVis.addEventListener("blur", () => {
-      const iso = parseDisplayToIso(dateVis.value.trim(), mdy);
-      if (iso) {
-        const sp = splitIsoLocalDateTime(hidden.value);
-        const tPart = normalizeTimeHM(sp.time || "08:30");
-        hidden.value = clampDateTimeLocal(`${iso}T${tPart}`, min, max);
-      } else if (!(dateVis.value || "").trim()) {
-        updateDate("");
-      }
+    hidden.addEventListener("change", () => {
+      if (combinedVis instanceof HTMLInputElement && document.activeElement === combinedVis) return;
       sync();
     });
     const timeClockBtn = wrap.querySelector(".remi-datetime-time-wrap .remi-time-clock-btn");
-    timeVis.readOnly = false;
     const openTimeCal = () => {
-      const sp = splitIsoLocalDateTime(hidden.value);
+      if (!(timeVis instanceof HTMLInputElement)) return;
+      const hm = getVisibleTimeHM() || "08:30";
       openTimePicker(timeVis, {
-        value: sp.time || "08:30",
+        value: hm,
         title: inferPickerTitle(timeVis, "Set Time"),
         onConfirm: (hm) => updateTime(hm)
       });
@@ -1287,25 +2312,19 @@ if ("serviceWorker" in navigator) {
         openTimeCal();
       });
     } else {
-      makeFieldOpenable(timeVis, openTimeCal);
+      if (timeVis instanceof HTMLInputElement) makeFieldOpenable(timeVis, openTimeCal);
     }
-    timeVis.addEventListener("input", () => {
-      const hm = normalizeTimeHM(timeVis.value.trim());
-      if (hm) updateTime(hm);
-      if (typeof activeTimePickerSync === "function") activeTimePickerSync(timeVis.value);
-    });
-    timeVis.addEventListener("blur", () => {
-      const hm = normalizeTimeHM(timeVis.value.trim());
-      if (hm) updateTime(hm);
-      else sync();
-    });
     const form = wrap.closest("form");
     if (form) {
       form.addEventListener("submit", (e) => {
         if (!validate()) {
           e.preventDefault();
-          dateVis.reportValidity();
-          timeVis.reportValidity();
+          if (isMobileLayout()) {
+            if (dateVis instanceof HTMLInputElement) dateVis.reportValidity();
+            if (timeVis instanceof HTMLInputElement) timeVis.reportValidity();
+          } else if (combinedVis instanceof HTMLInputElement) {
+            combinedVis.reportValidity();
+          }
           return;
         }
         hidden.dispatchEvent(new Event("change", { bubbles: true }));
@@ -2249,7 +3268,7 @@ window.addEventListener("load", () => {
     if (fetches.length > 0) await Promise.all(fetches);
   };
 
-  const buildTimelineConnectorLi = (from, to, distanceKm) => {
+  const buildTimelineConnectorLi = (fromEl, toEl, from, to, distanceKm) => {
     const driveMins = (distanceKm / 35) * 60;
     const walkMins = (distanceKm / 4.8) * 60;
     const transitMins = (distanceKm / 14) * 60;
@@ -2332,10 +3351,61 @@ window.addEventListener("load", () => {
       )
     );
 
+    const tripIdMatch = window.location.pathname.match(/\/trips\/([^/]+)/);
+    const tripId = tripIdMatch ? tripIdMatch[1] : "";
+    const fromId = (fromEl?.getAttribute("data-itinerary-item-id") || "").trim();
+    const toId = (toEl?.getAttribute("data-itinerary-item-id") || "").trim();
+    if (tripId && fromId && toId) {
+      const addRow = document.createElement("div");
+      addRow.className = "timeline-connector-add-commute";
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "timeline-connector-add-commute-btn secondary-btn";
+      addBtn.textContent = "Add commute here";
+      addBtn.setAttribute("aria-label", "Add commute leg between these items");
+      addBtn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const form =
+          document.getElementById("sidebar-add-commute-form") ||
+          document.getElementById("mobile-add-commute-form");
+        if (!form) {
+          return;
+        }
+        const applyPair = () => {
+          const setSel = (name, id) => {
+            const sel = form.querySelector(`select[name='${name}']`);
+            if (sel) sel.value = id;
+          };
+          setSel("commute_from_item_id", fromId);
+          setSel("commute_to_item_id", toId);
+          form.closest("details")?.setAttribute("open", "");
+          form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          const title = form.querySelector("input[name='title']");
+          title?.focus?.();
+        };
+        const hostSheet = form.closest(".mobile-sheet");
+        if (hostSheet instanceof HTMLElement && hostSheet.classList.contains("hidden")) {
+          const sid = hostSheet.getAttribute("id");
+          const opener = sid ? document.querySelector(`[data-mobile-sheet-open="${sid}"]`) : null;
+          if (opener instanceof HTMLElement) opener.click();
+          window.setTimeout(applyPair, 380);
+          return;
+        }
+        applyPair();
+      });
+      addRow.append(addBtn);
+      menu.append(addRow);
+    }
+
     details.append(summary, menu);
     li.append(rail, details);
     return li;
   };
+
+  const isCommuteTimelineItem = (el) =>
+    (el?.getAttribute?.("data-item-kind") || el?.getAttribute?.("data-marker-kind") || "").trim().toLowerCase() ===
+    "commute";
 
   const drawConnectors = (scopes) => {
     scopes.forEach((scope) => {
@@ -2343,15 +3413,36 @@ window.addEventListener("load", () => {
         list.querySelectorAll("[data-itinerary-connector]").forEach((el) => el.remove());
         const items = Array.from(list.querySelectorAll(".timeline-item[data-itinerary-item]"))
           .filter((el) => !el.classList.contains("itinerary-search-hidden"));
-        for (let i = 0; i < items.length - 1; i++) {
+        for (let i = 0; i < items.length; i++) {
           const current = items[i];
-          const next = items[i + 1];
+          if (isCommuteTimelineItem(current)) continue;
           const from = parseCoords(current);
-          const to = parseCoords(next);
-          if (!from || !to) continue;
-          const distanceKm = haversineKm(from.lat, from.lng, to.lat, to.lng);
-          if (!Number.isFinite(distanceKm) || distanceKm <= 0.05) continue;
-          next.insertAdjacentElement("beforebegin", buildTimelineConnectorLi(from, to, distanceKm));
+          if (!from) continue;
+          const curId = (current.getAttribute("data-itinerary-item-id") || "").trim();
+          for (let j = i + 1; j < items.length; j++) {
+            const cand = items[j];
+            if (isCommuteTimelineItem(cand)) continue;
+            const to = parseCoords(cand);
+            if (!to) break;
+            const nextId = (cand.getAttribute("data-itinerary-item-id") || "").trim();
+            let blocked = false;
+            for (let k = i + 1; k < j; k++) {
+              const between = items[k];
+              if (!isCommuteTimelineItem(between)) continue;
+              if (
+                (between.getAttribute("data-commute-from") || "").trim() === curId &&
+                (between.getAttribute("data-commute-to") || "").trim() === nextId
+              ) {
+                blocked = true;
+                break;
+              }
+            }
+            if (blocked) break;
+            const distanceKm = haversineKm(from.lat, from.lng, to.lat, to.lng);
+            if (!Number.isFinite(distanceKm) || distanceKm <= 0.05) break;
+            cand.insertAdjacentElement("beforebegin", buildTimelineConnectorLi(current, cand, from, to, distanceKm));
+            break;
+          }
         }
       });
     });
@@ -2363,6 +3454,47 @@ window.addEventListener("load", () => {
     drawConnectors(scopes);
   };
   renderItineraryConnectors(document);
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target?.closest?.("[data-commute-dur-min]");
+    if (!btn) return;
+    const form = btn.closest("form");
+    if (!form) return;
+    const mins = parseInt(btn.getAttribute("data-commute-dur-min") || "0", 10);
+    if (!Number.isFinite(mins) || mins <= 0) return;
+    const startHid = form.querySelector("input.remi-datetime-iso[name='start_at']");
+    const endHid = form.querySelector("input.remi-datetime-iso[name='end_at']");
+    if (startHid instanceof HTMLInputElement && endHid instanceof HTMLInputElement) {
+      const ISO_DT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/;
+      const rawStart = String(startHid.value || "").trim();
+      const m = rawStart.match(ISO_DT);
+      if (!m) return;
+      const day = m[1];
+      let sm = parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+      if (!Number.isFinite(sm)) sm = 9 * 60;
+      const em = Math.min(24 * 60 - 1, sm + mins);
+      const eH = String(Math.floor(em / 60)).padStart(2, "0");
+      const eM = String(em % 60).padStart(2, "0");
+      endHid.value = `${day}T${eH}:${eM}`;
+      endHid.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+    const startEl = form.querySelector("input[name='start_time']");
+    const endEl = form.querySelector("input[name='end_time']");
+    if (!startEl || !endEl) return;
+    const parseMin = (raw) => {
+      const p = String(raw || "").trim().split(":");
+      const h = parseInt(p[0] || "0", 10);
+      const m = parseInt(p[1] || "0", 10);
+      if (Number.isNaN(h) || Number.isNaN(m)) return null;
+      return h * 60 + m;
+    };
+    const fmt = (n) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+    let sm = parseMin(startEl.value);
+    if (sm == null) sm = 9 * 60;
+    endEl.value = fmt(Math.min(24 * 60 - 1, sm + mins));
+    endEl.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 
   const itinerarySearchInput = document.querySelector("[data-itinerary-search]");
   const itinerarySearchRoot = document.querySelector("[data-itinerary-search-root]");
@@ -2406,6 +3538,28 @@ window.addEventListener("load", () => {
     applyItinerarySearch();
   }
 
+  let remiItineraryQuickEditEscapeAbort = null;
+  const detachItineraryQuickEditEscape = () => {
+    if (remiItineraryQuickEditEscapeAbort) {
+      remiItineraryQuickEditEscapeAbort.abort();
+      remiItineraryQuickEditEscapeAbort = null;
+    }
+  };
+  const attachItineraryQuickEditEscape = (onEscape) => {
+    detachItineraryQuickEditEscape();
+    const ac = new AbortController();
+    remiItineraryQuickEditEscapeAbort = ac;
+    document.addEventListener(
+      "keydown",
+      (ev) => {
+        if (ev.key !== "Escape") return;
+        ev.preventDefault();
+        onEscape();
+      },
+      { capture: true, signal: ac.signal }
+    );
+  };
+
   const tripCalendarRoot = document.querySelector("[data-itinerary-calendar-root]");
   if (tripCalendarRoot) {
     const listPanel = tripCalendarRoot.querySelector("[data-itinerary-list-panel]");
@@ -2419,10 +3573,14 @@ window.addEventListener("load", () => {
     const tripEndRaw = (tripCalendarRoot.getAttribute("data-trip-end") || "").trim();
     const quickEditModal = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-modal]");
     const quickEditBody = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-body]");
+    const quickEditPreview = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-preview]");
+    const quickEditFormWrap = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-form-wrap]");
+    const quickEditPanel = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-panel]");
     const quickEditTitle = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-title]");
+    const quickEditModeLabel = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-mode-label]");
     const desktopCalFlyout = document.querySelector("[data-desktop-calendar-flyout]");
     const desktopCalFlyoutLabel = desktopCalFlyout?.querySelector("[data-desktop-calendar-flyout-label]");
-    const quickAddState = { date: "", startMin: 8 * 60 };
+    const quickAddState = { date: "", startMin: 8 * 60, lastClientX: null, lastClientY: null };
     if (listPanel && calendarPanels && dayView && weekView && toolbar && rangeLabel && tripStartRaw && tripEndRaw) {
       const PX_PER_MIN = 1.2;
       const DAY_MINUTES = 24 * 60;
@@ -2440,6 +3598,7 @@ window.addEventListener("load", () => {
         selectedDate: tripStartRaw,
         lastDragEndAt: 0
       };
+      let calendarQuickEditUiAbort = null;
       const toDate = (iso) => {
         const p = new Date(`${iso}T00:00:00`);
         return Number.isNaN(p.getTime()) ? null : p;
@@ -2508,15 +3667,29 @@ window.addEventListener("load", () => {
         state.selectedDate = todayISO;
       }
       syncWeekOffsetFromSelectedDate();
-      const inferRole = (entry) => {
-        const t = (entry.title || "").toLowerCase();
+      const inferRoleFromTitle = (title) => {
+        const t = (title || "").toLowerCase();
         if (t.includes("depart")) return "depart";
-        if (t.includes("arrive")) return "arrive";
+        if (t.includes("arrive") || t.includes("arrival")) return "arrive";
         if (t.includes("check-out")) return "checkout";
         if (t.includes("check in") || t.includes("check-in")) return "checkin";
         if (t.includes("drop-off")) return "dropoff";
         if (t.includes("pick-up") || t.includes("pickup")) return "pickup";
         return "single";
+      };
+      const inferRole = (row, title) => {
+        const leg = (row?.getAttribute?.("data-itinerary-booking-leg") || "").trim().toLowerCase();
+        if (
+          leg === "depart" ||
+          leg === "arrive" ||
+          leg === "checkin" ||
+          leg === "checkout" ||
+          leg === "pickup" ||
+          leg === "dropoff"
+        ) {
+          return leg;
+        }
+        return inferRoleFromTitle(title);
       };
       const bookingPairFields = (category) => {
         if (category === "flight") return { startField: "depart_at", endField: "arrive_at", primaryRole: "depart", secondaryRole: "arrive" };
@@ -2560,13 +3733,29 @@ window.addEventListener("load", () => {
             form = row.querySelector(`form#flight-itinerary-edit-${CSS.escape(itemID)}`);
             if (form) category = "flight";
           }
+          if (!form) {
+            form = row.querySelector(`form#commute-itinerary-edit-${CSS.escape(itemID)}`);
+            if (form) category = "commute";
+          }
           let startMin = 8 * 60;
           let endMin = 9 * 60;
-          if (form && category === "stop") {
-            const s = parseTime(form.querySelector("input[name='start_time']")?.value || "");
-            const e = parseTime(form.querySelector("input[name='end_time']")?.value || "");
-            if (s !== null) startMin = s;
-            endMin = e !== null ? e : startMin + 60;
+          if (form && (category === "stop" || category === "commute")) {
+            const ISO_DT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/;
+            const startH = form.querySelector("input.remi-datetime-iso[name='start_at']");
+            const endH = form.querySelector("input.remi-datetime-iso[name='end_at']");
+            const ms = startH instanceof HTMLInputElement ? String(startH.value || "").match(ISO_DT) : null;
+            const me = endH instanceof HTMLInputElement ? String(endH.value || "").match(ISO_DT) : null;
+            if (ms) {
+              startMin = parseInt(ms[2], 10) * 60 + parseInt(ms[3], 10);
+              endMin = me
+                ? parseInt(me[2], 10) * 60 + parseInt(me[3], 10)
+                : startMin + 60;
+            } else {
+              const s = parseTime(form.querySelector("input[name='start_time']")?.value || "");
+              const e = parseTime(form.querySelector("input[name='end_time']")?.value || "");
+              if (s !== null) startMin = s;
+              endMin = e !== null ? e : startMin + 60;
+            }
           } else {
             const meta = (view?.querySelector(".meta")?.textContent || "").trim();
             const bits = meta.split("-").map((s) => s.trim()).filter(Boolean);
@@ -2576,7 +3765,7 @@ window.addEventListener("load", () => {
             endMin = second !== null ? second : startMin + 60;
           }
           if (endMin <= startMin) endMin = Math.min(DAY_MINUTES, startMin + 60);
-          const role = inferRole({ title });
+          const role = inferRole(row, title);
           const bookingWindow = parseBookingWindow(form, category);
           if (bookingWindow && role === bookingWindow.secondaryRole) {
             // Secondary leg is rendered through the primary card as a spanning duration.
@@ -2599,6 +3788,7 @@ window.addEventListener("load", () => {
             out.push({ ...e, sourceItemID: e.itemID, segmentStartAt: new Date(`${e.date}T${toTime(e.startMin)}`) });
             return;
           }
+          /* Overnight flights and multi-day stays/rentals: one calendar block per local day (00:00–24:00 clip). */
           const clipStart = new Date(Math.max(e.pairedStartAt.getTime(), startDate.getTime()));
           const clipEnd = new Date(Math.min(e.pairedEndAt.getTime(), endDate.getTime() + 24 * 60 * 60000));
           const cur = new Date(`${fmtDate(clipStart)}T00:00:00`);
@@ -2628,6 +3818,17 @@ window.addEventListener("load", () => {
           }
         });
         return out;
+      };
+      const pairedSpanResizeFlags = (e) => {
+        if (!e.pairedSpan || !e.pairedStartAt || !e.pairedEndAt) {
+          return { allowResizeStart: true, allowResizeEnd: true };
+        }
+        const startDay = fmtDate(e.pairedStartAt);
+        const endDay = fmtDate(e.pairedEndAt);
+        return {
+          allowResizeStart: e.date === startDay,
+          allowResizeEnd: e.date === endDay
+        };
       };
       const getRenderableEntries = () =>
         expandRenderableEntries(parseEventRows()).map((e) => ({ ...e, ...(state.overrides.get(e.itemID) || {}) }));
@@ -2705,7 +3906,13 @@ window.addEventListener("load", () => {
         return "";
       };
       const applyResizeToForm = (entry, nextDate, nextStart, nextEnd, edge) => {
-        if (entry.category === "stop") {
+        if (entry.category === "stop" || entry.category === "commute") {
+          const startAtEl = entry.form.querySelector("input.remi-datetime-iso[name='start_at']");
+          if (startAtEl instanceof HTMLInputElement) {
+            setField(entry.form, "start_at", toDateTimeLocal(new Date(`${nextDate}T${toTime(nextStart)}`)));
+            setField(entry.form, "end_at", toDateTimeLocal(new Date(`${nextDate}T${toTime(nextEnd)}`)));
+            return;
+          }
           setField(entry.form, "itinerary_date", nextDate);
           setField(entry.form, "start_time", toTime(nextStart));
           setField(entry.form, "end_time", toTime(nextEnd));
@@ -2736,6 +3943,8 @@ window.addEventListener("load", () => {
         if (!desktopCalFlyout) return;
         quickAddState.date = date;
         quickAddState.startMin = startMin;
+        quickAddState.lastClientX = typeof clientX === "number" ? clientX : null;
+        quickAddState.lastClientY = typeof clientY === "number" ? clientY : null;
         setDesktopFlyoutExpanded(true);
         if (desktopCalFlyoutLabel) {
           const d = new Date(`${date}T00:00:00`);
@@ -2768,11 +3977,20 @@ window.addEventListener("load", () => {
         first?.focus?.();
       };
       const findAddForm = (kind) => {
+        if (kind === "expense") {
+          const fly = document.querySelector("[data-desktop-expense-flyout] form[data-remi-unified-expense-add-form]");
+          if (fly && window.innerWidth > 920) return fly;
+          const side = document.querySelector("form.remi-unified-expense-form--sidebar");
+          if (side) return side;
+          return document.querySelector("#mobile-sheet-expense form[data-remi-unified-expense-add-form]");
+        }
         const forms = Array.from(document.querySelectorAll("form[action]"));
         const matches = forms.filter((f) => {
           const action = (f.getAttribute("action") || "");
           if (action.includes("/update")) return false;
-          if (kind === "stop") return action.includes("/itinerary");
+          if (kind === "commute") return action.includes("/itinerary/commute");
+          if (kind === "stop")
+            return action.includes("/itinerary") && !action.includes("/itinerary/commute");
           if (kind === "accommodation") return action.includes("/accommodation");
           if (kind === "vehicle") return action.includes("/vehicle-rental");
           if (kind === "flight") return action.includes("/flights");
@@ -2785,20 +4003,32 @@ window.addEventListener("load", () => {
         const id =
           kind === "stop"
             ? "mobile-sheet-stop"
-            : kind === "accommodation"
-              ? "mobile-sheet-accommodation"
-              : kind === "vehicle"
-                ? "mobile-sheet-vehicle"
-                : kind === "flight"
-                  ? "mobile-sheet-flight"
-                  : "";
+            : kind === "commute"
+              ? "mobile-sheet-commute"
+            : kind === "expense"
+              ? "mobile-sheet-expense"
+              : kind === "accommodation"
+                ? "mobile-sheet-accommodation"
+                : kind === "vehicle"
+                  ? "mobile-sheet-vehicle"
+                  : kind === "flight"
+                    ? "mobile-sheet-flight"
+                    : "";
         if (!id) return null;
         const sheet = document.getElementById(id);
-        return sheet?.querySelector("form[action]") || null;
+        if (kind === "commute") {
+          return sheet?.querySelector("form.remi-add-commute-form") || null;
+        }
+        if (kind === "expense") {
+          return sheet?.querySelector("form[data-remi-unified-expense-add-form]") || null;
+        }
+        return sheet?.querySelector("form[action]:not(.remi-add-commute-form)") || null;
       };
       const showTripQuickSheetPanel = (sheetEl) => {
         if (!sheetEl) return;
         document.querySelectorAll(".mobile-sheet").forEach((s) => {
+          s.classList.remove("mobile-sheet--trip-fab-flyout-open", "mobile-sheet--dragging");
+          s.style.transform = "";
           s.classList.add("hidden");
           s.setAttribute("aria-hidden", "true");
         });
@@ -2806,6 +4036,15 @@ window.addEventListener("load", () => {
         sheetEl.classList.remove("hidden");
         sheetEl.setAttribute("aria-hidden", "false");
         if (bd) bd.classList.remove("hidden");
+        if (sheetEl.classList.contains("mobile-sheet--trip-fab-flyout") && document.querySelector("main.trip-details-page")) {
+          sheetEl.classList.remove("mobile-sheet--trip-fab-flyout-open");
+          void sheetEl.offsetWidth;
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              sheetEl.classList.add("mobile-sheet--trip-fab-flyout-open");
+            });
+          });
+        }
       };
       const prefillAddForm = (kind) => {
         const date = quickAddState.date || tripStartRaw;
@@ -2813,10 +4052,46 @@ window.addEventListener("load", () => {
         const startDT = new Date(`${date}T${toTime(startMin)}`);
         const form = sheetFormForKindOnDesktop(kind) || findAddForm(kind);
         if (!form) return;
-        if (kind === "stop") {
-          setField(form, "itinerary_date", date);
-          setField(form, "start_time", toTime(startMin));
-          setField(form, "end_time", toTime(Math.min(DAY_MINUTES, startMin + 60)));
+        if (kind === "expense") {
+          window.remiSetFormDateIso?.(form, date);
+          const expFly = form.closest("[data-desktop-expense-flyout]");
+          if (expFly instanceof HTMLElement && window.innerWidth > 920) {
+            expFly.classList.remove("hidden");
+            expFly.setAttribute("aria-hidden", "false");
+            const cx = quickAddState.lastClientX;
+            const cy = quickAddState.lastClientY;
+            const placeExp = () => {
+              if (typeof cx !== "number" || typeof cy !== "number") return;
+              const vw = window.innerWidth;
+              const vh = window.innerHeight;
+              const pad = 12;
+              const rect = expFly.getBoundingClientRect();
+              const width = rect.width || 400;
+              const height = rect.height || 480;
+              const left = Math.max(pad, Math.min(vw - width - pad, cx + 12));
+              const top = Math.max(pad, Math.min(vh - height - pad, cy + 12));
+              expFly.style.left = `${left}px`;
+              expFly.style.top = `${top}px`;
+              expFly.style.right = "auto";
+              expFly.style.bottom = "auto";
+            };
+            placeExp();
+            requestAnimationFrame(placeExp);
+            window.setTimeout(() => focusFormField(form), 80);
+            return;
+          }
+        }
+        if (kind === "stop" || kind === "commute") {
+          const startAtEl = form.querySelector("input.remi-datetime-iso[name='start_at']");
+          if (startAtEl instanceof HTMLInputElement) {
+            const endM = Math.min(DAY_MINUTES, startMin + 60);
+            setField(form, "start_at", toDateTimeLocal(new Date(`${date}T${toTime(startMin)}`)));
+            setField(form, "end_at", toDateTimeLocal(new Date(`${date}T${toTime(endM)}`)));
+          } else {
+            setField(form, "itinerary_date", date);
+            setField(form, "start_time", toTime(startMin));
+            setField(form, "end_time", toTime(Math.min(DAY_MINUTES, startMin + 60)));
+          }
         } else if (kind === "flight") {
           setField(form, "depart_at", toDateTimeLocal(startDT));
           setField(form, "arrive_at", toDateTimeLocal(addMinutes(startDT, 90)));
@@ -2832,10 +4107,16 @@ window.addEventListener("load", () => {
         const mobileSheet = form.closest(".mobile-sheet");
         const onTripDesktop =
           !!document.querySelector("main.trip-details-page") && window.innerWidth > 920 && mobileSheet;
+        if (kind === "commute") {
+          form.closest("details")?.setAttribute("open", "");
+        }
         if (mobileSheet) {
           if (onTripDesktop) {
             showTripQuickSheetPanel(mobileSheet);
-            window.setTimeout(() => focusFormField(form), 60);
+            window.setTimeout(() => {
+              form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+              focusFormField(form);
+            }, 60);
           } else {
             const sheetId = mobileSheet.getAttribute("id");
             if (sheetId) {
@@ -2849,6 +4130,7 @@ window.addEventListener("load", () => {
             }, 40);
           }
         } else {
+          form.closest("details")?.setAttribute("open", "");
           form.scrollIntoView({ behavior: "smooth", block: "center" });
           window.setTimeout(() => focusFormField(form), 260);
         }
@@ -2871,6 +4153,43 @@ window.addEventListener("load", () => {
           syncWeekOffsetFromSelectedDate();
         }
         const entries = getRenderableEntries();
+        const escapeCalEntryTitleHtml = (s) =>
+          String(s || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        /** Shorter labels on calendar cards only (list / quick view keep full server titles). */
+        const calendarEntryDisplayTitle = (raw) => {
+          let t = String(raw || "");
+          t = t.replace(/^Accommodation check-in:\s*/i, "Accommodation: ");
+          t = t.replace(/^Vehicle rental pick-up:\s*/i, "Vehicle rental: ");
+          t = t.replace(/^Flight departure:\s*/i, "Flight: ");
+          return t;
+        };
+        const renderCalEntryArticle = (e) => {
+          const top = Math.max(0, e.startMin * PX_PER_MIN);
+          const h = Math.max(40, (e.endMin - e.startMin) * PX_PER_MIN);
+          const lane = e.lane || 0;
+          const laneCount = Math.max(1, e.laneCount || 1);
+          let laneStepPct = laneCount <= 5 ? 0.08 : 0.065;
+          if (laneCount > 1) {
+            laneStepPct = Math.min(laneStepPct, 0.52 / (laneCount - 1)); // keep at least ~48% width visible
+          }
+          const leftPct = laneCount > 1 ? lane * laneStepPct * 100 : 0;
+          const rightPct = laneCount > 1 ? (laneCount - lane - 1) * laneStepPct * 100 : 0;
+          const crowdedClass = laneCount >= 6 ? " is-crowded" : "";
+          const rf = pairedSpanResizeFlags(e);
+          const hideStart = rf.allowResizeStart ? "" : " hidden";
+          const hideEnd = rf.allowResizeEnd ? "" : " hidden";
+          const calTitleHtml = escapeCalEntryTitleHtml(calendarEntryDisplayTitle(e.title));
+          return `<article class="trip-itinerary-entry${crowdedClass}" data-itinerary-drag-item="${e.itemID}" data-kind="${e.markerKind}" data-lane-count="${laneCount}" style="top:${top}px;height:${h}px;left:calc(6px + ${leftPct.toFixed(2)}%);right:calc(6px + ${rightPct.toFixed(2)}%)">
+              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--start" data-itinerary-resize-handle="start" aria-hidden="true"${hideStart}></span>
+              <strong class="trip-itinerary-entry__title">${calTitleHtml}</strong>
+              <span class="trip-itinerary-entry__meta"><span class="material-symbols-outlined" aria-hidden="true">${e.markerKind === "flight" ? "flight" : e.markerKind === "stay" ? "hotel" : e.markerKind === "vehicle" ? "directions_car" : e.markerKind === "commute" ? "directions_transit" : "pin_drop"}</span>${toTime(e.startMin)} - ${toTime(e.endMin)}</span>
+              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--end" data-itinerary-resize-handle="end" aria-hidden="true"${hideEnd}></span>
+            </article>`;
+        };
         const wDates = weekDates();
         const visibleCols = Math.max(1, wDates.length);
         const compactCols = visibleCols > 1 && visibleCols < 7;
@@ -2895,25 +4214,7 @@ window.addEventListener("load", () => {
           const key = fmtDate(d);
           const dayEntries = entries.filter((e) => e.date === key);
           applyCollisionOffsets(dayEntries);
-          const cards = dayEntries.map((e) => {
-            const top = Math.max(0, e.startMin * PX_PER_MIN);
-            const h = Math.max(40, (e.endMin - e.startMin) * PX_PER_MIN);
-            const lane = e.lane || 0;
-            const laneCount = Math.max(1, e.laneCount || 1);
-            let laneStepPct = laneCount <= 5 ? 0.08 : 0.065;
-            if (laneCount > 1) {
-              laneStepPct = Math.min(laneStepPct, 0.52 / (laneCount - 1)); // keep at least ~48% width visible
-            }
-            const leftPct = laneCount > 1 ? lane * laneStepPct * 100 : 0;
-            const rightPct = laneCount > 1 ? (laneCount - lane - 1) * laneStepPct * 100 : 0;
-            const crowdedClass = laneCount >= 6 ? " is-crowded" : "";
-            return `<article class="trip-itinerary-entry${crowdedClass}" data-itinerary-drag-item="${e.itemID}" data-kind="${e.markerKind}" data-lane-count="${laneCount}" style="top:${top}px;height:${h}px;left:calc(6px + ${leftPct.toFixed(2)}%);right:calc(6px + ${rightPct.toFixed(2)}%)">
-              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--start" data-itinerary-resize-handle="start" aria-hidden="true"></span>
-              <strong class="trip-itinerary-entry__title">${e.title}</strong>
-              <span class="trip-itinerary-entry__meta"><span class="material-symbols-outlined" aria-hidden="true">${e.markerKind === "flight" ? "flight" : e.markerKind === "stay" ? "hotel" : e.markerKind === "vehicle" ? "directions_car" : "pin_drop"}</span>${toTime(e.startMin)} - ${toTime(e.endMin)}</span>
-              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--end" data-itinerary-resize-handle="end" aria-hidden="true"></span>
-            </article>`;
-          }).join("");
+          const cards = dayEntries.map((e) => renderCalEntryArticle(e)).join("");
           const selectedClass = state.selectedDate === key ? " is-selected" : "";
           return `<div class="trip-itinerary-day-col${selectedClass}" data-itinerary-drop-date="${key}" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${hourLines}${cards}</div>`;
         }).join("");
@@ -2932,27 +4233,15 @@ window.addEventListener("load", () => {
         state.selectedDate = dayDate;
         const dayEntries = entries.filter((e) => e.date === dayDate);
         applyCollisionOffsets(dayEntries);
-        dayView.innerHTML = `<section class="trip-itinerary-day-wrap">
-          <header class="trip-itinerary-day-head"><strong>${new Date(`${dayDate}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</strong><small>Drag handles to adjust duration · tap an entry to edit</small></header>
-          <div class="trip-itinerary-day-body trip-itinerary-day-body--grid" data-itinerary-scroll-surface><aside class="trip-itinerary-time-col" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${timeTicks}</aside><div class="trip-itinerary-day-col trip-itinerary-day-col--single" data-itinerary-drop-date="${dayDate}" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${hourLines}${dayEntries.map((e) => {
-            const top = Math.max(0, e.startMin * PX_PER_MIN);
-            const h = Math.max(40, (e.endMin - e.startMin) * PX_PER_MIN);
-            const lane = e.lane || 0;
-            const laneCount = Math.max(1, e.laneCount || 1);
-            let laneStepPct = laneCount <= 5 ? 0.08 : 0.065;
-            if (laneCount > 1) {
-              laneStepPct = Math.min(laneStepPct, 0.52 / (laneCount - 1)); // keep at least ~48% width visible
-            }
-            const leftPct = laneCount > 1 ? lane * laneStepPct * 100 : 0;
-            const rightPct = laneCount > 1 ? (laneCount - lane - 1) * laneStepPct * 100 : 0;
-            const crowdedClass = laneCount >= 6 ? " is-crowded" : "";
-            return `<article class="trip-itinerary-entry${crowdedClass}" data-itinerary-drag-item="${e.itemID}" data-kind="${e.markerKind}" data-lane-count="${laneCount}" style="top:${top}px;height:${h}px;left:calc(6px + ${leftPct.toFixed(2)}%);right:calc(6px + ${rightPct.toFixed(2)}%)">
-              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--start" data-itinerary-resize-handle="start" aria-hidden="true"></span>
-              <strong class="trip-itinerary-entry__title">${e.title}</strong>
-              <span class="trip-itinerary-entry__meta"><span class="material-symbols-outlined" aria-hidden="true">${e.markerKind === "flight" ? "flight" : e.markerKind === "stay" ? "hotel" : e.markerKind === "vehicle" ? "directions_car" : "pin_drop"}</span>${toTime(e.startMin)} - ${toTime(e.endMin)}</span>
-              <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--end" data-itinerary-resize-handle="end" aria-hidden="true"></span>
-            </article>`;
-          }).join("")}</div></div>
+        const dayHeadline = new Date(`${dayDate}T00:00:00`).toLocaleDateString(undefined, {
+          weekday: "long",
+          month: "short",
+          day: "numeric"
+        });
+        const dayHeadlineAttr = dayHeadline.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        dayView.innerHTML = `<section class="trip-itinerary-day-wrap" aria-label="Schedule for ${dayHeadlineAttr}">
+          <header class="trip-itinerary-day-head"><small>Drag handles to adjust duration · tap an entry to edit</small></header>
+          <div class="trip-itinerary-day-body trip-itinerary-day-body--grid" data-itinerary-scroll-surface><aside class="trip-itinerary-time-col" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${timeTicks}</aside><div class="trip-itinerary-day-col trip-itinerary-day-col--single" data-itinerary-drop-date="${dayDate}" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${hourLines}${dayEntries.map((e) => renderCalEntryArticle(e)).join("")}</div></div>
         </section>`;
         const nextWeekSurface = weekView.querySelector("[data-itinerary-scroll-surface]");
         const nextDaySurface = dayView.querySelector("[data-itinerary-scroll-surface]");
@@ -2978,6 +4267,9 @@ window.addEventListener("load", () => {
       const onResizeCommit = async (entry, nextStart, nextEnd, edge, colEl) => {
         const targetDate = entry.date;
         if (!entry || !targetDate) return;
+        const rf = pairedSpanResizeFlags(entry);
+        if (edge === "start" && !rf.allowResizeStart) return;
+        if (edge === "end" && !rf.allowResizeEnd) return;
         const rollback = { date: entry.date, startMin: entry.startMin, endMin: entry.endMin };
         state.overrides.set(entry.itemID, { date: targetDate, startMin: nextStart, endMin: nextEnd });
         renderCalendar();
@@ -3005,13 +4297,36 @@ window.addEventListener("load", () => {
       };
       const bindCalendarInteractions = () => {
         if (desktopCalFlyout) {
+          const desktopExpenseFlyout = document.querySelector("[data-desktop-expense-flyout]");
           desktopCalFlyout.querySelectorAll("[data-desktop-calendar-add]").forEach((btn) => {
-            btn.addEventListener("click", () => {
+            btn.addEventListener("click", (ev) => {
+              ev.stopPropagation();
               const kind = btn.getAttribute("data-desktop-calendar-add") || "";
+              if (kind === "expense") {
+                closeDesktopFlyout();
+                window.setTimeout(() => prefillAddForm(kind), 0);
+                return;
+              }
               prefillAddForm(kind);
               closeDesktopFlyout();
             });
           });
+          if (desktopExpenseFlyout instanceof HTMLElement) {
+            document.addEventListener("click", (event) => {
+              if (desktopExpenseFlyout.classList.contains("hidden")) return;
+              const t = event.target;
+              if (!(t instanceof HTMLElement)) return;
+              if (t.closest("[data-desktop-expense-flyout]")) return;
+              desktopExpenseFlyout.classList.add("hidden");
+              desktopExpenseFlyout.setAttribute("aria-hidden", "true");
+            });
+            document.addEventListener("keydown", (event) => {
+              if (event.key !== "Escape") return;
+              if (desktopExpenseFlyout.classList.contains("hidden")) return;
+              desktopExpenseFlyout.classList.add("hidden");
+              desktopExpenseFlyout.setAttribute("aria-hidden", "true");
+            });
+          }
           document.addEventListener("click", (event) => {
             if (desktopCalFlyout.classList.contains("hidden")) return;
             const target = event.target;
@@ -3135,9 +4450,12 @@ window.addEventListener("load", () => {
           const itemID = card.getAttribute("data-itinerary-drag-item") || "";
           const entry = getRenderableEntries().find((x) => x.itemID === itemID);
           if (!entry) return;
+          const edge = handle.getAttribute("data-itinerary-resize-handle") === "start" ? "start" : "end";
+          const rf = pairedSpanResizeFlags(entry);
+          if (edge === "start" && !rf.allowResizeStart) return;
+          if (edge === "end" && !rf.allowResizeEnd) return;
           e.preventDefault();
           e.stopPropagation();
-          const edge = handle.getAttribute("data-itinerary-resize-handle") === "start" ? "start" : "end";
           state.resizeState = {
             pointerId: e.pointerId,
             card,
@@ -3202,44 +4520,358 @@ window.addEventListener("load", () => {
         };
         tripCalendarRoot.addEventListener("pointerup", (e) => finishPointerDrop(e, false), { passive: false });
         tripCalendarRoot.addEventListener("pointercancel", (e) => finishPointerDrop(e, true), { passive: true });
+        const stripPreviewCloneIds = (root) => {
+          if (!root) return;
+          root.removeAttribute("id");
+          root.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+        };
+        const escapeAttrSelector = (id) => {
+          const s = String(id || "");
+          if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(s);
+          return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        };
+        const bookingPreviewLegOrder = { depart: 0, checkin: 0, pickup: 0, arrive: 1, checkout: 1, dropoff: 1 };
+        const legSortKey = (r) => bookingPreviewLegOrder[(r.getAttribute("data-itinerary-booking-leg") || "").trim().toLowerCase()] ?? 99;
+        const returnFormsFromQuickEditWrap = () => {
+          if (!quickEditFormWrap) return;
+          quickEditFormWrap.querySelectorAll("form").forEach((f) => {
+            const fid = f.id || "";
+            let viewId = null;
+            if (fid.startsWith("accommodation-itinerary-edit-")) {
+              viewId = `itinerary-view-${fid.slice("accommodation-itinerary-edit-".length)}`;
+            } else if (fid.startsWith("vehicle-rental-itinerary-edit-")) {
+              viewId = `itinerary-view-${fid.slice("vehicle-rental-itinerary-edit-".length)}`;
+            } else if (fid.startsWith("flight-itinerary-edit-")) {
+              viewId = `itinerary-view-${fid.slice("flight-itinerary-edit-".length)}`;
+            } else if (fid.startsWith("commute-itinerary-edit-")) {
+              viewId = `itinerary-view-${fid.slice("commute-itinerary-edit-".length)}`;
+            } else if (fid.startsWith("itinerary-edit-")) {
+              viewId = `itinerary-view-${fid.slice("itinerary-edit-".length)}`;
+            }
+            if (!viewId) return;
+            const viewEl = document.getElementById(viewId);
+            const r = viewEl?.closest(".timeline-item");
+            if (r) {
+              r.appendChild(f);
+              f.classList.add("hidden");
+            }
+          });
+          quickEditFormWrap.replaceChildren();
+        };
         tripCalendarRoot.addEventListener("click", (e) => {
           if (e.target?.closest?.("[data-itinerary-resize-handle]")) return;
           const card = e.target?.closest?.("[data-itinerary-drag-item]");
-          if (!card || !quickEditModal || !quickEditBody) return;
+          if (!card || !quickEditModal || !quickEditBody || !quickEditPreview || !quickEditFormWrap) return;
           if (Date.now() - state.lastDragEndAt < 180) return;
           const entry = getRenderableEntries().find((x) => x.itemID === (card.getAttribute("data-itinerary-drag-item") || ""));
           if (!entry) return;
           const form = entry.form;
-          if (quickEditTitle) quickEditTitle.textContent = entry.title;
-          quickEditBody.innerHTML = "";
-          quickEditBody.appendChild(form);
-          form.classList.remove("hidden");
-          quickEditModal.classList.remove("hidden");
-          quickEditModal.setAttribute("aria-hidden", "false");
+          const row = entry.row;
+
+          const resetQuickEditChrome = () => {
+            if (quickEditModeLabel) quickEditModeLabel.textContent = "Quick view";
+            const editBtn = quickEditModal.querySelector("[data-itinerary-quick-edit-to-edit]");
+            if (editBtn) editBtn.removeAttribute("hidden");
+            if (quickEditPanel) quickEditPanel.setAttribute("aria-label", "Itinerary quick view");
+          };
+
           const closeModal = () => {
-            const row = entry.row;
-            if (row) row.appendChild(form);
-            form.classList.add("hidden");
+            if (calendarQuickEditUiAbort) {
+              calendarQuickEditUiAbort.abort();
+              calendarQuickEditUiAbort = null;
+            }
+            detachItineraryQuickEditEscape();
+            returnFormsFromQuickEditWrap();
+            quickEditPreview.innerHTML = "";
+            quickEditFormWrap.classList.add("hidden");
+            quickEditPreview.classList.remove("hidden");
+            resetQuickEditChrome();
+            delete quickEditModal.remiQuickEditSession;
+            if (quickEditBody) {
+              delete quickEditBody.remiQuickEditPreviewBackup;
+              delete quickEditBody.remiQuickEditTitleBackup;
+            }
             quickEditModal.classList.add("hidden");
             quickEditModal.setAttribute("aria-hidden", "true");
           };
-          const onSubmit = async (ev) => {
-            ev.preventDefault();
-            ev.stopImmediatePropagation();
-            try {
-              await submitFormAjax(form);
-              await syncAllRenderedItineraryRows();
-              closeModal();
-              renderCalendar();
-              showToast("Changes saved.");
-            } catch (error) {
-              showToast(error?.message || "Unable to save right now.");
+
+          const openEditMode = () => {
+            if (quickEditPreview && quickEditBody) {
+              quickEditBody.remiQuickEditPreviewBackup = quickEditPreview.innerHTML;
+              if (quickEditTitle) quickEditBody.remiQuickEditTitleBackup = quickEditTitle.textContent;
             }
+            quickEditPreview.innerHTML = "";
+            quickEditPreview.classList.add("hidden");
+            quickEditFormWrap.classList.remove("hidden");
+            quickEditFormWrap.appendChild(form);
+            form.classList.remove("hidden");
+            if (quickEditModeLabel) quickEditModeLabel.textContent = "Edit";
+            const editBtn = quickEditModal.querySelector("[data-itinerary-quick-edit-to-edit]");
+            if (editBtn) editBtn.setAttribute("hidden", "");
+            if (quickEditPanel) quickEditPanel.setAttribute("aria-label", "Edit itinerary item");
+
+            const onSubmit = async (ev) => {
+              ev.preventDefault();
+              ev.stopImmediatePropagation();
+              try {
+                await submitFormAjax(form);
+                await syncAllRenderedItineraryRows();
+                closeModal();
+                renderCalendar();
+                showToast("Changes saved.");
+              } catch (err) {
+                showToast(err?.message || "Unable to save right now.");
+              }
+            };
+            form.addEventListener("submit", onSubmit, { once: true, capture: true });
           };
-          form.addEventListener("submit", onSubmit, { once: true, capture: true });
+
+          returnFormsFromQuickEditWrap();
+          if (calendarQuickEditUiAbort) {
+            calendarQuickEditUiAbort.abort();
+            calendarQuickEditUiAbort = null;
+          }
+          calendarQuickEditUiAbort = new AbortController();
+          const quickEditUiSignal = calendarQuickEditUiAbort.signal;
+
+          if (quickEditTitle) quickEditTitle.textContent = entry.title ? ` ${entry.title}` : "";
+          quickEditPreview.innerHTML = "";
+          quickEditFormWrap.classList.add("hidden");
+          quickEditPreview.classList.remove("hidden");
+
+          const bookingId = row?.getAttribute("data-itinerary-booking-id") || "";
+          const mk = row?.getAttribute("data-marker-kind") || "";
+          const useCombinedPreview =
+            Boolean(listPanel) &&
+            bookingId &&
+            (mk === "flight" || mk === "stay" || mk === "vehicle");
+          if (useCombinedPreview) {
+            const peers = Array.from(
+              listPanel.querySelectorAll(`[data-itinerary-booking-id="${escapeAttrSelector(bookingId)}"]`)
+            ).filter((r) => (r.getAttribute("data-marker-kind") || "") === mk);
+            if (peers.length > 1) {
+              peers.sort((a, b) => legSortKey(a) - legSortKey(b));
+              const wrap = document.createElement("div");
+              wrap.className = "trip-itinerary-quick-edit__preview-combined";
+              const fieldLabelLc = (el) =>
+                el?.querySelector(".itinerary-label")?.textContent?.trim().toLowerCase() || "";
+              const takeField = (root, labelLc) => {
+                for (const f of root.querySelectorAll(".itinerary-field")) {
+                  if (fieldLabelLc(f) === labelLc) return f.cloneNode(true);
+                }
+                return null;
+              };
+              const mkLabeledField = (label, valueText) => {
+                const f = document.createElement("div");
+                f.className = "itinerary-field";
+                const lab = document.createElement("span");
+                lab.className = "itinerary-label";
+                lab.textContent = label;
+                const val = document.createElement("span");
+                val.className = "itinerary-value";
+                const t = (valueText || "").trim();
+                val.textContent = t || "—";
+                f.append(lab, val);
+                return f;
+              };
+              if (mk === "flight") {
+                const departRoot = peers[0]?.querySelector(".itinerary-item-view");
+                const arriveRoot = peers[1]?.querySelector(".itinerary-item-view");
+                const mainDepart = departRoot?.querySelector(".itinerary-vehicle-main");
+                const mainArrive = arriveRoot?.querySelector(".itinerary-vehicle-main");
+                if (departRoot && arriveRoot && mainDepart && mainArrive) {
+                  const merged = document.createElement("div");
+                  merged.className =
+                    "item-view itinerary-item-view itinerary-booking-view trip-itinerary-quick-edit__preview-flight-merged";
+                  const main = document.createElement("div");
+                  main.className = "itinerary-vehicle-main";
+                  const depTitle = mainDepart.querySelector(":scope > strong");
+                  if (depTitle) main.appendChild(depTitle.cloneNode(true));
+                  ["airline", "flight number", "booking reference", "departure airport", "flight departure"].forEach(
+                    (lab) => {
+                      const n = takeField(mainDepart, lab);
+                      if (n) main.appendChild(n);
+                    }
+                  );
+                  ["arrival airport", "flight arrival"].forEach((lab) => {
+                    const n = takeField(mainArrive, lab);
+                    if (n) main.appendChild(n);
+                  });
+                  ["total cost", "notes"].forEach((lab) => {
+                    const n = takeField(mainDepart, lab);
+                    if (n) main.appendChild(n);
+                  });
+                  const mediaFlight = departRoot.querySelector(".itinerary-entry-media-row");
+                  if (mediaFlight) main.appendChild(mediaFlight.cloneNode(true));
+                  const hint = mainDepart.querySelector(".itinerary-hint");
+                  if (hint) main.appendChild(hint.cloneNode(true));
+                  merged.appendChild(main);
+                  stripPreviewCloneIds(merged);
+                  wrap.appendChild(merged);
+                }
+              } else if (mk === "stay") {
+                const checkinRoot = peers[0]?.querySelector(".itinerary-item-view");
+                const checkoutRoot = peers[1]?.querySelector(".itinerary-item-view");
+                const checkinMain = checkinRoot?.querySelector(".itinerary-vehicle-main");
+                const checkoutMain = checkoutRoot?.querySelector(".itinerary-vehicle-main");
+                if (checkinRoot && checkoutRoot && checkinMain && checkoutMain) {
+                  const stripAccTitle = (t) =>
+                    String(t || "")
+                      .replace(/^Accommodation check-in:\s*/i, "")
+                      .replace(/^Accommodation check-out:\s*/i, "")
+                      .trim();
+                  const rawStrong = checkinMain.querySelector(":scope > strong")?.textContent?.trim() || "";
+                  const hotelName = stripAccTitle(rawStrong) || stripAccTitle(entry.title || "");
+                  const merged = document.createElement("div");
+                  merged.className =
+                    "item-view itinerary-item-view itinerary-booking-view trip-itinerary-quick-edit__preview-flight-merged";
+                  const main = document.createElement("div");
+                  main.className = "itinerary-vehicle-main";
+                  const h = document.createElement("strong");
+                  h.textContent = hotelName ? `Accommodation: ${hotelName}` : rawStrong || "Accommodation";
+                  main.appendChild(h);
+                  const addr = takeField(checkinMain, "address");
+                  if (addr) main.appendChild(addr);
+                  const bookRef = takeField(checkinMain, "booking reference");
+                  if (bookRef) main.appendChild(bookRef);
+                  const cinDt = takeField(checkinMain, "check in date & time");
+                  if (cinDt) main.appendChild(cinDt);
+                  const coutDt = takeField(checkoutMain, "check out date & time");
+                  if (coutDt) main.appendChild(coutDt);
+                  const cost = takeField(checkinMain, "total cost");
+                  const notes = takeField(checkinMain, "notes");
+                  if (cost) main.appendChild(cost);
+                  if (notes) {
+                    if (cost) notes.classList.remove("itinerary-field--full");
+                    else notes.classList.add("itinerary-field--full");
+                    main.appendChild(notes);
+                  }
+                  const mediaStay = checkinRoot.querySelector(".itinerary-entry-media-row");
+                  if (mediaStay) main.appendChild(mediaStay.cloneNode(true));
+                  const hint = checkinMain.querySelector(".itinerary-hint");
+                  if (hint) main.appendChild(hint.cloneNode(true));
+                  merged.appendChild(main);
+                  stripPreviewCloneIds(merged);
+                  wrap.appendChild(merged);
+                  if (quickEditTitle && hotelName) quickEditTitle.textContent = ` Accommodation: ${hotelName}`;
+                }
+              } else if (mk === "vehicle") {
+                const pickupRoot = peers[0]?.querySelector(".itinerary-item-view");
+                const dropoffRoot = peers[1]?.querySelector(".itinerary-item-view");
+                const pickupMain = pickupRoot?.querySelector(".itinerary-vehicle-main");
+                const dropoffMain = dropoffRoot?.querySelector(".itinerary-vehicle-main");
+                if (pickupRoot && dropoffRoot && pickupMain && dropoffMain) {
+                  const stripVehTitle = (t) =>
+                    String(t || "")
+                      .replace(/^Vehicle rental pick-up:\s*/i, "")
+                      .replace(/^Vehicle rental drop-off:\s*/i, "")
+                      .trim();
+                  const rawStrong = pickupMain.querySelector(":scope > strong")?.textContent?.trim() || "";
+                  const vehicleName = stripVehTitle(rawStrong) || stripVehTitle(entry.title || "");
+                  const merged = document.createElement("div");
+                  merged.className =
+                    "item-view itinerary-item-view itinerary-booking-view trip-itinerary-quick-edit__preview-flight-merged";
+                  const main = document.createElement("div");
+                  main.className = "itinerary-vehicle-main";
+                  const h = document.createElement("strong");
+                  h.textContent = vehicleName ? `Vehicle rental: ${vehicleName}` : rawStrong || "Vehicle rental";
+                  main.appendChild(h);
+                  const bookRef = takeField(pickupMain, "booking reference");
+                  if (bookRef) main.appendChild(bookRef);
+                  let rental = takeField(pickupMain, "rental · insurance");
+                  if (!rental) rental = takeField(pickupMain, "rental");
+                  if (!rental) rental = takeField(pickupMain, "insurance");
+                  if (rental) main.appendChild(rental);
+                  const pickLoc = takeField(pickupMain, "pick up location");
+                  if (pickLoc) main.appendChild(pickLoc);
+                  const pickDt = takeField(pickupMain, "pick up date & time");
+                  if (pickDt) main.appendChild(pickDt);
+                  let dropLoc = takeField(dropoffMain, "drop off location");
+                  if (!dropLoc) dropLoc = takeField(dropoffMain, "pick up location");
+                  if (dropLoc) main.appendChild(dropLoc);
+                  const dropDt = takeField(dropoffMain, "drop off date & time");
+                  if (dropDt) main.appendChild(dropDt);
+                  const notesEl = takeField(pickupMain, "notes");
+                  if (notesEl) {
+                    const nVal = notesEl.querySelector(".itinerary-value")?.textContent?.trim() || "";
+                    const dupNote =
+                      vehicleName && nVal && nVal.toLowerCase() === vehicleName.toLowerCase();
+                    if (!dupNote) {
+                      notesEl.classList.add("itinerary-field--full");
+                      main.appendChild(notesEl);
+                    }
+                  }
+                  const mediaVeh = pickupRoot.querySelector(".itinerary-entry-media-row");
+                  if (mediaVeh) main.appendChild(mediaVeh.cloneNode(true));
+                  const hint = pickupMain.querySelector(".itinerary-hint");
+                  if (hint) main.appendChild(hint.cloneNode(true));
+                  merged.appendChild(main);
+                  stripPreviewCloneIds(merged);
+                  wrap.appendChild(merged);
+                  if (quickEditTitle && vehicleName) quickEditTitle.textContent = ` Vehicle rental: ${vehicleName}`;
+                }
+              }
+              if (!wrap.firstChild) {
+                let bookingPreviewMediaShown = false;
+                peers.forEach((peer) => {
+                  const vr = peer.querySelector(".itinerary-item-view");
+                  if (!vr) return;
+                  const c = vr.cloneNode(true);
+                  stripPreviewCloneIds(c);
+                  const mediaRows = c.querySelectorAll(".itinerary-entry-media-row");
+                  if (mediaRows.length) {
+                    if (bookingPreviewMediaShown) {
+                      mediaRows.forEach((el) => el.remove());
+                    } else {
+                      bookingPreviewMediaShown = true;
+                    }
+                  }
+                  wrap.appendChild(c);
+                });
+              }
+              if (wrap.childNodes.length) {
+                quickEditPreview.appendChild(wrap);
+              }
+            }
+          }
+          if (!quickEditPreview.firstChild) {
+            const viewRoot = row?.querySelector(".itinerary-item-view");
+            if (viewRoot) {
+              const clone = viewRoot.cloneNode(true);
+              stripPreviewCloneIds(clone);
+              quickEditPreview.appendChild(clone);
+            } else {
+              const fallback = document.createElement("div");
+              fallback.className = "trip-itinerary-quick-edit__preview-fallback";
+              const titleEl = document.createElement("p");
+              titleEl.className = "trip-itinerary-quick-edit__preview-fallback-title";
+              titleEl.textContent = entry.title;
+              fallback.appendChild(titleEl);
+              const metaEl = document.createElement("p");
+              metaEl.className = "muted";
+              metaEl.textContent = `${toTime(entry.startMin)} – ${toTime(entry.endMin)}`;
+              fallback.appendChild(metaEl);
+              quickEditPreview.appendChild(fallback);
+            }
+          }
+
+          resetQuickEditChrome();
+          quickEditModal.remiQuickEditSession = {
+            closeModal,
+            openEditMode,
+            signal: quickEditUiSignal
+          };
+          quickEditModal.classList.remove("hidden");
+          quickEditModal.setAttribute("aria-hidden", "false");
+
           quickEditModal.querySelectorAll("[data-itinerary-quick-edit-close]").forEach((btn) => {
-            btn.addEventListener("click", closeModal, { once: true });
+            btn.addEventListener("click", closeModal, { once: true, signal: quickEditUiSignal });
           });
+          const toEditBtn = quickEditModal.querySelector("[data-itinerary-quick-edit-to-edit]");
+          if (toEditBtn) {
+            toEditBtn.addEventListener("click", () => openEditMode(), { once: true, signal: quickEditUiSignal });
+          }
+          attachItineraryQuickEditEscape(closeModal);
         });
       };
       const startChangePolling = () => {
@@ -3848,6 +5480,9 @@ window.addEventListener("load", () => {
     if (formId.startsWith("flight-itinerary-edit-")) {
       return `itinerary-view-${formId.slice("flight-itinerary-edit-".length)}`;
     }
+    if (formId.startsWith("commute-itinerary-edit-")) {
+      return `itinerary-view-${formId.slice("commute-itinerary-edit-".length)}`;
+    }
     return formId.replace("-edit-", "-view-");
   };
 
@@ -3876,15 +5511,42 @@ window.addEventListener("load", () => {
       const quickEditBodyEl = document.querySelector("[data-itinerary-quick-edit-body]");
       const quickEditModalEl = document.querySelector("[data-itinerary-quick-edit-modal]");
       if (quickEditBodyEl && quickEditModalEl && quickEditBodyEl.contains(form)) {
+        detachItineraryQuickEditEscape();
         const viewId = itineraryViewIdForForm(formId);
         const view = viewId ? document.getElementById(viewId) : null;
         const row = view?.closest(".timeline-item");
         if (row) row.appendChild(form);
+        if (typeof form.reset === "function") form.reset();
         form.classList.add("hidden");
         if (row) row.classList.remove("editing");
         if (view) view.classList.remove("hidden");
-        quickEditModalEl.classList.add("hidden");
-        quickEditModalEl.setAttribute("aria-hidden", "true");
+        const previewPane = quickEditBodyEl.querySelector("[data-itinerary-quick-edit-preview]");
+        const formWrapEl = quickEditBodyEl.querySelector("[data-itinerary-quick-edit-form-wrap]");
+        const modeLbl = quickEditModalEl.querySelector("[data-itinerary-quick-edit-mode-label]");
+        const editBtnReset = quickEditModalEl.querySelector("[data-itinerary-quick-edit-to-edit]");
+        const panelEl = quickEditModalEl.querySelector("[data-itinerary-quick-edit-panel]");
+        const titleEl = quickEditModalEl.querySelector("[data-itinerary-quick-edit-title]");
+        if (previewPane) {
+          const backupHtml = quickEditBodyEl.remiQuickEditPreviewBackup;
+          previewPane.innerHTML = typeof backupHtml === "string" ? backupHtml : "";
+          previewPane.classList.remove("hidden");
+        }
+        if (titleEl && quickEditBodyEl.remiQuickEditTitleBackup != null) {
+          titleEl.textContent = quickEditBodyEl.remiQuickEditTitleBackup;
+        }
+        if (formWrapEl) formWrapEl.classList.add("hidden");
+        if (modeLbl) modeLbl.textContent = "Quick view";
+        if (editBtnReset) editBtnReset.removeAttribute("hidden");
+        if (panelEl) panelEl.setAttribute("aria-label", "Itinerary quick view");
+        quickEditModalEl.classList.remove("hidden");
+        quickEditModalEl.setAttribute("aria-hidden", "false");
+        const sess = quickEditModalEl.remiQuickEditSession;
+        if (sess?.closeModal && sess?.openEditMode && sess?.signal) {
+          attachItineraryQuickEditEscape(sess.closeModal);
+          if (editBtnReset) {
+            editBtnReset.addEventListener("click", () => sess.openEditMode(), { once: true, signal: sess.signal });
+          }
+        }
         return;
       }
       if (form.classList.contains("budget-expense-edit-form")) {
@@ -3972,6 +5634,7 @@ window.addEventListener("load", () => {
       const formId = btn.getAttribute("data-inline-edit-open");
       const form = formId ? document.getElementById(formId) : null;
       if (!form) return;
+      if (window.remiHandleDesktopTripFlyoutEdit?.(form, formId)) return;
       if (form.classList.contains("budget-expense-edit-form")) {
         const expenseId = form.getAttribute("data-budget-expense-id") || "";
         const editTr = expenseId
@@ -4040,7 +5703,11 @@ window.addEventListener("load", () => {
       const dateInput =
         form.querySelector("input.remi-date-iso[name='itinerary_date']") ||
         form.querySelector("input[name='itinerary_date']");
-      if (dateInput) dateInput.dataset.originalValue = dateInput.value;
+      if (dateInput instanceof HTMLInputElement) dateInput.dataset.originalValue = dateInput.value;
+      const startAtSnap = form.querySelector("input.remi-datetime-iso[name='start_at']");
+      if (startAtSnap instanceof HTMLInputElement && !dateInput) {
+        startAtSnap.dataset.originalValue = startAtSnap.value;
+      }
       if (form.classList.contains("remi-checklist-inline-edit-form")) {
         window.requestAnimationFrame(() => {
           form.querySelector("input[name='text']")?.focus();
@@ -4079,7 +5746,15 @@ window.addEventListener("load", () => {
     if (!(btn instanceof HTMLElement)) return;
     const formId = btn.getAttribute("data-inline-edit-cancel");
     if (!formId) return;
+    const flyoutEditBody = btn.closest(".remi-trip-flyout-edit-body");
     closeInlineEdit(formId);
+    if (flyoutEditBody instanceof HTMLElement) {
+      const sheet = flyoutEditBody.closest(".mobile-sheet");
+      if (sheet instanceof HTMLElement) {
+        clearDirtyStateForSheet(sheet);
+      }
+      window.remiCloseDrawer?.();
+    }
   });
 
   document.addEventListener("click", (event) => {
@@ -4196,14 +5871,31 @@ window.addEventListener("load", () => {
     const longitudeInput = itineraryForm.querySelector("[data-longitude-input]");
     const locationStatus = itineraryForm.querySelector("[data-location-status]");
     const suggestionBox = itineraryForm.querySelector("[data-location-suggestions]");
+    const startAtIso = itineraryForm.querySelector("input.remi-datetime-iso[name='start_at']");
+    const endAtIso = itineraryForm.querySelector("input.remi-datetime-iso[name='end_at']");
     const itineraryDateIso =
       itineraryForm.querySelector("input.remi-date-iso[name='itinerary_date']") ||
+      itineraryForm.querySelector("input[type='hidden'][name='itinerary_date']") ||
       itineraryForm.querySelector("input[name='itinerary_date']");
-    const itineraryDateInput = itineraryDateIso;
+    const itineraryDateInput =
+      (itineraryDateIso instanceof HTMLInputElement ? itineraryDateIso : null) ||
+      (startAtIso instanceof HTMLInputElement ? startAtIso : null);
     const itineraryDateVisibleEl = () => {
-      const iso = itineraryForm.querySelector("input.remi-date-iso[name='itinerary_date']");
-      const wrap = iso?.closest?.("[data-remi-date]");
-      return wrap?.querySelector?.(".remi-date-visible") || null;
+      const isoLegacy = itineraryForm.querySelector("input.remi-date-iso[name='itinerary_date']");
+      const wrapLegacy = isoLegacy?.closest?.("[data-remi-date]");
+      if (wrapLegacy) {
+        const v = wrapLegacy.querySelector(".remi-date-visible");
+        if (v instanceof HTMLElement) return v;
+      }
+      const s = itineraryForm.querySelector("input.remi-datetime-iso[name='start_at']");
+      const wrapDt = s?.closest?.("[data-remi-datetime]");
+      if (wrapDt) {
+        const combined = wrapDt.querySelector(".remi-datetime-combined-part");
+        if (combined instanceof HTMLElement) return combined;
+        const part = wrapDt.querySelector(".remi-datetime-date-part");
+        if (part instanceof HTMLElement) return part;
+      }
+      return null;
     };
     const dateStatus = itineraryForm.querySelector("[data-date-status]");
     const tripStart = itineraryForm.getAttribute("data-trip-start") || "";
@@ -4248,8 +5940,36 @@ window.addEventListener("load", () => {
     };
 
     const validateDateInTripRange = () => {
-      if (!itineraryDateInput || !tripStart || !tripEnd) return true;
-      const selected = itineraryDateInput.value;
+      if (!tripStart || !tripEnd) return true;
+      const pickDate = (raw) => {
+        const s = String(raw || "").trim();
+        if (!s) return "";
+        return s.length >= 10 ? s.slice(0, 10) : "";
+      };
+      if (startAtIso instanceof HTMLInputElement && endAtIso instanceof HTMLInputElement) {
+        const d0 = pickDate(startAtIso.value);
+        const d1 = pickDate(endAtIso.value);
+        if (!d0) {
+          setDateStatus("Please select start date and time before saving.", "error");
+          return false;
+        }
+        if (!d1) {
+          setDateStatus("Please select end date and time before saving.", "error");
+          return false;
+        }
+        if (d0 < tripStart || d0 > tripEnd || d1 < tripStart || d1 > tripEnd) {
+          setDateStatus(`Dates must be between ${tripStartLabel} and ${tripEndLabel}.`, "error");
+          return false;
+        }
+        if (d0 !== d1) {
+          setDateStatus("Start and end must be on the same calendar day.", "error");
+          return false;
+        }
+        setDateStatus(`This date is within your trip (${tripStartLabel} – ${tripEndLabel}).`, "success");
+        return true;
+      }
+      if (!(itineraryDateIso instanceof HTMLInputElement)) return true;
+      const selected = pickDate(itineraryDateIso.value);
       if (!selected) {
         setDateStatus("Please select a date before saving.", "error");
         return false;
@@ -4258,10 +5978,7 @@ window.addEventListener("load", () => {
         setDateStatus(`Date must be between ${tripStartLabel} and ${tripEndLabel}.`, "error");
         return false;
       }
-      setDateStatus(
-        `This date is within your trip (${tripStartLabel} – ${tripEndLabel}).`,
-        "success"
-      );
+      setDateStatus(`This date is within your trip (${tripStartLabel} – ${tripEndLabel}).`, "success");
       return true;
     };
 
@@ -4400,13 +6117,21 @@ window.addEventListener("load", () => {
       });
       validateDateInTripRange();
     }
+    if (endAtIso instanceof HTMLInputElement && endAtIso !== itineraryDateInput) {
+      endAtIso.addEventListener("change", () => validateDateInTripRange());
+    }
 
-    itineraryForm.addEventListener("submit", async (event) => {
+    // Submit must stay synchronous for preventDefault + default action; async listeners and
+    // requestSubmit() without the original submitter caused first-click no-ops in some cases.
+    itineraryForm.addEventListener("submit", (event) => {
       if (allowResolvedSubmit) {
         allowResolvedSubmit = false;
         return;
       }
-      if (geocodeSubmitInProgress) return;
+      if (geocodeSubmitInProgress) {
+        event.preventDefault();
+        return;
+      }
       if (!validateDateInTripRange()) {
         event.preventDefault();
         const vis = itineraryDateVisibleEl();
@@ -4415,18 +6140,64 @@ window.addEventListener("load", () => {
         return;
       }
       if (!locationInput) return;
-      const query = locationInput.value;
-      if (!query || !query.trim()) return;
-      event.preventDefault();
-      geocodeSubmitInProgress = true;
-      const ok = await resolveLocation(query);
-      geocodeSubmitInProgress = false;
-      if (!ok) {
-        locationInput.focus();
+      const query = (locationInput.value || "").trim();
+      if (!query) return;
+
+      if (!locationLookupEnabled) {
         return;
       }
-      allowResolvedSubmit = true;
-      itineraryForm.requestSubmit();
+
+      const latVal = (latitudeInput?.value || "").trim();
+      const lngVal = (longitudeInput?.value || "").trim();
+      if (latVal && lngVal) {
+        const lat = parseFloat(latVal);
+        const lng = parseFloat(lngVal);
+        if (
+          Number.isFinite(lat) &&
+          Number.isFinite(lng) &&
+          Math.abs(lat) <= 90 &&
+          Math.abs(lng) <= 180
+        ) {
+          return;
+        }
+      }
+
+      event.preventDefault();
+      const sub =
+        event.submitter instanceof HTMLButtonElement || event.submitter instanceof HTMLInputElement
+          ? event.submitter
+          : undefined;
+      geocodeSubmitInProgress = true;
+      void resolveLocation(query)
+        .then((ok) => {
+          geocodeSubmitInProgress = false;
+          if (!ok) {
+            locationInput.focus();
+            return;
+          }
+          allowResolvedSubmit = true;
+          try {
+            if (typeof itineraryForm.requestSubmit === "function") {
+              if (sub && itineraryForm.contains(sub)) {
+                itineraryForm.requestSubmit(sub);
+              } else {
+                itineraryForm.requestSubmit();
+              }
+            } else {
+              itineraryForm.submit();
+            }
+          } catch (e) {
+            try {
+              itineraryForm.requestSubmit();
+            } catch (e2) {
+              itineraryForm.submit();
+            }
+          }
+        })
+        .catch(() => {
+          geocodeSubmitInProgress = false;
+          locationInput.focus();
+        });
     });
   };
 
@@ -4940,6 +6711,13 @@ window.addEventListener("load", () => {
   const inferToastMessage = (form) => {
     const explicit = form.getAttribute("data-toast-message");
     if (explicit) return explicit;
+    if (form.matches("[data-remi-unified-expense-add-form]")) {
+      const ft = form.querySelector(".remi-unified-expense-from-tab");
+      if (ft instanceof HTMLInputElement && !ft.disabled && String(ft.value || "").trim() === "1") {
+        return "Group expense saved.";
+      }
+      return "Expense saved.";
+    }
     const raw = (form.getAttribute("action") || "").trim();
     const lower = raw.toLowerCase();
     let path = lower;
@@ -5310,6 +7088,9 @@ window.addEventListener("load", () => {
       if (f.dataset.remiAjaxWired === "1") return;
       window.remiBindAjaxSubmitForm?.(f);
     });
+    root.querySelectorAll("form[data-remi-unified-expense-add-form]").forEach((f) => {
+      window.remiWireUnifiedExpenseForm?.(f);
+    });
     window.remiWireInlineEditOpenButtonsIn?.(root);
     window.remiWireDateFieldsIn?.(root);
     window.remiWireDateTimeFieldsIn?.(root);
@@ -5442,6 +7223,7 @@ window.addEventListener("load", () => {
     window.remiSetupMobileEntryCarouselsIn?.(scope);
     window.remiRefreshTripDocumentsListFilter?.();
     window.remiFitBudgetDonutCenterValues?.(scope);
+    window.remiWireMobileSheetFormDirtyIn?.(scope);
   };
 
   const replaceSelectorFromFreshDoc = (selector, freshDoc) => {
@@ -5943,54 +7725,55 @@ window.addEventListener("load", () => {
     };
   }
 
-  const handleAjaxFormSubmit = async (event) => {
+  const handleAjaxFormSubmit = (event) => {
     const form = event.currentTarget;
     if (!(form instanceof HTMLFormElement)) return;
-      if (event.defaultPrevented) return;
-      event.preventDefault();
-      const submitterEl = event.submitter;
-      const method = (form.getAttribute("method") || "post").toUpperCase();
-      const formData = new FormData(form);
-      mergeFormAssociatedControls(form, formData);
-      const fileInputs = form.querySelectorAll("input[type='file']");
-      if (fileInputs.length && typeof window.remiIsBlockedUploadFilename === "function") {
-        for (let j = 0; j < fileInputs.length; j++) {
-          const inp = fileInputs[j];
-          if (!(inp instanceof HTMLInputElement) || !inp.files) continue;
-          for (let i = 0; i < inp.files.length; i++) {
-            if (window.remiIsBlockedUploadFilename(inp.files[i].name)) {
-              showToast(
-                window.remiBlockedUploadFilenameMessage ||
-                  "This file type is not allowed — executables and scripts cannot be uploaded."
-              );
-              return;
-            }
+    if (event.defaultPrevented) return;
+    event.preventDefault();
+    const submitterEl = event.submitter;
+    const method = (form.getAttribute("method") || "post").toUpperCase();
+    const formData = new FormData(form);
+    mergeFormAssociatedControls(form, formData);
+    const fileInputs = form.querySelectorAll("input[type='file']");
+    if (fileInputs.length && typeof window.remiIsBlockedUploadFilename === "function") {
+      for (let j = 0; j < fileInputs.length; j++) {
+        const inp = fileInputs[j];
+        if (!(inp instanceof HTMLInputElement) || !inp.files) continue;
+        for (let i = 0; i < inp.files.length; i++) {
+          if (window.remiIsBlockedUploadFilename(inp.files[i].name)) {
+            showToast(
+              window.remiBlockedUploadFilenameMessage ||
+                "This file type is not allowed — executables and scripts cannot be uploaded."
+            );
+            return;
           }
         }
       }
-      if (
-        form.classList.contains("tab-settlement-form") ||
-        form.classList.contains("tab-settlement-edit-form")
-      ) {
-        const payer = String(formData.get("payer_user_id") ?? "").trim();
-        const payee = String(formData.get("payee_user_id") ?? "").trim();
-        if (payer && payee && payer === payee) {
-          showToast("Choose two different people for payer and payee.");
-          return;
-        }
+    }
+    if (
+      form.classList.contains("tab-settlement-form") ||
+      form.classList.contains("tab-settlement-edit-form")
+    ) {
+      const payer = String(formData.get("payer_user_id") ?? "").trim();
+      const payee = String(formData.get("payee_user_id") ?? "").trim();
+      if (payer && payee && payer === payee) {
+        showToast("Choose two different people for payer and payee.");
+        return;
       }
-      const hasFileInput = Boolean(form.querySelector("input[type='file']"));
-      const isMultipartForm = (form.enctype || "").toLowerCase().includes("multipart/form-data") || hasFileInput;
-      const requestBody = isMultipartForm ? formData : new URLSearchParams(formData);
-      const requestHeaders = {
-        "X-Requested-With": "XMLHttpRequest",
-        "Cache-Control": "no-cache",
-        Accept: "application/json"
-      };
-      if (!isMultipartForm) {
-        requestHeaders["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
-      }
-      const optimisticMutation = beginOptimisticAjaxMutation(form, formData);
+    }
+    const hasFileInput = Boolean(form.querySelector("input[type='file']"));
+    const isMultipartForm = (form.enctype || "").toLowerCase().includes("multipart/form-data") || hasFileInput;
+    const requestBody = isMultipartForm ? formData : new URLSearchParams(formData);
+    const requestHeaders = {
+      "X-Requested-With": "XMLHttpRequest",
+      "Cache-Control": "no-cache",
+      Accept: "application/json"
+    };
+    if (!isMultipartForm) {
+      requestHeaders["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
+    }
+    const optimisticMutation = beginOptimisticAjaxMutation(form, formData);
+    void (async () => {
       try {
         const response = await fetchNoStore(form.action, {
           method,
@@ -6031,6 +7814,40 @@ window.addEventListener("load", () => {
               return;
             }
           }
+        }
+        if (form.matches("[data-remi-unified-expense-add-form]")) {
+          const saveAnother =
+            submitterEl instanceof HTMLElement &&
+            (submitterEl.getAttribute("data-remi-save-expense-another") === "1" ||
+              submitterEl.getAttribute("data-remi-save-group-expense-another") === "1");
+          const msg = inferToastMessage(form);
+          if (saveAnother) {
+            if (document.body.classList.contains("budget-page")) {
+              try {
+                sessionStorage.setItem(TOAST_KEY, msg);
+                sessionStorage.setItem("remi_focus_budget_expense_title", "1");
+              } catch (e) {
+                /* ignore */
+              }
+              window.location.reload();
+              return;
+            }
+            showToast(msg);
+            if (document.querySelector(".trip-details-page .budget-tile")) {
+              await refreshBudgetTilesFromPage();
+            }
+            window.remiResetExpenseAddForm?.(form);
+            const titleInp = form.querySelector('input[name="title"]');
+            if (titleInp instanceof HTMLElement) titleInp.focus();
+            return;
+          }
+          try {
+            sessionStorage.setItem(TOAST_KEY, msg);
+          } catch (e) {
+            /* ignore */
+          }
+          window.location.reload();
+          return;
         }
         if (form.matches("[data-remi-expense-add-form]")) {
           const saveExpenseAnother =
@@ -6216,6 +8033,7 @@ window.addEventListener("load", () => {
           return;
         }
         showToast(inferToastMessage(form));
+        window.remiNotifyMobileSheetFormSaved?.(form);
       } catch (error) {
         optimisticMutation.rollback();
         const status = Number(error?.status || 0);
@@ -6229,6 +8047,7 @@ window.addEventListener("load", () => {
         }
         showToast(error?.message || "Unable to save right now.");
       }
+    })();
   };
 
   const bindAjaxSubmitForm = (form) => {
@@ -6239,6 +8058,9 @@ window.addEventListener("load", () => {
   };
   window.remiBindAjaxSubmitForm = bindAjaxSubmitForm;
   document.querySelectorAll("form[data-ajax-submit]").forEach((form) => bindAjaxSubmitForm(form));
+  document.querySelectorAll("form[data-remi-unified-expense-add-form]").forEach((form) => {
+    window.remiWireUnifiedExpenseForm?.(form);
+  });
 
   document.getElementById("tab-exp-view-all-btn")?.addEventListener("click", async () => {
     const btn = document.getElementById("tab-exp-view-all-btn");
@@ -6429,6 +8251,295 @@ window.addEventListener("load", () => {
   const mobileFabMenu = document.querySelector("[data-mobile-fab-menu]");
   const mobileBackdrop = document.querySelector("[data-mobile-sheet-backdrop]");
   const mobileSheets = Array.from(document.querySelectorAll(".mobile-sheet"));
+  let tripFabIconBridgeGeneration = 0;
+  const isTripFabFlyoutSheet = (el) =>
+    el instanceof HTMLElement && el.classList.contains("mobile-sheet--trip-fab-flyout");
+  const isTripFabFlyoutSlideContext = () => !!document.querySelector("main.trip-details-page");
+  const clearMobileSheetHeaderIconSlots = () => {
+    document.querySelectorAll("[data-mobile-sheet-header-icon-slot]").forEach((el) => {
+      el.replaceChildren();
+    });
+  };
+  const removeTripFabIconFlyClones = () => {
+    document.querySelectorAll(".mobile-fab-icon-fly-clone").forEach((node) => node.remove());
+  };
+  const placeMaterialIconInHeaderSlot = (slot, glyph) => {
+    if (!(slot instanceof HTMLElement) || !glyph) return;
+    slot.replaceChildren();
+    const perm = document.createElement("span");
+    perm.className = "material-symbols-outlined";
+    perm.setAttribute("aria-hidden", "true");
+    perm.textContent = glyph;
+    slot.appendChild(perm);
+  };
+  /** Target center + end scale for FAB → drawer header bridge (slot may be :empty with 0×0 box). */
+  const getTripFabHeaderIconFlyTarget = (slot, sourceIconHeight) => {
+    const row = slot?.closest(".mobile-sheet-title-row");
+    const h3 = row?.querySelector("h3");
+    const targetGlyphPx = 22;
+    const gap = 8;
+    if (h3 instanceof HTMLElement) {
+      const r = h3.getBoundingClientRect();
+      const cx = r.left - gap - targetGlyphPx / 2;
+      const cy = r.top + r.height / 2;
+      const scaleEnd = targetGlyphPx / Math.max(sourceIconHeight, 1);
+      return { cx, cy, scaleEnd };
+    }
+    const sr = slot.getBoundingClientRect();
+    return {
+      cx: sr.left + sr.width / 2,
+      cy: sr.top + sr.height / 2,
+      scaleEnd: targetGlyphPx / Math.max(sourceIconHeight, 1)
+    };
+  };
+  /**
+   * Spring-physics motion (stiffness / damping) in pixel + scale space.
+   * Uses a small coupling factor so k=300, c=30 integrates stably at 60fps; hard-capped at maxMs.
+   */
+  const springTripFabIconBridge = (from, to, stiffness, damping, maxMs, onFrame, onComplete) => {
+    const pos = { x: from.x, y: from.y, s: from.s };
+    const vel = { x: 0, y: 0, s: 0 };
+    const t0 = performance.now();
+    let lastT = t0;
+    const k = stiffness;
+    const c = damping;
+    const coupling = 1 / 900;
+    const step = (now) => {
+      const dt = Math.min(1 / 24, (now - lastT) / 1000);
+      lastT = now;
+      const elapsed = now - t0;
+      for (const key of ["x", "y", "s"]) {
+        const acc = (k * (to[key] - pos[key]) - c * vel[key]) * coupling;
+        vel[key] += acc * dt;
+        pos[key] += vel[key] * dt;
+      }
+      onFrame(pos);
+      const err =
+        Math.abs(to.x - pos.x) + Math.abs(to.y - pos.y) + Math.abs(to.s - pos.s) * 120;
+      const spd = Math.abs(vel.x) + Math.abs(vel.y) + Math.abs(vel.s);
+      if (elapsed >= maxMs || (err < 2.5 && spd < 12)) {
+        onFrame(to);
+        onComplete();
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+  const startTripFabMenuIconBridge = (snapshot, targetSheet) => {
+    if (!snapshot?.glyph || !(targetSheet instanceof HTMLElement)) return;
+    const gen = ++tripFabIconBridgeGeneration;
+    const slot = targetSheet.querySelector("[data-mobile-sheet-header-icon-slot]");
+    if (!(slot instanceof HTMLElement)) return;
+    const fly = getTripFabHeaderIconFlyTarget(slot, snapshot.baseH);
+    const clone = document.createElement("span");
+    clone.className = "material-symbols-outlined mobile-fab-icon-fly-clone";
+    clone.textContent = snapshot.glyph;
+    if (snapshot.fontSize) clone.style.fontSize = snapshot.fontSize;
+    if (snapshot.fontVariationSettings) clone.style.fontVariationSettings = snapshot.fontVariationSettings;
+    document.body.appendChild(clone);
+    const apply = (cx, cy, s) => {
+      clone.style.left = `${cx}px`;
+      clone.style.top = `${cy}px`;
+      clone.style.transform = `translate(-50%, -50%) scale(${s})`;
+    };
+    apply(snapshot.cx, snapshot.cy, 1);
+    springTripFabIconBridge(
+      { x: snapshot.cx, y: snapshot.cy, s: 1 },
+      { x: fly.cx, y: fly.cy, s: fly.scaleEnd },
+      300,
+      30,
+      350,
+      (p) => apply(p.x, p.y, p.s),
+      () => {
+        if (gen !== tripFabIconBridgeGeneration) return;
+        clone.remove();
+        placeMaterialIconInHeaderSlot(slot, snapshot.glyph);
+      }
+    );
+  };
+  const focusMobileCommuteForm = () => {
+    const form = document.getElementById("mobile-add-commute-form");
+    const focusable =
+      form?.querySelector("select[name='commute_from_item_id']") ||
+      form?.querySelector("input, textarea, select");
+    window.setTimeout(() => {
+      if (focusable && typeof focusable.focus === "function") focusable.focus();
+    }, 120);
+  };
+  const tripFlyoutEditMetaBySheetId = {
+    "mobile-sheet-stop": { kind: "stop", open: "stop", editTitle: "Edit Stop" },
+    "mobile-sheet-commute": { kind: "commute", open: "commute", editTitle: "Edit Commute Leg" },
+    "mobile-sheet-flight": { kind: "flight", open: "flight", editTitle: "Edit Flight" },
+    "mobile-sheet-accommodation": { kind: "accommodation", open: "accommodation", editTitle: "Edit Accommodation" },
+    "mobile-sheet-vehicle": { kind: "vehicle", open: "vehicle", editTitle: "Edit Vehicle Rental" }
+  };
+  const tripFlyoutSheetByOpenKey = {
+    stop: "mobile-sheet-stop",
+    commute: "mobile-sheet-commute",
+    flight: "mobile-sheet-flight",
+    accommodation: "mobile-sheet-accommodation",
+    vehicle: "mobile-sheet-vehicle",
+    checklist: "mobile-sheet-checklist",
+    expense: "mobile-sheet-expense"
+  };
+  const parseTripFlyoutKindAndIDFromForm = (form, formId = "") => {
+    if (!(form instanceof HTMLFormElement)) return null;
+    const action = form.getAttribute("action") || "";
+    const commuteID = action.match(/\/itinerary\/([^/]+)\/update/i)?.[1] || "";
+    if (form.classList.contains("commute-itinerary-form") || formId.startsWith("commute-itinerary-edit-")) {
+      return commuteID ? { kind: "commute", id: commuteID, sheetId: "mobile-sheet-commute" } : null;
+    }
+    const stopID = action.match(/\/itinerary\/([^/]+)\/update/i)?.[1] || "";
+    if (formId.startsWith("itinerary-edit-")) {
+      return stopID ? { kind: "stop", id: stopID, sheetId: "mobile-sheet-stop" } : null;
+    }
+    const flightID = action.match(/\/flights\/([^/]+)\/update/i)?.[1] || "";
+    if (flightID) return { kind: "flight", id: flightID, sheetId: "mobile-sheet-flight" };
+    const accommodationID = action.match(/\/accommodation\/([^/]+)\/update/i)?.[1] || "";
+    if (accommodationID) return { kind: "accommodation", id: accommodationID, sheetId: "mobile-sheet-accommodation" };
+    const vehicleID = action.match(/\/vehicle-rental\/([^/]+)\/update/i)?.[1] || "";
+    if (vehicleID) return { kind: "vehicle", id: vehicleID, sheetId: "mobile-sheet-vehicle" };
+    return null;
+  };
+  const tripFlyoutStateBySheetId = new Map();
+  const getTripFlyoutSheetDefaultBody = (sheet) => {
+    if (!(sheet instanceof HTMLElement)) return null;
+    if (sheet.id === "mobile-sheet-stop" || sheet.id === "mobile-sheet-commute") {
+      return sheet.querySelector(":scope > .trip-itinerary-drawer-scroll");
+    }
+    return sheet.querySelector(":scope > form");
+  };
+  const ensureTripFlyoutSheetState = (sheet) => {
+    if (!(sheet instanceof HTMLElement) || !sheet.id) return null;
+    if (tripFlyoutStateBySheetId.has(sheet.id)) return tripFlyoutStateBySheetId.get(sheet.id);
+    const titleEl = sheet.querySelector(":scope .mobile-sheet-head h3");
+    const defaultBody = getTripFlyoutSheetDefaultBody(sheet);
+    if (!(titleEl instanceof HTMLElement) || !(defaultBody instanceof HTMLElement)) return null;
+    const state = {
+      defaultTitle: titleEl.textContent || "",
+      titleEl,
+      defaultBody
+    };
+    tripFlyoutStateBySheetId.set(sheet.id, state);
+    return state;
+  };
+  const resetTripFlyoutSheetAddMode = (sheet) => {
+    const state = ensureTripFlyoutSheetState(sheet);
+    if (!state) return;
+    state.titleEl.textContent = state.defaultTitle;
+    state.defaultBody.classList.remove("hidden");
+    const editBody = sheet.querySelector(":scope > .remi-trip-flyout-edit-body");
+    if (editBody) editBody.remove();
+    delete sheet.dataset.remiTripFlyoutEditActive;
+  };
+  const resetAllTripFlyoutSheets = () => {
+    Object.keys(tripFlyoutEditMetaBySheetId).forEach((sheetId) => {
+      const sheet = document.getElementById(sheetId);
+      if (sheet instanceof HTMLElement) resetTripFlyoutSheetAddMode(sheet);
+    });
+  };
+  /** Cloned DOM (e.g. trip FAB edit flyout) copies `data-remi-*-wired` flags from the live form; strip so pickers re-bind. */
+  const stripRemiDomWireMarkersForClone = (root) => {
+    if (!(root instanceof HTMLElement)) return;
+    const ATTRS = [
+      "data-remi-date-wired",
+      "data-remi-time-wired",
+      "data-remi-datetime-wired",
+      "data-remi-inline-open-wired",
+      "data-remi-ajax-wired",
+      "data-remi-confirm-wired",
+      "data-remi-mobile-sheet-dirty-wired",
+      "data-remi-attachment-field-wired",
+      "data-remi-unified-expense-wired"
+    ];
+    ATTRS.forEach((attr) => {
+      root.querySelectorAll(`[${attr}]`).forEach((el) => el.removeAttribute(attr));
+    });
+  };
+
+  const wireDynamicInputsIn = (root) => {
+    if (!(root instanceof HTMLElement)) return;
+    window.remiBindAjaxSubmitForm &&
+      root.querySelectorAll("form[data-ajax-submit]").forEach((f) => window.remiBindAjaxSubmitForm(f));
+    window.remiWireDateFieldsIn?.(root);
+    window.remiWireDateTimeFieldsIn?.(root);
+    window.remiWireTimeFieldsIn?.(root);
+    window.remiWireInlineEditOpenButtonsIn?.(root);
+    window.remiWireAppConfirmOnForm &&
+      root.querySelectorAll("form[data-app-confirm]").forEach((f) => window.remiWireAppConfirmOnForm(f));
+    window.remiWireMobileSheetFormDirtyIn?.(root);
+    window.remiEnsureCsrfOnPostForms?.(root);
+  };
+  const findTripFlyoutSourceForm = (kind, id) => {
+    const normalizedKind = String(kind || "").toLowerCase();
+    const normalizedID = String(id || "").trim();
+    if (!normalizedKind || !normalizedID) return null;
+    const selectorsByKind = {
+      stop: `form.item-edit[id^="itinerary-edit-"][action*="/itinerary/${CSS.escape(normalizedID)}/update"]`,
+      commute: `form.commute-itinerary-form[action*="/itinerary/${CSS.escape(normalizedID)}/update"]`,
+      flight: `form.item-edit[action*="/flights/${CSS.escape(normalizedID)}/update"]`,
+      accommodation: `form.item-edit[action*="/accommodation/${CSS.escape(normalizedID)}/update"]`,
+      vehicle: `form.item-edit[action*="/vehicle-rental/${CSS.escape(normalizedID)}/update"]`
+    };
+    const selector = selectorsByKind[normalizedKind];
+    if (!selector) return null;
+    const form = document.querySelector(selector);
+    return form instanceof HTMLFormElement ? form : null;
+  };
+  const parseTripIDFromAction = (action) => {
+    const m = String(action || "").match(/\/trips\/([^/]+)/i);
+    return m && m[1] ? m[1] : "";
+  };
+  window.remiHandleDesktopTripFlyoutEdit = (form, formId = "") => {
+    if (!(form instanceof HTMLFormElement)) return false;
+    const parsed = parseTripFlyoutKindAndIDFromForm(form, formId || "");
+    if (!parsed) return false;
+    const tripPage = document.querySelector("main.trip-details-page");
+    const sheet = document.getElementById(parsed.sheetId);
+    if (!(tripPage instanceof HTMLElement) || !(sheet instanceof HTMLElement) || typeof openMobileSheet !== "function") {
+      const tripID = parseTripIDFromAction(form.getAttribute("action") || "");
+      if (!tripID) return false;
+      const meta = tripFlyoutEditMetaBySheetId[parsed.sheetId];
+      if (!meta) return false;
+      const target = `/trips/${tripID}?open=${encodeURIComponent(meta.open)}&edit=${encodeURIComponent(
+        `${parsed.kind}:${parsed.id}`
+      )}`;
+      window.location.assign(target);
+      return true;
+    }
+    const sourceForm = form instanceof HTMLFormElement ? form : findTripFlyoutSourceForm(parsed.kind, parsed.id);
+    if (!(sourceForm instanceof HTMLFormElement)) return false;
+    /*
+     * Open sheet first so its internal "reset to add mode" lifecycle runs once.
+     * Then mount the edit clone; this preserves existing values in edit mode.
+     */
+    openMobileSheet(parsed.sheetId);
+    const openSheet = document.getElementById(parsed.sheetId);
+    if (!(openSheet instanceof HTMLElement)) return false;
+    const state = ensureTripFlyoutSheetState(openSheet);
+    if (!state) return false;
+    resetTripFlyoutSheetAddMode(openSheet);
+    state.defaultBody.classList.add("hidden");
+    const editBody = document.createElement("div");
+    editBody.className = "trip-itinerary-drawer-scroll remi-trip-flyout-edit-body";
+    const editFormClone = sourceForm.cloneNode(true);
+    if (!(editFormClone instanceof HTMLElement)) return false;
+    editFormClone.classList.remove("hidden", "item-edit");
+    editFormClone.classList.add("remi-trip-widget-form");
+    editFormClone.removeAttribute("id");
+    stripRemiDomWireMarkersForClone(editFormClone);
+    editBody.appendChild(editFormClone);
+    openSheet.appendChild(editBody);
+    const meta = tripFlyoutEditMetaBySheetId[parsed.sheetId];
+    if (meta?.editTitle) state.titleEl.textContent = meta.editTitle;
+    openSheet.dataset.remiTripFlyoutEditActive = "1";
+    wireDynamicInputsIn(editBody);
+    window.setTimeout(() => {
+      editBody.querySelector("input:not([type='hidden']), textarea, select")?.focus();
+    }, 80);
+    return true;
+  };
   const openMobileFab = () => {
     if (!mobileFab || !mobileFabMenu) return;
     mobileFab.classList.add("open");
@@ -6439,21 +8550,405 @@ window.addEventListener("load", () => {
     mobileFab.classList.remove("open");
     mobileFabMenu.classList.add("hidden");
   };
-  const closeMobileSheets = () => {
+
+  const MOBILE_SHEET_BREAKPOINT = 920;
+  const remiMobileSheetFormDirty = new WeakMap();
+  const remiPrefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  const clearDirtyStateForSheet = (sheet) => {
+    if (!(sheet instanceof HTMLElement)) return;
+    sheet.querySelectorAll("form").forEach((f) => {
+      if (f instanceof HTMLFormElement) remiMobileSheetFormDirty.set(f, false);
+    });
+  };
+
+  const wireMobileSheetFormDirty = (form) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    if (form.dataset.remiMobileSheetDirtyWired === "1") return;
+    if (!form.closest(".mobile-sheet")) return;
+    form.dataset.remiMobileSheetDirtyWired = "1";
+    remiMobileSheetFormDirty.set(form, false);
+    try {
+      Object.defineProperty(form, "isDirty", {
+        configurable: true,
+        get: () => remiMobileSheetFormDirty.get(form) === true
+      });
+    } catch (e) {
+      /* ignore */
+    }
+    const mark = () => remiMobileSheetFormDirty.set(form, true);
+    form.addEventListener("input", mark, true);
+    form.addEventListener("change", mark, true);
+    form.addEventListener(
+      "remi-mobile-sheet-saved",
+      () => {
+        remiMobileSheetFormDirty.set(form, false);
+      },
+      true
+    );
+  };
+
+  const wireMobileSheetFormsIn = (root = document) => {
+    const scope = root instanceof HTMLElement || root instanceof Document ? root : document;
+    scope.querySelectorAll(".mobile-sheet form").forEach((f) => wireMobileSheetFormDirty(f));
+  };
+
+  window.remiNotifyMobileSheetFormSaved = (form) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    if (!form.closest(".mobile-sheet")) return;
+    form.dispatchEvent(new CustomEvent("remi-mobile-sheet-saved", { bubbles: false }));
+  };
+  window.remiWireMobileSheetFormDirtyIn = wireMobileSheetFormsIn;
+
+  const sheetHasDirtyForm = (sheet) => {
+    if (!(sheet instanceof HTMLElement)) return false;
+    const forms = sheet.querySelectorAll("form");
+    for (let i = 0; i < forms.length; i++) {
+      const f = forms[i];
+      if (f instanceof HTMLFormElement && remiMobileSheetFormDirty.get(f) === true) return true;
+    }
+    return false;
+  };
+
+  const getDismissableTripFabSheet = () => {
+    if (window.innerWidth > MOBILE_SHEET_BREAKPOINT) return null;
+    if (!document.querySelector("main.trip-details-page")) return null;
+    return (
+      mobileSheets.find(
+        (s) =>
+          s instanceof HTMLElement &&
+          !s.classList.contains("hidden") &&
+          isTripFabFlyoutSheet(s) &&
+          s.classList.contains("mobile-sheet--trip-fab-flyout-open")
+      ) || null
+    );
+  };
+
+  /**
+   * After drag release: ease-out to off-screen in one continuous motion (no spring “settle” pause).
+   * Keeps mobile-sheet--dragging so the sheet’s CSS transition does not fight inline transform.
+   */
+  const animateSheetDismissTranslateY = (sheet, fromY, toY, releaseVyPxMs, onComplete) => {
+    if (!(sheet instanceof HTMLElement)) {
+      onComplete?.();
+      return;
+    }
+    const f = Number(fromY);
+    const t = Number(toY);
+    if (!Number.isFinite(f) || !Number.isFinite(t)) {
+      onComplete?.();
+      return;
+    }
+    if (remiPrefersReducedMotion.matches) {
+      sheet.style.transform = `translateY(${t}px)`;
+      sheet.classList.remove("mobile-sheet--dragging");
+      onComplete?.();
+      return;
+    }
+    sheet.classList.add("mobile-sheet--dragging");
+    const dist = t - f;
+    const v = Math.max(0, Math.min(2.5, Number(releaseVyPxMs) || 0));
+    const duration = Math.min(400, Math.max(200, 200 + dist * 0.26 - v * 130));
+    const t0 = performance.now();
+    const step = (now) => {
+      const u = Math.min(1, (now - t0) / duration);
+      const eased = 1 - (1 - u) ** 3;
+      const y = f + dist * eased;
+      sheet.style.transform = `translateY(${y}px)`;
+      if (u < 1) {
+        requestAnimationFrame(step);
+      } else {
+        sheet.style.transform = `translateY(${t}px)`;
+        sheet.classList.remove("mobile-sheet--dragging");
+        onComplete?.();
+      }
+    };
+    requestAnimationFrame(step);
+  };
+
+  const finalizeCloseMobileSheets = () => {
+    tripFabIconBridgeGeneration++;
+    removeTripFabIconFlyClones();
+    clearMobileSheetHeaderIconSlots();
     mobileSheets.forEach((sheet) => {
+      if (!(sheet instanceof HTMLElement)) return;
+      /* Hide first so clearing transform/open never flashes the “peek” state (avoids close jerk). */
       sheet.classList.add("hidden");
       sheet.setAttribute("aria-hidden", "true");
+      sheet.classList.remove("mobile-sheet--trip-fab-flyout-open", "mobile-sheet--dragging");
+      sheet.style.transform = "";
+      clearDirtyStateForSheet(sheet);
     });
     if (mobileBackdrop) mobileBackdrop.classList.add("hidden");
+    resetAllTripFlyoutSheets();
   };
-  const openMobileSheet = (sheetId) => {
+
+  const closeMobileSheets = () => finalizeCloseMobileSheets();
+
+  const readSheetTranslateY = (sheet) => {
+    if (!(sheet instanceof HTMLElement)) return 0;
+    const m = (sheet.style.transform || "").match(/translateY\((-?[\d.]+)px\)/);
+    return m ? parseFloat(m[1]) : 0;
+  };
+
+  const MOBILE_SHEET_CLOSE_MS = 520;
+
+  /** At rest: CSS transform transition (matches open). Mid-drag: ease-out rAF (no spring stall). */
+  const runMobileSheetCloseAnimationThen = (thenFn) => {
+    const active = getDismissableTripFabSheet();
+    if (!active || remiPrefersReducedMotion.matches) {
+      thenFn();
+      return;
+    }
+    const inlineY = readSheetTranslateY(active);
+    if (Number.isFinite(inlineY) && inlineY > 8) {
+      const h = active.getBoundingClientRect().height;
+      const offY = Math.ceil(h + 32);
+      const vyRaw = active.dataset.remiDismissVy;
+      delete active.dataset.remiDismissVy;
+      const vy = vyRaw != null && vyRaw !== "" ? parseFloat(vyRaw, 10) : 0;
+      animateSheetDismissTranslateY(
+        active,
+        inlineY,
+        offY,
+        Number.isFinite(vy) ? vy : 0,
+        thenFn
+      );
+      return;
+    }
+    active.style.transform = "";
+    active.classList.remove("mobile-sheet--dragging");
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      active.removeEventListener("transitionend", onEnd);
+      thenFn();
+    };
+    const onEnd = (e) => {
+      if (e.target !== active) return;
+      if (e.propertyName !== "transform") return;
+      done();
+    };
+    active.addEventListener("transitionend", onEnd);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        active.classList.remove("mobile-sheet--trip-fab-flyout-open");
+      });
+    });
+    window.setTimeout(done, MOBILE_SHEET_CLOSE_MS);
+  };
+
+  const DRAG_CLOSE_PX = 100;
+  const DRAG_VEL_PX_MS = 0.55;
+
+  function requestDismissMobileBottomSheet() {
+    const active = getDismissableTripFabSheet();
+    if (!active) {
+      finalizeCloseMobileSheets();
+      return;
+    }
+    if (sheetHasDirtyForm(active) && typeof window.remiOpenAppConfirm === "function") {
+      const confirmDialogEl = document.getElementById("dialog-confirm-action");
+      let discardConfirmed = false;
+      const springSheetBackIfStillOpen = () => {
+        if (discardConfirmed) return;
+        if (!(active instanceof HTMLElement)) return;
+        if (active.classList.contains("hidden")) return;
+        if (!active.classList.contains("mobile-sheet--trip-fab-flyout-open")) return;
+        const cur = readSheetTranslateY(active);
+        if (cur <= 2) return;
+        delete active.dataset.remiDismissVy;
+        active.classList.remove("mobile-sheet--dragging");
+        requestAnimationFrame(() => {
+          active.style.transform = "";
+        });
+      };
+      const onDialogClose = () => {
+        confirmDialogEl?.removeEventListener("close", onDialogClose);
+        requestAnimationFrame(() => {
+          if (discardConfirmed) return;
+          springSheetBackIfStillOpen();
+        });
+      };
+      confirmDialogEl?.addEventListener("close", onDialogClose);
+      window.remiOpenAppConfirm({
+        title: "Discard your changes?",
+        body: "You have unsaved edits in this sheet.",
+        okText: "Discard",
+        icon: "edit_off",
+        variant: "neutral",
+        onConfirm: () => {
+          discardConfirmed = true;
+          confirmDialogEl?.removeEventListener("close", onDialogClose);
+          clearDirtyStateForSheet(active);
+          runMobileSheetCloseAnimationThen(() => finalizeCloseMobileSheets());
+        }
+      });
+      return;
+    }
+    runMobileSheetCloseAnimationThen(() => finalizeCloseMobileSheets());
+  }
+
+  /** Gestural / explicit dismiss entry (dirty check on trip FAB mobile sheets). */
+  function closeDrawer() {
+    requestDismissMobileBottomSheet();
+  }
+  window.remiCloseDrawer = closeDrawer;
+
+  const initMobileSheetDragDismiss = () => {
+    mobileSheets.forEach((sheet) => {
+      if (!isTripFabFlyoutSheet(sheet)) return;
+      const region = sheet.querySelector("[data-mobile-sheet-drag-region]");
+      if (!(region instanceof HTMLElement)) return;
+      if (region.dataset.remiSheetDragBound === "1") return;
+      region.dataset.remiSheetDragBound = "1";
+
+      let ptrId = null;
+      let startClientY = 0;
+      let dragging = false;
+      let lastY = 0;
+      let lastT = 0;
+      let prevY = 0;
+      let prevT = 0;
+
+      region.addEventListener(
+        "pointerdown",
+        (e) => {
+          if (e.button !== 0) return;
+          if (window.innerWidth > MOBILE_SHEET_BREAKPOINT) return;
+          if (!isTripFabFlyoutSlideContext()) return;
+          if (!sheet.classList.contains("mobile-sheet--trip-fab-flyout-open")) return;
+          ptrId = e.pointerId;
+          startClientY = e.clientY;
+          dragging = false;
+          lastY = e.clientY;
+          lastT = performance.now();
+          prevY = lastY;
+          prevT = lastT;
+          try {
+            region.setPointerCapture(e.pointerId);
+          } catch (err) {
+            /* ignore */
+          }
+        },
+        { passive: true }
+      );
+
+      region.addEventListener(
+        "pointermove",
+        (e) => {
+          if (e.pointerId !== ptrId) return;
+          const dy = e.clientY - startClientY;
+          if (!dragging) {
+            if (dy <= 4) return;
+            dragging = true;
+            sheet.classList.add("mobile-sheet--dragging");
+          }
+          prevY = lastY;
+          prevT = lastT;
+          lastY = e.clientY;
+          lastT = performance.now();
+          const y = Math.max(0, e.clientY - startClientY);
+          sheet.style.transform = `translateY(${y}px)`;
+          e.preventDefault();
+        },
+        { passive: false }
+      );
+
+      const endDrag = (e) => {
+        if (e.pointerId !== ptrId) return;
+        try {
+          region.releasePointerCapture(e.pointerId);
+        } catch (err) {
+          /* ignore */
+        }
+        ptrId = null;
+        if (!dragging) return;
+        dragging = false;
+        const y = Math.max(0, e.clientY - startClientY);
+        let v = 0;
+        if (lastT > prevT) v = (lastY - prevY) / (lastT - prevT);
+        const shouldClose = y >= DRAG_CLOSE_PX || v > DRAG_VEL_PX_MS;
+        if (shouldClose) {
+          sheet.dataset.remiDismissVy = String(Math.max(0, v));
+          closeDrawer();
+        } else {
+          sheet.classList.remove("mobile-sheet--dragging");
+          const cur = readSheetTranslateY(sheet);
+          if (Number.isFinite(cur) && cur > 2) {
+            requestAnimationFrame(() => {
+              sheet.style.transform = "";
+            });
+          }
+        }
+      };
+
+      region.addEventListener("pointerup", endDrag);
+      region.addEventListener("pointercancel", endDrag);
+    });
+  };
+
+  const openMobileSheet = (sheetId, fabSourceBtn = null) => {
     if (!sheetId) return;
     const target = document.getElementById(sheetId);
     if (!target) return;
+    const canBridge =
+      fabSourceBtn instanceof HTMLElement &&
+      fabSourceBtn.closest("[data-mobile-fab-menu]") &&
+      fabSourceBtn.tagName !== "A" &&
+      isTripFabFlyoutSheet(target) &&
+      isTripFabFlyoutSlideContext();
+    let bridgeSnapshot = null;
+    let bridgeGlyphReduced = null;
+    if (canBridge) {
+      const iconEl = fabSourceBtn.querySelector(".material-symbols-outlined");
+      if (iconEl instanceof HTMLElement) {
+        const glyph = (iconEl.textContent || "").trim();
+        if (glyph) {
+          const r = iconEl.getBoundingClientRect();
+          const cs = window.getComputedStyle(iconEl);
+          if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+            bridgeGlyphReduced = glyph;
+          } else {
+            bridgeSnapshot = {
+              glyph,
+              cx: r.left + r.width / 2,
+              cy: r.top + r.height / 2,
+              baseH: Math.max(r.height, 1),
+              fontSize: cs.fontSize || "",
+              fontVariationSettings: cs.fontVariationSettings || ""
+            };
+          }
+        }
+      }
+    }
     closeMobileSheets();
+    resetTripFlyoutSheetAddMode(target);
     target.classList.remove("hidden");
+    target.style.transform = "";
     target.setAttribute("aria-hidden", "false");
+    clearDirtyStateForSheet(target);
+    wireMobileSheetFormsIn(target);
     if (mobileBackdrop) mobileBackdrop.classList.remove("hidden");
+    if (bridgeGlyphReduced) {
+      const slot = target.querySelector("[data-mobile-sheet-header-icon-slot]");
+      if (slot instanceof HTMLElement) placeMaterialIconInHeaderSlot(slot, bridgeGlyphReduced);
+    }
+    if (isTripFabFlyoutSheet(target) && isTripFabFlyoutSlideContext()) {
+      target.classList.remove("mobile-sheet--trip-fab-flyout-open");
+      void target.offsetWidth;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          target.classList.add("mobile-sheet--trip-fab-flyout-open");
+          if (bridgeSnapshot) {
+            requestAnimationFrame(() => {
+              startTripFabMenuIconBridge(bridgeSnapshot, target);
+            });
+          }
+        });
+      });
+    }
   };
   const tripIdFromPath = () => {
     const m = window.location.pathname.match(/^\/trips\/([^/]+)/i);
@@ -6469,11 +8964,12 @@ window.addEventListener("load", () => {
     const pathBase = `/trips/${tripId}`;
     const navMap = {
       "mobile-sheet-stop": `${pathBase}?open=stop`,
+      "mobile-sheet-commute": `${pathBase}?open=commute`,
       "mobile-sheet-expense": `${pathBase}/expenses#add-expense`,
-      "mobile-sheet-tab": `${pathBase}/group-expenses#add-group-expense`,
-      "mobile-sheet-accommodation": `${pathBase}/accommodation`,
-      "mobile-sheet-vehicle": `${pathBase}/vehicle-rental`,
-      "mobile-sheet-flight": `${pathBase}/flights`,
+      "mobile-sheet-tab": `${pathBase}?open=expense`,
+      "mobile-sheet-accommodation": `${pathBase}?open=accommodation`,
+      "mobile-sheet-vehicle": `${pathBase}?open=vehicle`,
+      "mobile-sheet-flight": `${pathBase}?open=flight`,
       "mobile-sheet-checklist": `${pathBase}?open=checklist`
     };
     const target = navMap[sheetId];
@@ -6489,7 +8985,7 @@ window.addEventListener("load", () => {
           closeMobileFab();
           return;
         }
-        openMobileSheet(sheetId);
+        openMobileSheet(sheetId, btn);
         closeMobileFab();
         const dcf = document.querySelector("[data-desktop-calendar-flyout]");
         if (dcf) {
@@ -6501,22 +8997,24 @@ window.addEventListener("load", () => {
     });
     document.querySelectorAll("[data-mobile-sheet-close]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        closeMobileSheets();
+        requestDismissMobileBottomSheet();
       });
     });
     if (mobileBackdrop) {
       mobileBackdrop.addEventListener("click", () => {
-        closeMobileSheets();
+        requestDismissMobileBottomSheet();
       });
     }
   };
   if (mobileSheets.length > 0 || mobileBackdrop) {
     bindTripQuickSheets();
+    wireMobileSheetFormsIn(document);
+    initMobileSheetDragDismiss();
   }
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     closeMobileFab();
-    closeMobileSheets();
+    requestDismissMobileBottomSheet();
   });
   if (mobileFab && mobileFabToggle) {
     closeMobileFab();
@@ -6537,7 +9035,10 @@ window.addEventListener("load", () => {
         const t = e.target;
         if (!(t instanceof HTMLElement)) return;
         if (!t.matches("input, textarea, select")) return;
-        const scrollRoot = t.closest(".mobile-sheet > form");
+        const sheet = t.closest(".mobile-sheet");
+        const scrollRoot =
+          (sheet instanceof HTMLElement ? sheet.querySelector(".trip-itinerary-drawer-scroll") : null) ||
+          t.closest(".mobile-sheet > form");
         window.setTimeout(() => {
           try {
             t.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
@@ -6581,40 +9082,62 @@ window.addEventListener("load", () => {
     true
   );
 
-  const openParamForSheet = new URLSearchParams(window.location.search).get("open");
+  const sheetSearchParams = new URLSearchParams(window.location.search);
+  const openParamForSheet = (sheetSearchParams.get("open") || "").toLowerCase();
+  const editParamForSheet = sheetSearchParams.get("edit") || "";
+  const parseSheetEditParam = (raw) => {
+    const m = String(raw || "").match(/^([a-z_]+):(.+)$/i);
+    if (!m) return null;
+    return { kind: m[1].toLowerCase(), id: m[2] };
+  };
   const stripOpenQueryParam = () => {
     try {
       const u = new URL(window.location.href);
       u.searchParams.delete("open");
+      u.searchParams.delete("edit");
+      u.searchParams.delete("focus");
       const qs = u.searchParams.toString();
       window.history.replaceState({}, "", u.pathname + (qs ? `?${qs}` : "") + u.hash);
     } catch (e) {
       /* ignore */
     }
   };
-  const stopSheetEl = document.getElementById("mobile-sheet-stop");
-  if (stopSheetEl && typeof openMobileSheet === "function" && openParamForSheet === "stop") {
-    openMobileSheet("mobile-sheet-stop");
+  const focusSheetPrimaryField = (sheetId) => {
+    const sheet = document.getElementById(sheetId);
+    if (!(sheet instanceof HTMLElement)) return;
+    if (sheetId === "mobile-sheet-commute") {
+      window.setTimeout(() => focusMobileCommuteForm(), 80);
+      return;
+    }
     window.setTimeout(() => {
-      const loc = stopSheetEl.querySelector("[data-location-input]");
-      const focusable = loc || stopSheetEl.querySelector("input, textarea, select");
-      if (focusable && typeof focusable.focus === "function") {
-        focusable.focus();
+      const loc = sheet.querySelector("[data-location-input]");
+      const cat = sheet.querySelector('select[name="category"]');
+      const amt = sheet.querySelector(".remi-unified-expense-amount-input");
+      const focusable = loc || cat || amt || sheet.querySelector("input, textarea, select");
+      if (focusable && typeof focusable.focus === "function") focusable.focus();
+    }, 80);
+  };
+  const targetSheetId = tripFlyoutSheetByOpenKey[openParamForSheet] || "";
+  if (targetSheetId && typeof openMobileSheet === "function") {
+    const sheet = document.getElementById(targetSheetId);
+    if (sheet instanceof HTMLElement) {
+      const parsedEdit = parseSheetEditParam(editParamForSheet);
+      if (parsedEdit && tripFlyoutEditMetaBySheetId[targetSheetId]) {
+        const sourceForm = findTripFlyoutSourceForm(parsedEdit.kind, parsedEdit.id);
+        if (sourceForm) {
+          window.remiHandleDesktopTripFlyoutEdit?.(sourceForm, sourceForm.id || "");
+          stripOpenQueryParam();
+        } else {
+          openMobileSheet(targetSheetId);
+          focusSheetPrimaryField(targetSheetId);
+          stripOpenQueryParam();
+        }
+      } else {
+        openMobileSheet(targetSheetId);
+        focusSheetPrimaryField(targetSheetId);
+        stripOpenQueryParam();
       }
-    }, 60);
-    stripOpenQueryParam();
-  }
-  const checklistSheetEl = document.getElementById("mobile-sheet-checklist");
-  if (checklistSheetEl && typeof openMobileSheet === "function" && openParamForSheet === "checklist") {
-    openMobileSheet("mobile-sheet-checklist");
-    window.setTimeout(() => {
-      const cat = checklistSheetEl.querySelector('select[name="category"]');
-      const focusable = cat || checklistSheetEl.querySelector("input, textarea, select");
-      if (focusable && typeof focusable.focus === "function") {
-        focusable.focus();
-      }
-    }, 60);
-    stripOpenQueryParam();
+    }
   }
 
   const tripSearchInput = document.querySelector("[data-dashboard-trip-search]");
@@ -6748,6 +9271,7 @@ window.addEventListener("load", () => {
     stay: "hotel",
     vehicle: "directions_car",
     flight: "flight",
+    commute: "directions_transit",
     stop: "place"
   };
   const uniqueDays = [...new Set(points.map((p) => Math.max(1, p.day)))].sort((a, b) => a - b);
@@ -10592,5 +13116,379 @@ function initTabOverTimeChart() {
 
   if (document.fonts?.ready) {
     document.fonts.ready.then(() => window.remiFitBudgetDonutCenterValues(document)).catch(() => {});
+  }
+})();
+
+(function initFirstTripSetup() {
+  const STEP_META = [
+    {
+      step: "STEP 01 — BASICS",
+      k: "01",
+      sidebarTitle: "Trip basics",
+      sidebarDesc: "Name your adventure and capture the story you want to remember.",
+      nextHint: "Next: Cover image",
+    },
+    {
+      step: "STEP 02 — AESTHETICS",
+      k: "02",
+      sidebarTitle: "Cover image",
+      sidebarDesc: "Choose a hero image or a built-in style for your trip header.",
+      nextHint: "Next: Locals & currency",
+    },
+    {
+      step: "STEP 03 — LOGISTICS",
+      k: "03",
+      sidebarTitle: "Logistics",
+      sidebarDesc: "Set currency, symbol, and distance units so totals and maps feel right for this trip.",
+      nextHint: "Next: Personalization",
+    },
+    {
+      step: "STEP 04 — PERSONALIZATION",
+      k: "04",
+      sidebarTitle: "Personalization",
+      sidebarDesc: "Choose solo or group travel and turn trip sections on or off.",
+      nextHint: "",
+    },
+  ];
+
+  function syncCurrencyFields(root, sel) {
+    const wrap = root.querySelector("[data-fts-currency-other-wrap]");
+    const cust = root.querySelector("[data-fts-currency-custom]");
+    const symPost = root.querySelector("[data-fts-currency-symbol-post]");
+    const symEdit = root.querySelector("[data-fts-currency-symbol-edit]");
+    const isOther = sel.value === "__OTHER__";
+    if (wrap) {
+      if (isOther) wrap.removeAttribute("hidden");
+      else wrap.setAttribute("hidden", "");
+    }
+    if (cust instanceof HTMLInputElement) {
+      cust.required = isOther;
+    }
+    if (symEdit instanceof HTMLInputElement) {
+      symEdit.required = isOther;
+    }
+    if (symPost instanceof HTMLInputElement) {
+      if (isOther) {
+        if (symEdit instanceof HTMLInputElement) symPost.value = symEdit.value;
+      } else {
+        const opt = sel.options[sel.selectedIndex];
+        const ds = opt?.dataset?.symbol;
+        if (ds) symPost.value = ds;
+      }
+    }
+  }
+
+  function syncCurrencyFromTrip(root, sel) {
+    const symPost = root.querySelector("[data-fts-currency-symbol-post]");
+    const symEdit = root.querySelector("[data-fts-currency-symbol-edit]");
+    const code = (root.getAttribute("data-currency-code") || "").trim();
+    if (!code) {
+      syncCurrencyFields(root, sel);
+      return;
+    }
+    const u = code.toUpperCase();
+    const hasPreset = Array.from(sel.options).some((o) => o.value === u);
+    if (hasPreset) {
+      sel.value = u;
+    } else {
+      sel.value = "__OTHER__";
+      const wrap = root.querySelector("[data-fts-currency-other-wrap]");
+      const cust = root.querySelector("[data-fts-currency-custom]");
+      if (wrap) wrap.removeAttribute("hidden");
+      if (cust instanceof HTMLInputElement) cust.value = code;
+      const sym = (root.getAttribute("data-currency-symbol") || "").trim();
+      if (symEdit instanceof HTMLInputElement) symEdit.value = sym || cust.value;
+      if (symPost instanceof HTMLInputElement && symEdit instanceof HTMLInputElement) symPost.value = symEdit.value;
+    }
+    syncCurrencyFields(root, sel);
+  }
+
+  function wireCoverUI(root) {
+    const modeInput = root.querySelector("[data-fts-cover-mode]");
+    const fileInput = root.querySelector("[data-fts-cover-file]");
+    const drop = root.querySelector("[data-fts-cover-drop]");
+    const filenameEl = root.querySelector("[data-fts-cover-filename]");
+    const preview = root.querySelector("[data-fts-cover-preview]");
+    const initial = (root.getAttribute("data-trip-cover") || "").trim();
+    const presetBtns = root.querySelectorAll("[data-fts-cover-preset]");
+    const clearBtn = root.querySelector("[data-fts-cover-clear]");
+
+    function setMode(m) {
+      if (modeInput instanceof HTMLInputElement) modeInput.value = m;
+    }
+
+    function clearPresetVisual() {
+      presetBtns.forEach((b) => b.classList.remove("is-selected"));
+    }
+
+    function clearFilePreview() {
+      if (fileInput instanceof HTMLInputElement) fileInput.value = "";
+      if (filenameEl instanceof HTMLElement) {
+        filenameEl.textContent = "";
+        filenameEl.hidden = true;
+      }
+      if (preview instanceof HTMLElement) {
+        preview.innerHTML = "";
+        preview.hidden = true;
+      }
+    }
+
+    presetBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const v = btn.getAttribute("data-fts-cover-preset") || "";
+        setMode(v);
+        clearPresetVisual();
+        btn.classList.add("is-selected");
+        clearFilePreview();
+      });
+    });
+
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        setMode("clear");
+        clearPresetVisual();
+        clearFilePreview();
+      });
+    }
+
+    if (fileInput instanceof HTMLInputElement && drop instanceof HTMLElement) {
+      fileInput.addEventListener("change", () => {
+        const f = fileInput.files?.[0];
+        if (!f) return;
+        setMode("upload");
+        clearPresetVisual();
+        if (filenameEl instanceof HTMLElement) {
+          filenameEl.textContent = f.name;
+          filenameEl.hidden = false;
+        }
+        if (preview instanceof HTMLElement) {
+          preview.replaceChildren();
+          const im = document.createElement("img");
+          im.src = URL.createObjectURL(f);
+          im.alt = "";
+          preview.appendChild(im);
+          preview.hidden = false;
+        }
+      });
+
+      drop.addEventListener("click", () => fileInput.click());
+      drop.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          fileInput.click();
+        }
+      });
+
+      ["dragenter", "dragover"].forEach((ev) => {
+        drop.addEventListener(ev, (e) => {
+          e.preventDefault();
+          drop.classList.add("is-dragover");
+        });
+      });
+      ["dragleave", "drop"].forEach((ev) => {
+        drop.addEventListener(ev, (e) => {
+          e.preventDefault();
+          drop.classList.remove("is-dragover");
+        });
+      });
+      drop.addEventListener("drop", (e) => {
+        const f = e.dataTransfer?.files?.[0];
+        if (!f || !String(f.type || "").startsWith("image/")) return;
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(f);
+          fileInput.files = dt.files;
+        } catch {
+          return;
+        }
+        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+
+    if (initial) {
+      if (initial === "default" || initial.startsWith("pattern:")) {
+        const match = Array.from(presetBtns).find((b) => (b.getAttribute("data-fts-cover-preset") || "") === initial);
+        if (match) {
+          clearPresetVisual();
+          match.classList.add("is-selected");
+        }
+      } else if (initial.startsWith("http://") || initial.startsWith("https://") || initial.startsWith("/static/")) {
+        if (preview instanceof HTMLElement) {
+          const im = document.createElement("img");
+          im.src = initial;
+          im.alt = "";
+          preview.replaceChildren(im);
+          preview.hidden = false;
+        }
+      }
+    }
+  }
+
+  function applyTravelMode(root, solo) {
+    const pill = root.querySelector("[data-fts-group-pill]");
+    const groupCells = root.querySelectorAll("[data-fts-group-only]");
+    if (pill) {
+      if (solo) pill.setAttribute("hidden", "");
+      else pill.removeAttribute("hidden");
+    }
+    groupCells.forEach((cell) => {
+      const cb = cell.querySelector('input[type="checkbox"]');
+      if (solo) {
+        cell.classList.add("first-trip-setup__toggle-cell--disabled");
+        if (cb instanceof HTMLInputElement) {
+          cb.checked = false;
+          cb.disabled = true;
+        }
+      } else {
+        cell.classList.remove("first-trip-setup__toggle-cell--disabled");
+        if (cb instanceof HTMLInputElement) cb.disabled = false;
+      }
+    });
+  }
+
+  function boot() {
+    const root = document.querySelector("[data-first-trip-setup]");
+    if (!root) return;
+    const form = root.querySelector("[data-fts-form]");
+    if (!(form instanceof HTMLFormElement)) return;
+
+    document.body.classList.add("first-trip-setup-lock");
+
+    const curSel = root.querySelector("[data-fts-currency-select]");
+    const symPost = root.querySelector("[data-fts-currency-symbol-post]");
+    const symEdit = root.querySelector("[data-fts-currency-symbol-edit]");
+    if (curSel instanceof HTMLSelectElement) {
+      syncCurrencyFromTrip(root, curSel);
+      curSel.addEventListener("change", () => {
+        if (curSel.value === "__OTHER__") {
+          if (symPost instanceof HTMLInputElement && symEdit instanceof HTMLInputElement) {
+            symEdit.value = symPost.value || symEdit.value;
+            symPost.value = symEdit.value;
+          }
+        }
+        syncCurrencyFields(root, curSel);
+      });
+    }
+    if (symEdit instanceof HTMLInputElement && symPost instanceof HTMLInputElement) {
+      symEdit.addEventListener("input", () => {
+        symPost.value = symEdit.value;
+      });
+    }
+
+    const steps = Array.from(root.querySelectorAll("[data-fts-step]")).sort(
+      (a, b) =>
+        Number(a.getAttribute("data-fts-step") || "0") - Number(b.getAttribute("data-fts-step") || "0"),
+    );
+    const segbar = root.querySelector("[data-fts-segbar]");
+    const dots = root.querySelector("[data-fts-dots]");
+    if (segbar) {
+      segbar.replaceChildren();
+      for (let i = 0; i < steps.length; i++) segbar.appendChild(document.createElement("span"));
+    }
+    if (dots) {
+      dots.replaceChildren();
+      for (let i = 0; i < steps.length; i++) dots.appendChild(document.createElement("span"));
+    }
+
+    wireCoverUI(root);
+
+    let idx = 0;
+    const btnCont = root.querySelector("[data-fts-continue]");
+    const btnBack = root.querySelector("[data-fts-back]");
+    const btnSave = root.querySelector("[data-fts-save]");
+    const btnSkip = root.querySelector("[data-fts-skip]");
+    const nextHint = root.querySelector("[data-fts-next-hint]");
+    const sidebarStep = root.querySelector("[data-fts-sidebar-step]");
+    const sidebarTitle = root.querySelector("[data-fts-sidebar-title]");
+    const sidebarDesc = root.querySelector("[data-fts-sidebar-desc]");
+    const mobileStep = root.querySelector("[data-fts-mobile-step]");
+    const progressPct = root.querySelector("[data-fts-progress-pct]");
+    const progressFill = root.querySelector("[data-fts-progress-fill]");
+
+    function renderProgress() {
+      const n = steps.length;
+      const pct = Math.round(((idx + 1) / n) * 100);
+      if (progressPct) progressPct.textContent = `${pct}% Complete`;
+      if (progressFill instanceof HTMLElement) progressFill.style.width = `${pct}%`;
+      const segs = segbar ? Array.from(segbar.children) : [];
+      segs.forEach((el, i) => {
+        el.classList.toggle("is-on", i <= idx);
+      });
+      const dchildren = dots ? Array.from(dots.children) : [];
+      dchildren.forEach((el, i) => {
+        el.classList.toggle("is-active", i === idx);
+      });
+      const m = STEP_META[idx] || STEP_META[0];
+      if (sidebarStep) sidebarStep.textContent = `STEP ${m.k}`;
+      if (sidebarTitle) sidebarTitle.textContent = m.sidebarTitle;
+      if (sidebarDesc) sidebarDesc.textContent = m.sidebarDesc;
+      if (mobileStep) mobileStep.textContent = m.step;
+      if (nextHint) nextHint.textContent = idx < n - 1 ? m.nextHint : "";
+      if (btnCont instanceof HTMLElement && btnSave instanceof HTMLElement) {
+        const last = idx >= n - 1;
+        btnCont.hidden = last;
+        btnSave.hidden = !last;
+      }
+      if (btnBack instanceof HTMLElement) btnBack.hidden = idx === 0;
+    }
+
+    function showStep(i) {
+      idx = i;
+      steps.forEach((fs, j) => {
+        const on = j === i;
+        fs.classList.toggle("first-trip-setup__step--hidden", !on);
+        fs.hidden = !on;
+      });
+      renderProgress();
+    }
+
+    const localsStepIndex = 2;
+    form.addEventListener("submit", (e) => {
+      const sel = root.querySelector("[data-fts-currency-select]");
+      if (!(sel instanceof HTMLSelectElement) || sel.value !== "__OTHER__") return;
+      const cust = root.querySelector("[data-fts-currency-custom]");
+      if (cust instanceof HTMLInputElement && !cust.value.trim()) {
+        e.preventDefault();
+        showStep(localsStepIndex);
+        cust.focus();
+        cust.reportValidity();
+      }
+    });
+
+    function travelSolo() {
+      const g = root.querySelector('input[name="trip_travel_mode"][value="group"]');
+      return !(g instanceof HTMLInputElement && g.checked);
+    }
+
+    root.querySelectorAll('input[name="trip_travel_mode"]').forEach((r) => {
+      r.addEventListener("change", () => applyTravelMode(root, travelSolo()));
+    });
+    applyTravelMode(root, travelSolo());
+
+    showStep(0);
+
+    btnCont?.addEventListener("click", () => {
+      if (idx === 0) {
+        const name = form.querySelector('input[name="name"]');
+        if (name instanceof HTMLInputElement && !name.value.trim()) {
+          name.reportValidity();
+          return;
+        }
+      }
+      if (idx < steps.length - 1) showStep(idx + 1);
+    });
+    btnBack?.addEventListener("click", () => {
+      if (idx > 0) showStep(idx - 1);
+    });
+    btnSkip?.addEventListener("click", () => {
+      root.classList.add("first-trip-setup--dismissed");
+      document.body.classList.remove("first-trip-setup-lock");
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else {
+    boot();
   }
 })();

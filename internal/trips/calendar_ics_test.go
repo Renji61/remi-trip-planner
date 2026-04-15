@@ -145,6 +145,56 @@ func TestBuildTripICSBytes_publishCalendarParsesWithItineraryEvent(t *testing.T)
 	}
 }
 
+func TestBuildTripICSBytes_emitsTZIDWhenREMI_ICS_TIMEZONE(t *testing.T) {
+	t.Setenv("REMI_ICS_TIMEZONE", "Europe/Berlin")
+	repo, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := trips.NewService(repo)
+
+	uid, err := repo.CreateUser(ctx, trips.User{
+		Email: "tz@example.com", Username: "tz", DisplayName: "TZ", PasswordHash: "x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tripID, err := repo.CreateTrip(ctx, trips.Trip{
+		Name: "Berlin labels", OwnerUserID: uid, StartDate: "2026-07-10", EndDate: "2026-07-12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = repo.AddItineraryItem(ctx, trips.ItineraryItem{
+		ID: "it-tz", TripID: tripID, DayNumber: 1, Title: "Museum",
+		Location: "Mitte", StartTime: "10:30", EndTime: "12:00",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := svc.BuildTripICSBytes(ctx, tripID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, "TZID=Europe/Berlin") {
+		t.Fatalf("expected TZID=Europe/Berlin in feed, snippet: %q", truncate(s, 400))
+	}
+	if !strings.Contains(s, "X-WR-TIMEZONE:Europe/Berlin") {
+		t.Fatalf("expected X-WR-TIMEZONE for Google Calendar, snippet: %q", truncate(s, 400))
+	}
+	if strings.Contains(s, "DTSTART:20260710T103000Z") {
+		t.Fatal("did not expect plain UTC Z DTSTART when REMI_ICS_TIMEZONE is set")
+	}
+	cal, err := ics.ParseCalendar(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cal.Events()) != 1 {
+		t.Fatalf("events: %d", len(cal.Events()))
+	}
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=266">
+  <link rel="stylesheet" href="/static/app.css?v=279">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=244"></script>
+  <script defer src="/static/app.js?v=271"></script>
 </head>
 <body class="page-trip-settings">
   <main class="app-shell" aria-label="Trip settings" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}">
@@ -524,12 +524,12 @@
               <p class="muted trip-settings-section-hint">Control which quick actions appear in the sidebar and mobile menu.</p>
               <div class="trip-settings-toggle-list trip-settings-toggle-list--layout-mirror">
                 {{range .SidebarWidgetOrder}}
-                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact{{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}} trip-settings-toggle-row--muted{{end}}{{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}} trip-settings-toggle-row--muted{{end}}{{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}} trip-settings-toggle-row--muted{{end}}{{if and (or (eq . "tab_total") (eq . "add_tab")) (or (not $.Details.Trip.UIShowSpends) (not $.Details.Trip.UIShowTheTab))}} trip-settings-toggle-row--muted{{end}}" {{if eq . "add_stop"}}data-itinerary-master-gated="1"{{end}}{{if eq . "checklist"}}data-checklist-master-gated="1"{{end}}{{if or (eq . "budget") (eq . "quick_spends")}}data-spends-master-gated="1"{{end}}{{if or (eq . "tab_total") (eq . "add_tab")}}data-add-tab-widget-gate="1"{{end}}>
+                <label class="trip-settings-toggle-row trip-settings-toggle-row--compact{{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}} trip-settings-toggle-row--muted{{end}}{{if and (eq . "add_commute") (not $.Details.Trip.UIShowItinerary)}} trip-settings-toggle-row--muted{{end}}{{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}} trip-settings-toggle-row--muted{{end}}{{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}} trip-settings-toggle-row--muted{{end}}{{if and (or (eq . "tab_total") (eq . "add_tab")) (or (not $.Details.Trip.UIShowSpends) (not $.Details.Trip.UIShowTheTab))}} trip-settings-toggle-row--muted{{end}}" {{if eq . "add_stop"}}data-itinerary-master-gated="1"{{end}}{{if eq . "add_commute"}}data-itinerary-master-gated="1"{{end}}{{if eq . "checklist"}}data-checklist-master-gated="1"{{end}}{{if or (eq . "budget") (eq . "quick_spends")}}data-spends-master-gated="1"{{end}}{{if or (eq . "tab_total") (eq . "add_tab")}}data-add-tab-widget-gate="1"{{end}}>
                   <span class="material-symbols-outlined trip-settings-toggle-icon" aria-hidden="true">{{tripSidebarWidgetVisibilityIcon .}}</span>
                   <span class="trip-settings-toggle-text">{{tripSidebarWidgetLabel .}}</span>
                   <span class="trip-settings-switch">
                     <input type="hidden" name="ui_vis_sidebar_{{.}}" value="0">
-                    <input type="checkbox" name="ui_vis_sidebar_{{.}}" value="1" {{if sidebarWidgetVisible . $.Details.Trip}}checked{{end}} {{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}}disabled{{end}} {{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}}disabled{{end}} {{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}}disabled{{end}} {{if and (or (eq . "tab_total") (eq . "add_tab")) (or (not $.Details.Trip.UIShowSpends) (not $.Details.Trip.UIShowTheTab))}}disabled{{end}}>
+                    <input type="checkbox" name="ui_vis_sidebar_{{.}}" value="1" {{if sidebarWidgetVisible . $.Details.Trip}}checked{{end}} {{if and (eq . "add_stop") (not $.Details.Trip.UIShowItinerary)}}disabled{{end}} {{if and (eq . "add_commute") (not $.Details.Trip.UIShowItinerary)}}disabled{{end}} {{if and (eq . "checklist") (not $.Details.Trip.UIShowChecklist)}}disabled{{end}} {{if and (or (eq . "budget") (eq . "quick_spends")) (not $.Details.Trip.UIShowSpends)}}disabled{{end}} {{if and (or (eq . "tab_total") (eq . "add_tab")) (or (not $.Details.Trip.UIShowSpends) (not $.Details.Trip.UIShowTheTab))}}disabled{{end}}>
                     <span class="trip-settings-switch-track" aria-hidden="true"><span class="trip-settings-switch-knob"></span></span>
                   </span>
                 </label>

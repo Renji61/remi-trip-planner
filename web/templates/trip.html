@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=266">
+  <link rel="stylesheet" href="/static/app.css?v=289">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js?v=250"></script>
+  <script defer src="/static/app.js?v=277"></script>
 </head>
 <body class="trip-details-body">
   <main class="app-shell trip-details-page" data-long-press-sheet-root data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
@@ -148,10 +148,12 @@
               <button type="button" class="trip-itinerary-view-toggle__btn" data-itinerary-view-toggle="week" aria-selected="false">Week</button>
             </div>
             <div class="trip-itinerary-calendar-toolbar hidden" data-itinerary-calendar-toolbar>
-              <button type="button" class="secondary-btn" data-itinerary-week-nav="prev">Prev</button>
               <strong data-itinerary-range-label>Week</strong>
-              <button type="button" class="secondary-btn" data-itinerary-week-nav="today">Today</button>
-              <button type="button" class="secondary-btn" data-itinerary-week-nav="next">Next</button>
+              <div class="trip-itinerary-calendar-toolbar__nav" role="group" aria-label="Itinerary calendar navigation">
+                <button type="button" class="secondary-btn" data-itinerary-week-nav="prev">Prev</button>
+                <button type="button" class="secondary-btn" data-itinerary-week-nav="today">Today</button>
+                <button type="button" class="secondary-btn" data-itinerary-week-nav="next">Next</button>
+              </div>
             </div>
             <div class="trip-itinerary-calendar hidden" data-itinerary-calendar-panels>
               <div class="trip-itinerary-calendar-day hidden" data-itinerary-day-view></div>
@@ -179,7 +181,112 @@
                 {{end}}
                 <ul class="list timeline day-items">
                   {{range $group.Items}}
-                  <li class="timeline-item" data-itinerary-item data-map-itinerary-point data-itinerary-item-id="{{.Item.ID}}" data-map-day="{{$group.DayNumber}}" data-marker-kind="{{if ne .Lodging.ID ""}}stay{{else if ne .Vehicle.ID ""}}vehicle{{else if ne .Flight.ID ""}}flight{{else}}stop{{end}}" data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-geocode-location="{{itineraryGeocodeQuery .}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
+                  {{if eq .Item.ItemKind "commute"}}
+                  {{$commute := .}}
+                  <li class="timeline-item timeline-item--commute" data-itinerary-item data-itinerary-item-id="{{.Item.ID}}" data-map-day="{{$group.DayNumber}}" data-item-kind="commute" data-marker-kind="commute" data-commute-from="{{.Item.CommuteFromItemID}}" data-commute-to="{{.Item.CommuteToItemID}}" data-search-text="{{.Item.Title}} {{.Item.Notes}} {{.Item.TransportMode}} {{.CommuteFromTitle}} {{.CommuteToTitle}}" aria-label="Commute: {{.Item.Title}}">
+                    {{if not $.Details.Trip.IsArchived}}
+                    <details class="item-actions trip-inline-actions-dropdown">
+                      <summary class="trip-inline-actions-summary">
+                        <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
+                        <span class="trip-inline-actions-summary-label">Commute actions</span>
+                      </summary>
+                      <div class="trip-inline-actions-buttons">
+                        <button type="button" class="item-action-btn" data-inline-edit-open="commute-itinerary-edit-{{.Item.ID}}">Edit</button>
+                        <form method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/delete" data-app-confirm data-confirm-title="Delete this commute?" data-confirm-body="This removes the commute leg from your itinerary." data-confirm-ok="Delete" data-confirm-icon="route" data-confirm-variant="danger" data-ajax-submit data-toast-message="Commute deleted.">
+                          <button type="submit" class="item-action-btn danger">Delete</button>
+                        </form>
+                      </div>
+                    </details>
+                    {{end}}
+                    <div class="timeline-dot timeline-dot--commute"></div>
+                    <div id="itinerary-view-{{.Item.ID}}" class="item-view itinerary-item-view itinerary-commute-view">
+                      <div class="itinerary-vehicle-main">
+                        <span class="itinerary-commute-badge" aria-hidden="true"><span class="material-symbols-outlined">{{if eq .Item.TransportMode "transit"}}directions_transit{{else if eq .Item.TransportMode "walk"}}directions_walk{{else if eq .Item.TransportMode "drive"}}directions_car{{else}}route{{end}}</span><span>Commute</span></span>
+                        <strong>{{.Item.Title}}</strong>
+                        <div class="meta">{{if .Item.StartTime}}{{formatTripClock $.Details.Trip .Item.StartTime}}{{else}}--:--{{end}}{{if trimSpace .Item.EndTime}} – {{formatTripClock $.Details.Trip .Item.EndTime}}{{end}}</div>
+                        {{if or (trimSpace .Item.TransportMode) (and .CommuteFromTitle .CommuteToTitle)}}
+                        <div class="itinerary-field">
+                          <span class="itinerary-label">Details</span>
+                          <span class="itinerary-value">{{if trimSpace .Item.TransportMode}}{{.Item.TransportMode}}{{if and .CommuteFromTitle .CommuteToTitle}} · {{end}}{{end}}{{if and .CommuteFromTitle .CommuteToTitle}}{{.CommuteFromTitle}} → {{.CommuteToTitle}}{{else if and (ne .Item.CommuteFromItemID "") (eq .CommuteFromTitle "")}}<span class="muted">From link missing — edit to re-link</span>{{else if and (ne .Item.CommuteToItemID "") (eq .CommuteToTitle "")}}<span class="muted">To link missing — edit to re-link</span>{{end}}</span>
+                        </div>
+                        {{end}}
+                        {{with googleMapsDirectionsURL .CommuteFromLat .CommuteFromLng .CommuteToLat .CommuteToLng .Item.TransportMode}}
+                        <div class="itinerary-field">
+                          <span class="itinerary-label">Directions</span>
+                          <span class="itinerary-value"><a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open directions in Google Maps" aria-label="Open directions in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span>Google Maps</a></span>
+                        </div>
+                        {{end}}
+                        {{if ne .Item.EstCost 0.0}}
+                        <div class="itinerary-field">
+                          <span class="itinerary-label">Est. cost</span>
+                          <span class="itinerary-value">{{$.CurrencySymbol}}{{printf "%.2f" .Item.EstCost}}</span>
+                        </div>
+                        {{end}}
+                        {{if (itineraryNotesDisplay .Item.Notes)}}
+                        <div class="itinerary-field itinerary-field--full">
+                          <span class="itinerary-label">Notes</span>
+                          <span class="itinerary-value">{{itineraryNotesDisplay .Item.Notes}}</span>
+                        </div>
+                        {{end}}
+                      </div>
+                    </div>
+                    {{if not $.Details.Trip.IsArchived}}
+                    <form id="commute-itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/update" class="form-grid item-edit hidden commute-itinerary-form" data-ajax-submit data-toast-message="Commute updated.">
+                      <input type="hidden" name="item_kind" value="commute">
+                      <input type="hidden" name="expected_updated_at" value="{{.Item.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
+                      <p class="full muted small">A commute leg blocks travel time between two itinerary items on the same day. It appears on your day list and calendar like a stop, without adding an extra map pin.</p>
+                      <label class="full">Title<input type="text" name="title" value="{{.Item.Title}}" required></label>
+                      <label class="full">Start date &amp; time{{template "remiDateTimeField" (dict "name" "start_at" "value" (joinItineraryLocalDateTime $group.DateLabel .Item.StartTime) "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">End date &amp; time{{template "remiDateTimeField" (dict "name" "end_at" "value" (joinItineraryLocalDateTime $group.DateLabel .Item.EndTime) "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">Est. cost<input type="number" step="0.01" min="0" name="est_cost" value="{{printf "%.2f" .Item.EstCost}}" placeholder="0.00"></label>
+                      <p class="full muted small">Quick duration (sets end from start)</p>
+                      <div class="full commute-duration-presets" data-commute-duration-presets>
+                        <button type="button" class="secondary-btn" data-commute-dur-min="15">15 min</button>
+                        <button type="button" class="secondary-btn" data-commute-dur-min="30">30 min</button>
+                        <button type="button" class="secondary-btn" data-commute-dur-min="45">45 min</button>
+                        <button type="button" class="secondary-btn" data-commute-dur-min="60">60 min</button>
+                      </div>
+                      <label class="full">From (itinerary item)<select name="commute_from_item_id" required data-commute-endpoint-select>
+                        <option value="">Select…</option>
+                        {{range $.DayGroups}}
+                        {{if eq .DayNumber $group.DayNumber}}
+                        {{range .Items}}
+                        {{if ne .Item.ID $commute.Item.ID}}
+                        <option value="{{.Item.ID}}" {{if eq $commute.Item.CommuteFromItemID .Item.ID}}selected{{end}}>{{.Item.Title}}</option>
+                        {{end}}
+                        {{end}}
+                        {{end}}
+                        {{end}}
+                      </select></label>
+                      <label class="full">To (itinerary item)<select name="commute_to_item_id" required data-commute-endpoint-select>
+                        <option value="">Select…</option>
+                        {{range $.DayGroups}}
+                        {{if eq .DayNumber $group.DayNumber}}
+                        {{range .Items}}
+                        {{if ne .Item.ID $commute.Item.ID}}
+                        <option value="{{.Item.ID}}" {{if eq $commute.Item.CommuteToItemID .Item.ID}}selected{{end}}>{{.Item.Title}}</option>
+                        {{end}}
+                        {{end}}
+                        {{end}}
+                        {{end}}
+                      </select></label>
+                      <label class="full">Transport mode
+                        <select name="transport_mode">
+                          <option value="" {{if eq .Item.TransportMode ""}}selected{{end}}>Other / unspecified</option>
+                          <option value="walk" {{if eq .Item.TransportMode "walk"}}selected{{end}}>Walk</option>
+                          <option value="transit" {{if eq .Item.TransportMode "transit"}}selected{{end}}>Transit</option>
+                          <option value="drive" {{if eq .Item.TransportMode "drive"}}selected{{end}}>Drive</option>
+                          <option value="taxi" {{if eq .Item.TransportMode "taxi"}}selected{{end}}>Taxi / ride-hail</option>
+                        </select>
+                      </label>
+                      <label class="full">Notes<input type="text" name="notes" value="{{.Item.Notes}}" placeholder="Platform, line, tickets…"></label>
+                      <button type="submit">Save</button>
+                      <button type="button" class="secondary-btn" data-inline-edit-cancel="commute-itinerary-edit-{{.Item.ID}}">Cancel</button>
+                    </form>
+                    {{end}}
+                  </li>
+                  {{else}}
+                  <li class="timeline-item" data-itinerary-item data-map-itinerary-point data-itinerary-item-id="{{.Item.ID}}" data-map-day="{{$group.DayNumber}}" data-marker-kind="{{if ne .Lodging.ID ""}}stay{{else if ne .Vehicle.ID ""}}vehicle{{else if ne .Flight.ID ""}}flight{{else}}stop{{end}}"{{if ne .Flight.ID ""}} data-itinerary-booking-id="{{.Flight.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Flight.DepartItineraryID}}depart{{else}}arrive{{end}}"{{end}}{{if ne .Lodging.ID ""}} data-itinerary-booking-id="{{.Lodging.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Lodging.CheckInItineraryID}}checkin{{else}}checkout{{end}}"{{end}}{{if ne .Vehicle.ID ""}} data-itinerary-booking-id="{{.Vehicle.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Vehicle.PickUpItineraryID}}pickup{{else}}dropoff{{end}}"{{end}} data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-geocode-location="{{itineraryGeocodeQuery .}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
                     {{if not $.Details.Trip.IsArchived}}
                     <details class="item-actions trip-inline-actions-dropdown">
                       <summary class="trip-inline-actions-summary">
@@ -205,11 +312,8 @@
                       <div class="itinerary-vehicle-main">
                       <strong>{{.Item.Title}}</strong>
                       {{if ne .Lodging.ID ""}}
-                      <div class="meta">{{if .Item.StartTime}}{{formatTripClock $.Details.Trip .Item.StartTime}}{{else}}--:--{{end}}</div>
                       {{else if ne .Vehicle.ID ""}}
-                      <div class="meta">{{if .Item.StartTime}}{{formatTripClock $.Details.Trip .Item.StartTime}}{{else}}--:--{{end}}</div>
                       {{else if ne .Flight.ID ""}}
-                      <div class="meta">{{if .Item.StartTime}}{{formatTripClock $.Details.Trip .Item.StartTime}}{{else}}--:--{{end}}</div>
                       {{else}}
                       <div class="meta">{{if .Item.StartTime}}{{formatTripClock $.Details.Trip .Item.StartTime}}{{else}}--:--{{end}}{{if trimSpace .Item.EndTime}} – {{formatTripClock $.Details.Trip .Item.EndTime}}{{end}}</div>
                       {{end}}
@@ -219,15 +323,43 @@
                         <span class="itinerary-value">{{.Vehicle.VehicleDetail}}</span>
                       </div>
                       {{end}}
+                      {{if and (ne .Vehicle.ID "") (eq .Item.ID .Vehicle.PickUpItineraryID) (trimSpace .Vehicle.BookingConfirmation)}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Booking Reference</span>
+                        <span class="itinerary-value">{{.Vehicle.BookingConfirmation}}</span>
+                      </div>
+                      {{end}}
+                      {{if ne .Flight.ID ""}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Airline</span>
+                        <span class="itinerary-value">{{if .Flight.FlightName}}{{.Flight.FlightName}}{{else}}<span class="muted">—</span>{{end}}</span>
+                      </div>
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Flight Number</span>
+                        <span class="itinerary-value">{{if .Flight.FlightNumber}}{{.Flight.FlightNumber}}{{else}}<span class="muted">—</span>{{end}}</span>
+                      </div>
+                      {{if trimSpace .Flight.BookingConfirmation}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Booking Reference</span>
+                        <span class="itinerary-value">{{.Flight.BookingConfirmation}}</span>
+                      </div>
+                      {{end}}
+                      {{end}}
                       <div class="itinerary-field">
                         {{if ne .Lodging.ID ""}}
                         <span class="itinerary-label">Address</span>
                         {{$mapHint := .Lodging.Address}}{{if eq $mapHint ""}}{{$mapHint = .Item.Location}}{{end}}
                         <span class="itinerary-value">{{if .Lodging.Address}}{{locationLineBeforeComma .Lodging.Address}}{{else if .Item.Location}}{{locationLineBeforeComma .Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
                         {{else if ne .Vehicle.ID ""}}
-                        <span class="itinerary-label">Pick Up Location</span>
+                        <span class="itinerary-label">{{if eq .Item.ID .Vehicle.PickUpItineraryID}}Pick Up Location{{else}}Drop Off Location{{end}}</span>
+                        {{if eq .Item.ID .Vehicle.PickUpItineraryID}}
                         {{$mapHint := .Vehicle.PickUpLocation}}{{if eq $mapHint ""}}{{$mapHint = .Item.Location}}{{end}}
                         <span class="itinerary-value">{{if .Vehicle.PickUpLocation}}{{locationLineBeforeComma .Vehicle.PickUpLocation}}{{else if .Item.Location}}{{locationLineBeforeComma .Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
+                        {{else}}
+                        {{$dropEff := .Vehicle.DropOffLocation}}{{if eq (trimSpace $dropEff) ""}}{{$dropEff = .Vehicle.PickUpLocation}}{{end}}
+                        {{$mapHint := $dropEff}}{{if eq $mapHint ""}}{{$mapHint = .Item.Location}}{{end}}
+                        <span class="itinerary-value">{{if ne (trimSpace .Vehicle.DropOffLocation) ""}}{{locationLineBeforeComma .Vehicle.DropOffLocation}}{{else if .Vehicle.PickUpLocation}}{{locationLineBeforeComma .Vehicle.PickUpLocation}}{{else if .Item.Location}}{{locationLineBeforeComma .Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
+                        {{end}}
                         {{else if ne .Flight.ID ""}}
                         <span class="itinerary-label">{{if eq .Item.ID .Flight.DepartItineraryID}}Departure Airport{{else}}Arrival Airport{{end}}</span>
                         {{$mapHint := .Item.Location}}
@@ -238,14 +370,42 @@
                         <span class="itinerary-value">{{if .Item.Location}}{{locationLineBeforeComma .Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
                         {{end}}
                       </div>
+                      {{if ne .Lodging.ID ""}}
+                      {{if eq .Item.ID .Lodging.CheckInItineraryID}}
+                      {{if trimSpace .Lodging.BookingConfirmation}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Booking Reference</span>
+                        <span class="itinerary-value">{{.Lodging.BookingConfirmation}}</span>
+                      </div>
+                      {{end}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Check In Date &amp; Time</span>
+                        <span class="itinerary-value">{{formatTripDateTime $.Details.Trip $.Settings .Lodging.CheckInAt}}</span>
+                      </div>
+                      {{else if eq .Item.ID .Lodging.CheckOutItineraryID}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Check Out Date &amp; Time</span>
+                        <span class="itinerary-value">{{formatTripDateTime $.Details.Trip $.Settings .Lodging.CheckOutAt}}</span>
+                      </div>
+                      {{end}}
+                      {{end}}
+                      {{if ne .Vehicle.ID ""}}
+                      {{if eq .Item.ID .Vehicle.PickUpItineraryID}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Pick Up Date &amp; Time</span>
+                        <span class="itinerary-value">{{formatTripDateTime $.Details.Trip $.Settings .Vehicle.PickUpAt}}</span>
+                      </div>
+                      {{else if eq .Item.ID .Vehicle.DropOffItineraryID}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Drop Off Date &amp; Time</span>
+                        <span class="itinerary-value">{{formatTripDateTime $.Details.Trip $.Settings .Vehicle.DropOffAt}}</span>
+                      </div>
+                      {{end}}
+                      {{end}}
                       {{if ne .Flight.ID ""}}
                       <div class="itinerary-field">
-                        <span class="itinerary-label">Airline</span>
-                        <span class="itinerary-value">{{if .Flight.FlightName}}{{.Flight.FlightName}}{{else}}<span class="muted">—</span>{{end}}</span>
-                      </div>
-                      <div class="itinerary-field">
-                        <span class="itinerary-label">Flight Number</span>
-                        <span class="itinerary-value">{{if .Flight.FlightNumber}}{{.Flight.FlightNumber}}{{else}}<span class="muted">—</span>{{end}}</span>
+                        <span class="itinerary-label">{{if eq .Item.ID .Flight.DepartItineraryID}}Flight Departure{{else}}Flight Arrival{{end}}</span>
+                        <span class="itinerary-value">{{if .Item.StartTime}}{{formatTripClock $.Details.Trip .Item.StartTime}}{{else}}<span class="muted">—</span>{{end}}</span>
                       </div>
                       {{end}}
                       {{if ne .Lodging.ID ""}}
@@ -306,14 +466,6 @@
                         <span class="itinerary-value">{{itineraryNotesDisplay .Item.Notes}}</span>
                       </div>
                       {{end}}
-                      {{if ne .Lodging.ID ""}}
-                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/accommodation">{{$.Details.Trip.StaySectionTitle}}</a>.</p>
-                      {{else if ne .Vehicle.ID ""}}
-                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/vehicle-rental">{{$.Details.Trip.VehicleSectionTitle}}</a>.</p>
-                      {{else if ne .Flight.ID ""}}
-                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/flights">{{$.Details.Trip.FlightsSectionTitle}}</a>.</p>
-                      {{end}}
-                      </div>
                       {{if and (ne .Vehicle.ID "") (or .Vehicle.VehicleImagePath .Vehicle.AttachmentPath)}}
                       <div class="itinerary-entry-media-row">
                         {{if .Vehicle.VehicleImagePath}}
@@ -387,6 +539,14 @@
                         </a>
                       </div>
                       {{end}}
+                      {{if ne .Lodging.ID ""}}
+                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/accommodation">{{$.Details.Trip.StaySectionTitle}}</a>.</p>
+                      {{else if ne .Vehicle.ID ""}}
+                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/vehicle-rental">{{$.Details.Trip.VehicleSectionTitle}}</a>.</p>
+                      {{else if ne .Flight.ID ""}}
+                      <p class="itinerary-hint">Booking details are managed under <a href="/trips/{{$.Details.Trip.ID}}/flights">{{$.Details.Trip.FlightsSectionTitle}}</a>.</p>
+                      {{end}}
+                      </div>
                     </div>
                     {{if not $.Details.Trip.IsArchived}}
                     {{if ne .Lodging.ID ""}}
@@ -396,17 +556,17 @@
                       <label class="full">Property Name<input type="text" name="name" value="{{.Lodging.Name}}" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
                       <label class="full">Address<input type="text" name="address" value="{{.Lodging.Address}}" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
                       <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
-                      <label>Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" .Lodging.CheckInAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                      <label>Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" .Lodging.CheckOutAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                      <label>Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Lodging.Cost}}" placeholder="0.00"></label>
-                      <label>Booking Reference<input type="text" name="booking_confirmation" value="{{.Lodging.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
+                      <label class="full">Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" .Lodging.CheckInAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" .Lodging.CheckOutAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Lodging.Cost}}" placeholder="0.00"></label>
+                      <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.Lodging.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
                       <input type="hidden" name="current_attachment_path" value="{{.Lodging.AttachmentPath}}">
                       <input type="hidden" name="current_image_path" value="{{.Lodging.ImagePath}}">
                       {{if .Lodging.AttachmentPath}}
                       <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{.Lodging.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open current booking attachment in a new tab">Open existing attachment</a></p>
                       {{end}}
-                      <label>Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
-                      <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+                      <label class="full">Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+                      <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
                       {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
                       {{template "remiRemoveAttachmentSelect" "remove_image"}}
                       <label class="full">Notes<input type="text" name="notes" value="{{.Lodging.Notes}}" placeholder="Breakfast included, high floor requested..."></label>
@@ -414,14 +574,14 @@
                       <button type="button" class="secondary-btn" data-inline-edit-cancel="accommodation-itinerary-edit-{{.Item.ID}}">Cancel</button>
                     </form>
                     {{else if ne .Vehicle.ID ""}}
-                    <form id="vehicle-rental-itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.Vehicle.ID}}/update" class="form-grid item-edit hidden full vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form data-ajax-submit data-toast-message="Vehicle rental updated.">
+                    <form id="vehicle-rental-itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{.Vehicle.ID}}/update" class="form-grid item-edit hidden full vehicle-form-grid vehicle-edit-form" enctype="multipart/form-data" data-vehicle-form data-ajax-submit data-toast-message="Vehicle rental updated.">
                       <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
                       <input type="hidden" name="expected_updated_at" value="{{.Vehicle.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
-                      <label>Vehicle<input type="text" name="vehicle_detail" value="{{.Vehicle.VehicleDetail}}" placeholder="e.g. Range Rover Velar"></label>
-                      <label>Booking Reference<input type="text" name="booking_confirmation" value="{{.Vehicle.BookingConfirmation}}" placeholder="#REMI-9921"></label>
-                      <label>Pickup Location<input type="text" name="pick_up_location" value="{{.Vehicle.PickUpLocation}}" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
-                      <label>Pickup Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" .Vehicle.PickUpAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                      <fieldset class="vehicle-dropoff-fieldset">
+                      <label class="full">Vehicle<input type="text" name="vehicle_detail" value="{{.Vehicle.VehicleDetail}}" placeholder="e.g. Range Rover Velar"></label>
+                      <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.Vehicle.BookingConfirmation}}" placeholder="#REMI-9921"></label>
+                      <label class="full">Pickup Location<input type="text" name="pick_up_location" value="{{.Vehicle.PickUpLocation}}" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+                      <label class="full">Pickup Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" .Vehicle.PickUpAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <fieldset class="vehicle-dropoff-fieldset full">
                         <legend class="vehicle-dropoff-legend">Drop-off Location</legend>
                         <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pickup">
                           <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" {{if eq .Vehicle.DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-same> Same as pickup</label>
@@ -429,42 +589,48 @@
                         </div>
                         <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field {{if eq .Vehicle.DropOffLocation ""}}hidden{{end}}>Drop-off Location<input type="text" name="drop_off_location" value="{{.Vehicle.DropOffLocation}}" placeholder="Return location" autocomplete="off" data-location-autocomplete {{if eq .Vehicle.DropOffLocation ""}}disabled{{end}}></label>
                       </fieldset>
-                      <label>Drop-off Date & Time{{template "remiDateTimeField" (dict "name" "drop_off_at" "value" .Vehicle.DropOffAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                      <label>Rental Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Vehicle.Cost}}" placeholder="0.00"></label>
-                      <label>Insurance Cost<input type="number" step="0.01" min="0" name="insurance_cost" value="{{printf "%.2f" .Vehicle.InsuranceCost}}" placeholder="0.00"></label>
+                      <label class="full">Drop-off Date & Time{{template "remiDateTimeField" (dict "name" "drop_off_at" "value" .Vehicle.DropOffAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">Rental Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Vehicle.Cost}}" placeholder="0.00"></label>
+                      <label class="full">Insurance Cost<input type="number" step="0.01" min="0" name="insurance_cost" value="{{printf "%.2f" .Vehicle.InsuranceCost}}" placeholder="0.00"></label>
                       <input type="hidden" name="current_vehicle_image_path" value="{{.Vehicle.VehicleImagePath}}">
                       <input type="hidden" name="current_attachment_path" value="{{.Vehicle.AttachmentPath}}">
-                      {{if .Vehicle.VehicleImagePath}}
-                      <label class="full vehicle-thumb-form-row">
-                        <span>Current vehicle rental image</span>
-                        <a href="{{.Vehicle.VehicleImagePath}}" target="_blank" rel="noreferrer">
-                          <img class="vehicle-thumb" src="{{.Vehicle.VehicleImagePath}}" alt="Vehicle rental image">
-                        </a>
-                      </label>
-                      {{end}}
                       {{if .Vehicle.AttachmentPath}}
                       <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{.Vehicle.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open current booking attachment in a new tab">Open existing attachment</a></p>
                       {{end}}
-                      <label>Rental Agreement Attachment<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
-                      <label>Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
-                      {{template "remiRemoveAttachmentSelect" "remove_vehicle_image"}}
-                      {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
-                      <label>Notes<input type="text" name="notes" value="{{.Vehicle.Notes}}" placeholder="Notes about insurance coverage, keys, etc."></label>
-                      <button type="submit">Save</button>
-                      <button type="button" class="secondary-btn" data-inline-edit-cancel="vehicle-rental-itinerary-edit-{{.Item.ID}}">Cancel</button>
+                      <div class="vehicle-form-rental-attach-col full">
+                        <label>Rental Agreement Attachment<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+                        {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
+                      </div>
+                      <div class="vehicle-form-photo-stack full">
+                        {{if .Vehicle.VehicleImagePath}}
+                        <label class="vehicle-thumb-form-row">
+                          <span>Current vehicle rental image</span>
+                          <a href="{{.Vehicle.VehicleImagePath}}" target="_blank" rel="noreferrer">
+                            <img class="vehicle-thumb" src="{{.Vehicle.VehicleImagePath}}" alt="Vehicle rental image">
+                          </a>
+                        </label>
+                        {{end}}
+                        <label>Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
+                        {{template "remiRemoveAttachmentSelect" "remove_vehicle_image"}}
+                      </div>
+                      <label class="full">Notes<input type="text" name="notes" value="{{.Vehicle.Notes}}" placeholder="Notes about insurance coverage, keys, etc."></label>
+                      <div class="full vehicle-edit-actions">
+                        <button type="submit" class="vehicle-submit-btn">Save</button>
+                        <button type="button" class="secondary-btn" data-inline-edit-cancel="vehicle-rental-itinerary-edit-{{.Item.ID}}">Cancel</button>
+                      </div>
                     </form>
                     {{else if ne .Flight.ID ""}}
                     <form id="flight-itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{.Flight.ID}}/update" class="form-grid flight-form-grid item-edit hidden full" enctype="multipart/form-data" data-ajax-submit data-toast-message="Flight updated.">
                       <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
                       <input type="hidden" name="expected_updated_at" value="{{.Flight.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
-                      <label>Airline<input type="text" name="flight_name" value="{{.Flight.FlightName}}" placeholder="e.g. Philippine Airlines" required></label>
-                      <label>Flight Number<input type="text" name="flight_number" value="{{.Flight.FlightNumber}}" placeholder="e.g. PR 2781"></label>
-                      <label>Departure Airport<input type="text" name="depart_airport" value="{{.Flight.DepartAirport}}" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
-                      <label>Departure Date & Time{{template "remiDateTimeField" (dict "name" "depart_at" "value" .Flight.DepartAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                      <label>Arrival Airport<input type="text" name="arrive_airport" value="{{.Flight.ArriveAirport}}" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
-                      <label>Arrival Date & Time{{template "remiDateTimeField" (dict "name" "arrive_at" "value" .Flight.ArriveAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                      <label>Booking Reference<input type="text" name="booking_confirmation" value="{{.Flight.BookingConfirmation}}" placeholder="e.g. FLT-1234"></label>
-                      <label>Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Flight.Cost}}" placeholder="0.00"></label>
+                      <label class="full">Airline<input type="text" name="flight_name" value="{{.Flight.FlightName}}" placeholder="e.g. Philippine Airlines" required></label>
+                      <label class="full">Flight Number<input type="text" name="flight_number" value="{{.Flight.FlightNumber}}" placeholder="e.g. PR 2781"></label>
+                      <label class="full">Departure Airport<input type="text" name="depart_airport" value="{{.Flight.DepartAirport}}" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
+                      <label class="full">Departure Date & Time{{template "remiDateTimeField" (dict "name" "depart_at" "value" .Flight.DepartAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">Arrival Airport<input type="text" name="arrive_airport" value="{{.Flight.ArriveAirport}}" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
+                      <label class="full">Arrival Date & Time{{template "remiDateTimeField" (dict "name" "arrive_at" "value" .Flight.ArriveAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.Flight.BookingConfirmation}}" placeholder="e.g. FLT-1234"></label>
+                      <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Flight.Cost}}" placeholder="0.00"></label>
                       <input type="hidden" name="current_document_path" value="{{.Flight.DocumentPath}}">
                       <input type="hidden" name="current_image_path" value="{{.Flight.ImagePath}}">
                       {{if .Flight.DocumentPath}}
@@ -473,8 +639,8 @@
                       {{if .Flight.ImagePath}}
                       <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{.Flight.ImagePath}}" target="_blank" rel="noreferrer" title="Open current flight image in a new tab">Open existing image</a></p>
                       {{end}}
-                      <label>Boarding Pass / Ticket Attachment<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
-                      <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+                      <label class="full">Boarding Pass / Ticket Attachment<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
+                      <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
                       {{template "remiRemoveAttachmentSelect" "remove_document"}}
                       {{template "remiRemoveAttachmentSelect" "remove_image"}}
                       <label class="full">Notes<input type="text" name="notes" value="{{.Flight.Notes}}" placeholder="Add any additional details"></label>
@@ -483,13 +649,13 @@
                     </form>
                     {{else}}
                     <form id="itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/update" class="form-grid item-edit hidden" enctype="multipart/form-data" data-ajax-submit data-toast-message="Itinerary stop updated.">
+                      <input type="hidden" name="item_kind" value="stop">
                       <input type="hidden" name="expected_updated_at" value="{{.Item.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
                       <label class="full">Location Name<input type="text" name="location" value="{{.Item.Location}}" placeholder="e.g. Coron Island" data-location-autocomplete required></label>
                       <label class="full">Title<input type="text" name="title" value="{{.Item.Title}}" placeholder="Kayaking Big Lagoon" required></label>
-                      <label>Date{{template "remiDateField" (dict "name" "itinerary_date" "value" $group.DateLabel "min" $.Details.Trip.StartDate "max" $.Details.Trip.EndDate "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                      <label>Cost<input type="number" step="0.01" min="0" name="est_cost" value="{{printf "%.2f" .Item.EstCost}}" placeholder="0.00"></label>
-                      <label>Start{{template "remiTimeField" (dict "name" "start_time" "value" .Item.StartTime)}}</label>
-                      <label>End{{template "remiTimeField" (dict "name" "end_time" "value" .Item.EndTime)}}</label>
+                      <label class="full">Start date &amp; time{{template "remiDateTimeField" (dict "name" "start_at" "value" (joinItineraryLocalDateTime $group.DateLabel .Item.StartTime) "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">End date &amp; time{{template "remiDateTimeField" (dict "name" "end_at" "value" (joinItineraryLocalDateTime $group.DateLabel .Item.EndTime) "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                      <label class="full">Cost<input type="number" step="0.01" min="0" name="est_cost" value="{{printf "%.2f" .Item.EstCost}}" placeholder="0.00"></label>
                       <label class="full">Notes<input type="text" name="notes" value="{{.Item.Notes}}" placeholder="Optional details"></label>
                       {{$rems := index $.ItineraryCustomRemindersByItem .Item.ID}}
                       <fieldset class="full itinerary-reminders-fieldset">
@@ -512,6 +678,7 @@
                     {{end}}
                   </li>
                   {{end}}
+                  {{end}}
                 </ul>
               </details>
               {{end}}
@@ -521,17 +688,24 @@
             {{end}}
             <div class="trip-itinerary-quick-edit hidden" data-itinerary-quick-edit-modal aria-hidden="true">
               <div class="trip-itinerary-quick-edit__backdrop" data-itinerary-quick-edit-close></div>
-              <section class="trip-itinerary-quick-edit__panel" role="dialog" aria-modal="true" aria-label="Quick edit itinerary item">
+              <section class="trip-itinerary-quick-edit__panel" role="dialog" aria-modal="true" aria-label="Itinerary quick view" data-itinerary-quick-edit-panel>
                 <header class="trip-itinerary-quick-edit__head">
-                  <div>
-                    <small>Quick Edit</small>
-                    <strong data-itinerary-quick-edit-title>Itinerary Item</strong>
+                  <div class="trip-itinerary-quick-edit__head-text">
+                    <p class="trip-itinerary-quick-edit__head-titleline">
+                      <span class="trip-itinerary-quick-edit__mode" data-itinerary-quick-edit-mode-label>Quick view</span><span class="trip-itinerary-quick-edit__subject" data-itinerary-quick-edit-title></span>
+                    </p>
                   </div>
-                  <button type="button" class="icon-btn" data-itinerary-quick-edit-close aria-label="Close quick edit">
-                    <span class="material-symbols-outlined">close</span>
-                  </button>
+                  <div class="trip-itinerary-quick-edit__head-actions">
+                    <button type="button" class="trip-itinerary-quick-edit__edit-btn" data-itinerary-quick-edit-to-edit>Edit</button>
+                    <button type="button" class="icon-btn" data-itinerary-quick-edit-close aria-label="Close">
+                      <span class="material-symbols-outlined">close</span>
+                    </button>
+                  </div>
                 </header>
-                <div class="trip-itinerary-quick-edit__body" data-itinerary-quick-edit-body></div>
+                <div class="trip-itinerary-quick-edit__body" data-itinerary-quick-edit-body>
+                  <div class="trip-itinerary-quick-edit__preview" data-itinerary-quick-edit-preview></div>
+                  <div class="trip-itinerary-quick-edit__form-wrap hidden" data-itinerary-quick-edit-form-wrap></div>
+                </div>
               </section>
             </div>
           </section>
@@ -572,7 +746,7 @@
                       <div class="expense-view-cols">
                         <div class="expense-view-primary">
                           <strong class="expense-view-title">{{if .Title}}{{.Title}}{{else if .Category}}{{.Category}}{{else}}General{{end}}</strong>
-                          {{if or .Notes .ReceiptPath}}<span class="muted expense-view-notes">{{if .Notes}}{{.Notes}}{{end}}{{if .ReceiptPath}}{{if .Notes}} · {{end}}<a href="{{.ReceiptPath}}" target="_blank" rel="noopener">Open receipt</a>{{end}}</span>{{end}}
+                          {{if or .Notes .ReceiptPath}}<span class="muted expense-view-notes">{{if .Notes}}{{.Notes}}{{end}}{{if and .ReceiptPath (eq .LodgingID "") (not (index $.VehicleExpenseLocked .ID)) (not (index $.FlightExpenseLocked .ID))}}{{if .Notes}} · {{end}}<a href="{{.ReceiptPath}}" target="_blank" rel="noopener">Open receipt</a>{{end}}</span>{{end}}
                         </div>
                         <span class="expense-view-amount">{{$.CurrencySymbol}}{{printf "%.2f" .Amount}}</span>
                         {{if and (not $.Details.Trip.IsArchived) (eq $.CurrentUserID $.Details.Trip.OwnerUserID) (eq .LodgingID "") (not (index $.VehicleExpenseLocked .ID)) (not (index $.FlightExpenseLocked .ID))}}
@@ -592,6 +766,22 @@
                             </form>
                           </div>
                         </details>
+                        {{end}}
+                        {{if and .ReceiptPath (or (ne .LodgingID "") (index $.VehicleExpenseLocked .ID) (index $.FlightExpenseLocked .ID))}}
+                        <div class="itinerary-entry-media-row expense-view-receipt-media">
+                          {{if isImageWebPath .ReceiptPath}}
+                          <a class="vehicle-itinerary-thumb-link" href="{{.ReceiptPath}}" target="_blank" rel="noopener">
+                            <img class="vehicle-thumb" src="{{.ReceiptPath}}" alt="Receipt image">
+                          </a>
+                          {{else}}
+                          <a class="vehicle-itinerary-thumb-link" href="{{.ReceiptPath}}" target="_blank" rel="noopener">
+                            <span class="vehicle-thumb vehicle-thumb--doc" role="img" aria-label="Receipt attachment">
+                              <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                              <small>View Attachment</small>
+                            </span>
+                          </a>
+                          {{end}}
+                        </div>
                         {{end}}
                         {{if ne .LodgingID ""}}
                         <p class="itinerary-hint expense-view-hint">From <a href="/trips/{{$.Details.Trip.ID}}/accommodation">{{$.Details.Trip.StaySectionTitle}}</a>; edit the booking there.</p>
@@ -751,17 +941,17 @@
                     <label class="full">Property Name<input type="text" name="name" value="{{.Name}}" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
                     <label class="full">Address<input type="text" name="address" value="{{.Address}}" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
                     <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
-                    <label>Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" .CheckInAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                    <label>Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" .CheckOutAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                    <label>Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
-                    <label>Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
+                    <label class="full">Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" .CheckInAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                    <label class="full">Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" .CheckOutAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                    <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
+                    <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
                     <input type="hidden" name="current_attachment_path" value="{{.AttachmentPath}}">
                     <input type="hidden" name="current_image_path" value="{{.ImagePath}}">
                     {{if .AttachmentPath}}
                     <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open current booking attachment in a new tab">Open existing attachment</a></p>
                     {{end}}
-                    <label>Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
-                    <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+                    <label class="full">Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+                    <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
                     {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
                     {{template "remiRemoveAttachmentSelect" "remove_image"}}
                     <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}" placeholder="Breakfast included, high floor requested..."></label>
@@ -875,11 +1065,11 @@
                       <p class="vehicle-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.</p>
                     </div>
                   </div>
-                  <label>Vehicle<input type="text" name="vehicle_detail" value="{{.VehicleDetail}}" placeholder="e.g. Range Rover Velar"></label>
-                  <label>Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="#REMI-9921"></label>
-                  <label>Pickup Location<input type="text" name="pick_up_location" value="{{.PickUpLocation}}" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
-                  <label>Pickup Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" .PickUpAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                  <fieldset class="vehicle-dropoff-fieldset">
+                  <label class="full">Vehicle<input type="text" name="vehicle_detail" value="{{.VehicleDetail}}" placeholder="e.g. Range Rover Velar"></label>
+                  <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="#REMI-9921"></label>
+                  <label class="full">Pickup Location<input type="text" name="pick_up_location" value="{{.PickUpLocation}}" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+                  <label class="full">Pickup Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" .PickUpAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                  <fieldset class="vehicle-dropoff-fieldset full">
                     <legend class="vehicle-dropoff-legend">Drop-off Location</legend>
                     <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pickup">
                       <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" {{if eq .DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-same> Same as pickup</label>
@@ -887,26 +1077,30 @@
                     </div>
                     <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field {{if eq .DropOffLocation ""}}hidden{{end}}>Drop-off Location<input type="text" name="drop_off_location" value="{{.DropOffLocation}}" placeholder="Return location" autocomplete="off" data-location-autocomplete {{if eq .DropOffLocation ""}}disabled{{end}}></label>
                   </fieldset>
-                  <label>Drop-off Date & Time{{template "remiDateTimeField" (dict "name" "drop_off_at" "value" .DropOffAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                  <label>Rental Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
-                  <label>Insurance Cost<input type="number" step="0.01" min="0" name="insurance_cost" value="{{printf "%.2f" .InsuranceCost}}" placeholder="0.00"></label>
+                  <label class="full">Drop-off Date & Time{{template "remiDateTimeField" (dict "name" "drop_off_at" "value" .DropOffAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                  <label class="full">Rental Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
+                  <label class="full">Insurance Cost<input type="number" step="0.01" min="0" name="insurance_cost" value="{{printf "%.2f" .InsuranceCost}}" placeholder="0.00"></label>
                   <input type="hidden" name="current_vehicle_image_path" value="{{.VehicleImagePath}}">
                   <input type="hidden" name="current_attachment_path" value="{{.AttachmentPath}}">
-                  {{if .VehicleImagePath}}
-                  <label class="full vehicle-thumb-form-row">
-                    <span>Current vehicle rental image</span>
-                    <a href="{{.VehicleImagePath}}" target="_blank" rel="noreferrer" title="Open current vehicle rental image in a new tab">
-                      <img class="vehicle-thumb" src="{{.VehicleImagePath}}" alt="Current vehicle rental image">
-                    </a>
-                  </label>
-                  {{end}}
                   {{if .AttachmentPath}}
                   <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open current booking attachment in a new tab">Open existing attachment</a></p>
                   {{end}}
-                  <label>Rental Agreement Attachment<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
-                  <label>Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
-                  {{template "remiRemoveAttachmentSelect" "remove_vehicle_image"}}
-                  {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
+                  <div class="vehicle-form-rental-attach-col full">
+                    <label>Rental Agreement Attachment<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+                    {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
+                  </div>
+                  <div class="vehicle-form-photo-stack full">
+                    {{if .VehicleImagePath}}
+                    <label class="vehicle-thumb-form-row">
+                      <span>Current vehicle rental image</span>
+                      <a href="{{.VehicleImagePath}}" target="_blank" rel="noreferrer" title="Open current vehicle rental image in a new tab">
+                        <img class="vehicle-thumb" src="{{.VehicleImagePath}}" alt="Current vehicle rental image">
+                      </a>
+                    </label>
+                    {{end}}
+                    <label>Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
+                    {{template "remiRemoveAttachmentSelect" "remove_vehicle_image"}}
+                  </div>
                   <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}" placeholder="Notes about insurance coverage, keys, etc."></label>
                   <div class="full vehicle-edit-actions">
                     <button type="submit" class="vehicle-submit-btn">Save Changes</button>
@@ -1014,14 +1208,14 @@
                       <p class="flight-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.</p>
                     </div>
                   </div>
-                  <label>Airline<input type="text" name="flight_name" value="{{.FlightName}}" placeholder="e.g. Philippine Airlines" required></label>
-                  <label>Flight Number<input type="text" name="flight_number" value="{{.FlightNumber}}" placeholder="e.g. PR 2781"></label>
-                  <label>Departure Airport<input type="text" name="depart_airport" value="{{.DepartAirport}}" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
-                  <label>Departure Date & Time{{template "remiDateTimeField" (dict "name" "depart_at" "value" .DepartAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                  <label>Arrival Airport<input type="text" name="arrive_airport" value="{{.ArriveAirport}}" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
-                  <label>Arrival Date & Time{{template "remiDateTimeField" (dict "name" "arrive_at" "value" .ArriveAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "required" true)}}</label>
-                  <label>Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. FLT-1234"></label>
-                  <label>Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
+                  <label class="full">Airline<input type="text" name="flight_name" value="{{.FlightName}}" placeholder="e.g. Philippine Airlines" required></label>
+                  <label class="full">Flight Number<input type="text" name="flight_number" value="{{.FlightNumber}}" placeholder="e.g. PR 2781"></label>
+                  <label class="full">Departure Airport<input type="text" name="depart_airport" value="{{.DepartAirport}}" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
+                  <label class="full">Departure Date & Time{{template "remiDateTimeField" (dict "name" "depart_at" "value" .DepartAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                  <label class="full">Arrival Airport<input type="text" name="arrive_airport" value="{{.ArriveAirport}}" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
+                  <label class="full">Arrival Date & Time{{template "remiDateTimeField" (dict "name" "arrive_at" "value" .ArriveAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                  <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. FLT-1234"></label>
+                  <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
                   <input type="hidden" name="current_document_path" value="{{.DocumentPath}}">
                   <input type="hidden" name="current_image_path" value="{{.ImagePath}}">
                   {{if .DocumentPath}}
@@ -1030,8 +1224,8 @@
                   {{if .ImagePath}}
                   <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{.ImagePath}}" target="_blank" rel="noreferrer" title="Open current flight image in a new tab">Open existing image</a></p>
                   {{end}}
-                  <label>Boarding Pass / Ticket Attachment<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
-                  <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+                  <label class="full">Boarding Pass / Ticket Attachment<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
+                  <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
                   {{template "remiRemoveAttachmentSelect" "remove_document"}}
                   {{template "remiRemoveAttachmentSelect" "remove_image"}}
                   <label class="full">Notes<input type="text" name="notes" value="{{.Notes}}" placeholder="Add any additional details"></label>
@@ -1135,7 +1329,7 @@
             </div>
             <p class="muted trip-page-the-tab-foot"><a href="/trips/{{$.Details.Trip.ID}}/group-expenses">View {{$.Details.Trip.GroupExpensesSectionTitle}}</a> to add or edit entries.</p>
             {{else}}
-            <p class="muted">No group expenses added yet. Use <strong>Add Group Expense</strong> in the sidebar or open <a href="/trips/{{$.Details.Trip.ID}}/group-expenses">{{$.Details.Trip.GroupExpensesSectionTitle}}</a>.</p>
+            <p class="muted">No group expenses added yet. Use <strong>Add expense</strong> in the sidebar (with <strong>Split with group</strong>) or open <a href="/trips/{{$.Details.Trip.ID}}/group-expenses">{{$.Details.Trip.GroupExpensesSectionTitle}}</a>.</p>
             {{end}}
           </section>
           {{end}}
@@ -1149,18 +1343,36 @@
           {{if sidebarWidgetVisible . $.Details.Trip}}
           {{if eq . "add_stop"}}
           <section class="card add-card add-stop-card">
-            <div class="trip-widget-card-head">
+            <div class="trip-itinerary-sidebar-card-head">
               <h3>{{tripSidebarWidgetLabel "add_stop"}}</h3>
-              <p class="trip-resource-form-subtitle">Add a pin to your itinerary map and day list.</p>
             </div>
             {{if $.Details.Trip.IsArchived}}
             <p class="muted">Trip is archived. New itinerary stops are disabled.</p>
             {{else}}
-            <form method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-location-lookup-enabled="{{$.Settings.EnableLocationLookup}}" data-trip-start="{{$.Details.Trip.StartDate}}" data-trip-end="{{$.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.EndDate}}">
-              {{template "tripAddStopFormInner" (dict "Trip" $.Details.Trip "Settings" $.Settings "TabNamespace" "sidebar")}}
-              <label class="full remi-widget-file-label">Attach Image<input type="file" name="stop_image" accept="image/*"></label>
-              <button class="full" type="submit">Add to Itinerary</button>
-            </form>
+            <div class="trip-itinerary-drawer-section trip-itinerary-drawer-section--stop trip-sidebar-itinerary-section trip-sidebar-itinerary-section--stop">
+              <h4 class="trip-itinerary-drawer-section-title">
+                <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+                Stop details
+              </h4>
+              <p class="trip-itinerary-drawer-section-intro muted small">Add a map pin and day-list row. <strong>Custom reminders</strong> are on the second tab below.</p>
+              <form method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-location-lookup-enabled="{{$.Settings.EnableLocationLookup}}" data-trip-start="{{$.Details.Trip.StartDate}}" data-trip-end="{{$.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.EndDate}}">
+                {{template "tripAddStopFormInner" (dict "Trip" $.Details.Trip "Settings" $.Settings "TabNamespace" "sidebar")}}
+                <label class="full remi-widget-file-label">Attach Image<input type="file" name="stop_image" accept="image/*"></label>
+                <button class="full" type="submit">Add to Itinerary</button>
+              </form>
+            </div>
+            {{end}}
+          </section>
+          {{end}}
+          {{if eq . "add_commute"}}
+          <section class="card add-card add-stop-card add-commute-card">
+            <div class="trip-itinerary-sidebar-card-head">
+              <h3>{{tripSidebarWidgetLabel "add_commute"}}</h3>
+            </div>
+            {{if $.Details.Trip.IsArchived}}
+            <p class="muted">Trip is archived. New commute legs are disabled.</p>
+            {{else}}
+            {{template "tripAddCommuteBlock" (dict "Trip" $.Details.Trip "Settings" $.Settings "DayGroups" $.DayGroups "FormID" "sidebar-add-commute-form" "Variant" "sidebar")}}
             {{end}}
           </section>
           {{end}}
@@ -1184,41 +1396,13 @@
           {{if eq . "quick_spends"}}
           <section class="card add-card add-expense-card">
             <div class="trip-widget-card-head">
-              <h3>Add Expense</h3>
-              <p class="trip-resource-form-subtitle">Add a spend without leaving this trip.</p>
+              <h3>Add expense</h3>
+              <p class="trip-resource-form-subtitle">Personal spend or split with the group (same form). Add a spend without leaving this trip.</p>
             </div>
             {{if $.Details.Trip.IsArchived}}
             <p class="muted">Trip is archived. New expenses are disabled.</p>
             {{else}}
-            <form method="post" action="/trips/{{$.Details.Trip.ID}}/expenses" class="form-grid remi-trip-widget-form" data-ajax-submit data-toast-message="Expense saved." data-remi-expense-add-form data-remi-default-spent-on="{{$.ExpenseFormDefaultDateISO}}">
-              <label>Title (optional)<input type="text" name="title" maxlength="200" autocomplete="off" placeholder="e.g. Dinner at Ichiran or airport train"></label>
-              <label>Category
-                <select name="category" required>
-                  <option value="" disabled selected>Select a category</option>
-                  {{range $.ExpenseCategories}}
-                  <option value="{{.}}">{{.}}</option>
-                  {{end}}
-                </select>
-              </label>
-              <label>Payment Method
-                <select name="payment_method" required>
-                  <option value="" disabled selected>Select a payment method</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Credit Card">Credit Card</option>
-                  <option value="Crypto">Crypto</option>
-                  <option value="Debit Card">Debit Card</option>
-                  <option value="Digital Wallet">Digital Wallet</option>
-                  <option value="Mobile Payment">Mobile Payment</option>
-                </select>
-              </label>
-              <label>Amount<span class="tab-amount-input-wrap remi-expense-amount-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{$.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" autocomplete="transaction-amount" {{template "remiPmIgnoreExt"}} placeholder="0.00" required></span></label>
-              <label>Date{{template "remiDateField" (dict "name" "spent_on" "value" $.ExpenseFormDefaultDateISO "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings))}}</label>
-              <label>Notes<input type="text" name="notes" placeholder="Add any notes"></label>
-              <div class="full remi-expense-add-actions">
-                <button class="btn" type="submit">Save Expense</button>
-                <button class="secondary-btn" type="submit" data-remi-save-expense-another="1">Save &amp; Add Another</button>
-              </div>
-            </form>
+            {{template "tripUnifiedExpenseForm" (dict "Trip" $.Details.Trip "Settings" $.Settings "ExpenseCategories" $.ExpenseCategories "CurrencySymbol" $.CurrencySymbol "ExpenseFormDefaultDateISO" $.ExpenseFormDefaultDateISO "Party" $.Party "TripGuests" $.TripGuests "TabDepartedParticipants" $.TabDepartedParticipants "CurrentUserID" $.CurrentUserID "Variant" "sidebar" "ReturnTo" (printf "/trips/%s" $.Details.Trip.ID) "FormSuffix" "sidebar" "Subtitle" "" "TabSectionEnabled" $.Details.Trip.SectionEnabledTheTab "FormClass" "")}}
             {{end}}
           </section>
           {{end}}
@@ -1237,49 +1421,26 @@
           </section>
           {{end}}
           {{if eq . "add_tab"}}
+          {{if not (sidebarWidgetVisible "quick_spends" $.Details.Trip)}}
           <section class="card add-card add-tab-card" id="sidebar-add-tab">
             <div class="trip-widget-card-head">
-              <h3>Add Group Expense</h3>
-              <p class="trip-resource-form-subtitle">Creates a shared Tab entry; totals are included in {{$.Details.Trip.SpendsSectionTitle}}.</p>
+              <h3>Add expense</h3>
+              <p class="trip-resource-form-subtitle">Personal spend or split with the group. Creates a shared Tab entry when you turn on <strong>Split with group</strong>; totals are included in {{$.Details.Trip.SpendsSectionTitle}}.</p>
             </div>
             {{if $.Details.Trip.IsArchived}}
             <p class="muted">Trip is archived. New expenses are disabled.</p>
             {{else}}
-            <form method="post" action="/trips/{{$.Details.Trip.ID}}/expenses" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-remi-trip-tab-add-form data-ajax-submit data-toast-message="Group expense saved." data-remi-default-spent-on="{{$.ExpenseFormDefaultDateISO}}">
-              <input type="hidden" name="from_tab" value="1">
-              <input type="hidden" name="quick_tab_equal_all" value="1">
-              <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
-              <label class="full">Title (optional)<input type="text" name="title" maxlength="200" autocomplete="off" placeholder="e.g. Team dinner"></label>
-              <label>Category
-                <select name="category" required>
-                  <option value="" disabled selected>Select a category</option>
-                  {{range $.ExpenseCategories}}
-                  <option value="{{.}}">{{.}}</option>
-                  {{end}}
-                </select>
-              </label>
-              <label>Payment Method
-                <select name="payment_method" required>
-                  <option value="" disabled selected>Select a payment method</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Credit Card">Credit Card</option>
-                  <option value="Crypto">Crypto</option>
-                  <option value="Debit Card">Debit Card</option>
-                  <option value="Digital Wallet">Digital Wallet</option>
-                  <option value="Mobile Payment">Mobile Payment</option>
-                </select>
-              </label>
-              <label>Amount<span class="tab-amount-input-wrap remi-expense-amount-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{$.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" autocomplete="transaction-amount" {{template "remiPmIgnoreExt"}} placeholder="0.00" required></span></label>
-              <label>Date{{template "remiDateField" (dict "name" "spent_on" "value" $.ExpenseFormDefaultDateISO "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings))}}</label>
-              <label class="full">Notes<input type="text" name="notes" placeholder="Add any notes"></label>
-              <label class="full">Receipt<input type="file" name="tab_attachment" accept=".pdf,image/*"></label>
-              <div class="full remi-expense-add-actions">
-                <button class="btn" type="submit">Save Group Expense</button>
-                <button class="secondary-btn" type="submit" data-remi-save-group-expense-another="1">Save &amp; Add Another</button>
-              </div>
-            </form>
+            {{template "tripUnifiedExpenseForm" (dict "Trip" $.Details.Trip "Settings" $.Settings "ExpenseCategories" $.ExpenseCategories "CurrencySymbol" $.CurrencySymbol "ExpenseFormDefaultDateISO" $.ExpenseFormDefaultDateISO "Party" $.Party "TripGuests" $.TripGuests "TabDepartedParticipants" $.TabDepartedParticipants "CurrentUserID" $.CurrentUserID "Variant" "sidebar" "ReturnTo" (printf "/trips/%s" $.Details.Trip.ID) "FormSuffix" "sidebar-tabonly" "Subtitle" "" "TabSectionEnabled" $.Details.Trip.SectionEnabledTheTab "FormClass" "")}}
             {{end}}
           </section>
+          {{else}}
+          <section class="card add-card add-tab-card add-tab-card--unified-placeholder" id="sidebar-add-tab">
+            <div class="trip-widget-card-head">
+              <h3>{{tripSidebarWidgetLabel "add_tab"}}</h3>
+              <p class="trip-resource-form-subtitle muted">Use <strong>Add expense</strong> above for personal spends and group splits.</p>
+            </div>
+          </section>
+          {{end}}
           {{end}}
           {{if eq . "checklist"}}
           <section class="card add-card add-checklist-card">
@@ -1309,11 +1470,24 @@
     <p class="desktop-calendar-flyout__label" data-desktop-calendar-flyout-label>Quick add</p>
     <div class="desktop-calendar-flyout__actions">
       {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_stop" .Details.Trip)}}<button type="button" class="desktop-calendar-flyout__btn" data-desktop-calendar-add="stop"><span class="material-symbols-outlined" aria-hidden="true">pin_drop</span>{{tripSidebarWidgetLabel "add_stop"}}</button>{{end}}
+      {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_commute" .Details.Trip)}}<button type="button" class="desktop-calendar-flyout__btn" data-desktop-calendar-add="commute"><span class="material-symbols-outlined" aria-hidden="true">route</span>{{tripSidebarWidgetLabel "add_commute"}}</button>{{end}}
       {{if .Details.Trip.UIShowFlights}}<button type="button" class="desktop-calendar-flyout__btn" data-desktop-calendar-add="flight"><span class="material-symbols-outlined" aria-hidden="true">flight</span>Add Flights</button>{{end}}
       {{if .Details.Trip.UIShowStay}}<button type="button" class="desktop-calendar-flyout__btn" data-desktop-calendar-add="accommodation"><span class="material-symbols-outlined" aria-hidden="true">hotel</span>Add Accommodation</button>{{end}}
       {{if .Details.Trip.UIShowVehicle}}<button type="button" class="desktop-calendar-flyout__btn" data-desktop-calendar-add="vehicle"><span class="material-symbols-outlined" aria-hidden="true">car_rental</span>Add Vehicle Rental</button>{{end}}
+      {{if and (tripExpenseQuickAddVisible .Details.Trip) (not .Details.Trip.IsArchived)}}<button type="button" class="desktop-calendar-flyout__btn" data-desktop-calendar-add="expense"><span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>Add expense</button>{{end}}
     </div>
   </div>
+  {{if and (tripExpenseQuickAddVisible .Details.Trip) (not .Details.Trip.IsArchived) (tripDesktopCalendarFlyoutHasActions .Details.Trip)}}
+  <div class="desktop-unified-expense-flyout hidden" data-desktop-expense-flyout aria-hidden="true">
+    <div class="desktop-unified-expense-flyout__inner card">
+      <div class="trip-widget-card-head">
+        <h3>Add expense</h3>
+        <p class="trip-resource-form-subtitle muted">Record a new transaction for {{.Details.Trip.Name}}</p>
+      </div>
+      {{template "tripUnifiedExpenseForm" (dict "Trip" .Details.Trip "Settings" .Settings "ExpenseCategories" .ExpenseCategories "CurrencySymbol" .CurrencySymbol "ExpenseFormDefaultDateISO" .ExpenseFormDefaultDateISO "Party" .Party "TripGuests" .TripGuests "TabDepartedParticipants" .TabDepartedParticipants "CurrentUserID" .CurrentUserID "Variant" "flyout" "ReturnTo" (printf "/trips/%s" .Details.Trip.ID) "FormSuffix" "flyout" "Subtitle" "" "TabSectionEnabled" .Details.Trip.SectionEnabledTheTab "FormClass" "")}}
+    </div>
+  </div>
+  {{end}}
   {{end}}
   {{if tripMobileFabHasItems .Details.Trip}}
   <div class="mobile-fab-wrap" data-mobile-fab>
@@ -1324,6 +1498,10 @@
       {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_stop" .Details.Trip)}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-stop">
         <span class="material-symbols-outlined">pin_drop</span>
         {{tripSidebarWidgetLabel "add_stop"}}
+      </button>{{end}}
+      {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_commute" .Details.Trip)}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-commute">
+        <span class="material-symbols-outlined">directions</span>
+        {{tripSidebarWidgetLabel "add_commute"}}
       </button>{{end}}
       {{if .Details.Trip.UIShowFlights}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-flight">
         <span class="material-symbols-outlined">flight</span>
@@ -1341,13 +1519,9 @@
         <span class="material-symbols-outlined" aria-hidden="true">edit_note</span>
         {{tripSidebarWidgetLabel "checklist"}}
       </button>{{end}}
-      {{if and .Details.Trip.UIShowSpends (sidebarWidgetVisible "quick_spends" .Details.Trip)}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-expense">
+      {{if tripExpenseQuickAddVisible .Details.Trip}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-expense">
         <span class="material-symbols-outlined">receipt_long</span>
-        {{tripSidebarWidgetLabel "quick_spends"}}
-      </button>{{end}}
-      {{if and .Details.Trip.SectionEnabledTheTab (sidebarWidgetVisible "add_tab" .Details.Trip)}}<button type="button" class="mobile-fab-option" data-mobile-sheet-open="mobile-sheet-tab">
-        <span class="material-symbols-outlined" aria-hidden="true">post_add</span>
-        {{tripSidebarWidgetLabel "add_tab"}}
+        Add expense
       </button>{{end}}
       {{if .Details.Trip.UIShowDocuments}}<a class="mobile-fab-option" href="/trips/{{.Details.Trip.ID}}/documents">
         <span class="material-symbols-outlined" aria-hidden="true">description</span>
@@ -1357,141 +1531,120 @@
   </div>
   {{end}}
   <div class="mobile-sheet-backdrop hidden" data-mobile-sheet-backdrop></div>
-  {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_stop" .Details.Trip)}}<section id="mobile-sheet-stop" class="mobile-sheet hidden" aria-hidden="true">
+  {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_stop" .Details.Trip)}}<section id="mobile-sheet-stop" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true" aria-labelledby="mobile-sheet-stop-title" aria-modal="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
     <div class="mobile-sheet-head">
-      <h3>{{tripSidebarWidgetLabel "add_stop"}}</h3>
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3 id="mobile-sheet-stop-title">{{tripSidebarWidgetLabel "add_stop"}}</h3>
+      </div>
       <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add stop">
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
-    <p class="mobile-sheet-subtitle muted">Add a pin to your itinerary map and day list.</p>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-location-lookup-enabled="{{.Settings.EnableLocationLookup}}" data-trip-start="{{.Details.Trip.StartDate}}" data-trip-end="{{.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.EndDate}}">
-      {{template "tripAddStopFormInner" (dict "Trip" .Details.Trip "Settings" .Settings "TabNamespace" "mobile")}}
-      <label class="full remi-widget-file-label">Attach Image<input type="file" name="stop_image" accept="image/*"></label>
-      <button class="full" type="submit">Add to Itinerary</button>
-    </form>
+    <div class="trip-itinerary-drawer-scroll">
+      <div class="trip-itinerary-drawer-section trip-itinerary-drawer-section--stop">
+        <h4 class="trip-itinerary-drawer-section-title">
+          <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+          Stop details
+        </h4>
+        <p class="trip-itinerary-drawer-section-intro muted small">Add a map pin and day-list row. <strong>Custom reminders</strong> live on the second tab below.</p>
+        <form method="post" action="/trips/{{.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-location-lookup-enabled="{{.Settings.EnableLocationLookup}}" data-trip-start="{{.Details.Trip.StartDate}}" data-trip-end="{{.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.EndDate}}">
+          {{template "tripAddStopFormInner" (dict "Trip" .Details.Trip "Settings" .Settings "TabNamespace" "mobile")}}
+          <label class="full remi-widget-file-label">Attach Image<input type="file" name="stop_image" accept="image/*"></label>
+          <button class="full trip-itinerary-drawer-stop-submit" type="submit">Add to Itinerary</button>
+        </form>
+      </div>
+    </div>
   </section>{{end}}
-  {{if and .Details.Trip.UIShowSpends (sidebarWidgetVisible "quick_spends" .Details.Trip)}}
-  <section id="mobile-sheet-expense" class="mobile-sheet hidden" aria-hidden="true">
+  {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_commute" .Details.Trip)}}<section id="mobile-sheet-commute" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true" aria-labelledby="mobile-sheet-commute-title" aria-modal="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
     <div class="mobile-sheet-head">
-      <h3>Add Expense</h3>
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3 id="mobile-sheet-commute-title">{{tripSidebarWidgetLabel "add_commute"}}</h3>
+      </div>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add commute">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="trip-itinerary-drawer-scroll">
+      {{template "tripAddCommuteBlock" (dict "Trip" .Details.Trip "Settings" .Settings "DayGroups" .DayGroups "FormID" "mobile-add-commute-form" "Variant" "drawer")}}
+    </div>
+  </section>{{end}}
+  {{if tripExpenseQuickAddVisible .Details.Trip}}
+  <section id="mobile-sheet-expense" class="mobile-sheet mobile-sheet--trip-fab-flyout mobile-sheet--unified-expense hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
+    <div class="mobile-sheet-head">
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>Add expense</h3>
+      </div>
       <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add expense">
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/expenses" class="form-grid remi-trip-widget-form" data-ajax-submit data-toast-message="Expense saved." data-remi-expense-add-form data-remi-default-spent-on="{{.ExpenseFormDefaultDateISO}}">
-      <label>Title (optional)<input type="text" name="title" maxlength="200" autocomplete="off" placeholder="e.g. Dinner at Ichiran or airport train"></label>
-      <label>Category
-        <select name="category" required>
-          <option value="" disabled selected>Select a category</option>
-          {{range .ExpenseCategories}}
-          <option value="{{.}}">{{.}}</option>
-          {{end}}
-        </select>
-      </label>
-      <label>Payment Method
-        <select name="payment_method" required>
-          <option value="" disabled selected>Select a payment method</option>
-          <option value="Cash">Cash</option>
-          <option value="Credit Card">Credit Card</option>
-          <option value="Crypto">Crypto</option>
-          <option value="Debit Card">Debit Card</option>
-          <option value="Digital Wallet">Digital Wallet</option>
-          <option value="Mobile Payment">Mobile Payment</option>
-        </select>
-      </label>
-      <label>Amount<span class="tab-amount-input-wrap remi-expense-amount-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" autocomplete="transaction-amount" {{template "remiPmIgnoreExt"}} placeholder="0.00" required></span></label>
-      <label>Date{{template "remiDateField" (dict "name" "spent_on" "value" .ExpenseFormDefaultDateISO "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings))}}</label>
-      <label>Notes<input type="text" name="notes" placeholder="Add any notes"></label>
-      <div class="full remi-expense-add-actions">
-        <button class="btn" type="submit">Save Expense</button>
-        <button class="secondary-btn" type="submit" data-remi-save-expense-another="1">Save &amp; Add Another</button>
-      </div>
-    </form>
-  </section>
-  {{end}}
-  {{if and .Details.Trip.SectionEnabledTheTab (sidebarWidgetVisible "add_tab" .Details.Trip)}}
-  <section id="mobile-sheet-tab" class="mobile-sheet hidden" aria-hidden="true">
-    <div class="mobile-sheet-head">
-      <h3>Add Group Expense</h3>
-      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add to group expense">
-        <span class="material-symbols-outlined">close</span>
-      </button>
-    </div>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/expenses" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-remi-trip-tab-add-form data-ajax-submit data-toast-message="Group expense saved." data-remi-default-spent-on="{{.ExpenseFormDefaultDateISO}}">
-      <input type="hidden" name="from_tab" value="1">
-      <input type="hidden" name="quick_tab_equal_all" value="1">
-      <input type="hidden" name="return_to" value="/trips/{{.Details.Trip.ID}}">
-      <label class="full">Title (optional)<input type="text" name="title" maxlength="200" autocomplete="off" placeholder="e.g. Team dinner"></label>
-      <label>Category
-        <select name="category" required>
-          <option value="" disabled selected>Select a category</option>
-          {{range .ExpenseCategories}}
-          <option value="{{.}}">{{.}}</option>
-          {{end}}
-        </select>
-      </label>
-      <label>Payment Method
-        <select name="payment_method" required>
-          <option value="" disabled selected>Select a payment method</option>
-          <option value="Cash">Cash</option>
-          <option value="Credit Card">Credit Card</option>
-          <option value="Crypto">Crypto</option>
-          <option value="Debit Card">Debit Card</option>
-          <option value="Digital Wallet">Digital Wallet</option>
-          <option value="Mobile Payment">Mobile Payment</option>
-        </select>
-      </label>
-      <label>Amount<span class="tab-amount-input-wrap remi-expense-amount-wrap"><span class="tab-amount-prefix" aria-hidden="true">{{.CurrencySymbol}}</span><input type="number" step="0.01" min="0" name="amount" autocomplete="transaction-amount" {{template "remiPmIgnoreExt"}} placeholder="0.00" required></span></label>
-      <label>Date{{template "remiDateField" (dict "name" "spent_on" "value" .ExpenseFormDefaultDateISO "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings))}}</label>
-      <label class="full">Notes<input type="text" name="notes" placeholder="Add any notes"></label>
-      <label class="full">Receipt<input type="file" name="tab_attachment" accept=".pdf,image/*"></label>
-      <div class="full remi-expense-add-actions">
-        <button class="btn" type="submit">Save Group Expense</button>
-        <button class="secondary-btn" type="submit" data-remi-save-group-expense-another="1">Save &amp; Add Another</button>
-      </div>
-    </form>
+    <p class="mobile-sheet-subtitle muted">Personal spend or split with the group using the toggle below.</p>
+    {{template "tripUnifiedExpenseForm" (dict "Trip" .Details.Trip "Settings" .Settings "ExpenseCategories" .ExpenseCategories "CurrencySymbol" .CurrencySymbol "ExpenseFormDefaultDateISO" .ExpenseFormDefaultDateISO "Party" .Party "TripGuests" .TripGuests "TabDepartedParticipants" .TabDepartedParticipants "CurrentUserID" .CurrentUserID "Variant" "mobile" "ReturnTo" (printf "/trips/%s" .Details.Trip.ID) "FormSuffix" "mobile" "Subtitle" "" "TabSectionEnabled" .Details.Trip.SectionEnabledTheTab "FormClass" "")}}
   </section>
   {{end}}
   {{if .Details.Trip.UIShowStay}}
-  <section id="mobile-sheet-accommodation" class="mobile-sheet hidden" aria-hidden="true">
+  <section id="mobile-sheet-accommodation" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
     <div class="mobile-sheet-head">
-      <h3>Add {{.Details.Trip.StaySectionTitle}}</h3>
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>Add {{.Details.Trip.StaySectionTitle}}</h3>
+      </div>
       <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add accommodation">
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
     <p class="trip-resource-form-subtitle mobile-sheet-subtitle">Details sync with your itinerary and expenses.</p>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid remi-trip-widget-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form>
       <label class="full">Property Name<input type="text" name="name" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
       <label class="full">Address<input type="text" name="address" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
       <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
-      <label>Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
-      <label>Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
-      <label>Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
-      <label>Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
-      <label>Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
-      <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+      <label class="full">Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
+      <label class="full">Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
+      <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+      <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
+      <label class="full">Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+      <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
       <label class="full">Notes<input type="text" name="notes" placeholder="Breakfast included, high floor requested..."></label>
       <button class="full" type="submit">Save Accommodation</button>
     </form>
   </section>
   {{end}}
   {{if .Details.Trip.UIShowVehicle}}
-  <section id="mobile-sheet-vehicle" class="mobile-sheet hidden" aria-hidden="true">
+  <section id="mobile-sheet-vehicle" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
     <div class="mobile-sheet-head">
-      <h3>Add {{.Details.Trip.VehicleSectionTitle}}</h3>
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>Add {{.Details.Trip.VehicleSectionTitle}}</h3>
+      </div>
       <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add vehicle rental">
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
     <p class="trip-resource-form-subtitle mobile-sheet-subtitle">Details sync with your itinerary and expenses.</p>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form>
-      <label>Vehicle<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
-      <label>Booking Reference<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
-      <label>Pickup Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
-      <label>Pickup Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
-      <fieldset class="vehicle-dropoff-fieldset">
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid remi-trip-widget-form vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form>
+      <label class="full">Vehicle<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
+      <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
+      <label class="full">Pickup Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+      <label class="full">Pickup Date & Time{{template "remiDateTimeField" (dict "name" "pick_up_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
+      <fieldset class="vehicle-dropoff-fieldset full">
         <legend class="vehicle-dropoff-legend">Drop-off Location</legend>
         <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pickup">
         <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" checked data-vehicle-dropoff-same> Same as pickup</label>
@@ -1499,44 +1652,56 @@
         </div>
         <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field hidden>Drop-off Location<input type="text" name="drop_off_location" value="" placeholder="Return location" autocomplete="off" data-location-autocomplete disabled></label>
       </fieldset>
-      <label>Drop-off Date & Time{{template "remiDateTimeField" (dict "name" "drop_off_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
-      <label>Rental Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
-      <label>Insurance Cost<input type="number" step="0.01" min="0" name="insurance_cost" placeholder="0.00"></label>
-      <label>Rental Agreement<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
-      <label>Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
-      <label>Notes<input type="text" name="notes" placeholder="Notes about insurance coverage, keys, etc."></label>
+      <label class="full">Drop-off Date & Time{{template "remiDateTimeField" (dict "name" "drop_off_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
+      <label class="full">Rental Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+      <label class="full">Insurance Cost<input type="number" step="0.01" min="0" name="insurance_cost" placeholder="0.00"></label>
+      <label class="full">Rental Agreement<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+      <label class="full">Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
+      <label class="full">Notes<input type="text" name="notes" placeholder="Notes about insurance coverage, keys, etc."></label>
       <button class="full vehicle-submit-btn" type="submit">Save Vehicle Rental</button>
     </form>
   </section>
   {{end}}
   {{if .Details.Trip.UIShowFlights}}
-  <section id="mobile-sheet-flight" class="mobile-sheet hidden" aria-hidden="true">
+  <section id="mobile-sheet-flight" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
     <div class="mobile-sheet-head">
-      <h3>Add {{.Details.Trip.FlightsSectionTitle}}</h3>
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>Add {{.Details.Trip.FlightsSectionTitle}}</h3>
+      </div>
       <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add flight">
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/flights" class="form-grid flight-form-grid" enctype="multipart/form-data">
-      <label>Airline<input type="text" name="flight_name" placeholder="e.g. Philippine Airlines" required></label>
-      <label>Flight Number<input type="text" name="flight_number" placeholder="e.g. PR 2781"></label>
-      <label>Departure Airport<input type="text" name="depart_airport" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
-      <label>Departure Date & Time{{template "remiDateTimeField" (dict "name" "depart_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
-      <label>Arrival Airport<input type="text" name="arrive_airport" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
-      <label>Arrival Date & Time{{template "remiDateTimeField" (dict "name" "arrive_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "required" true)}}</label>
-      <label>Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. FLT-1234"></label>
-      <label>Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
-      <label>Boarding Pass / Ticket<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
-      <label>Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/flights" class="form-grid remi-trip-widget-form flight-form-grid" enctype="multipart/form-data">
+      <label class="full">Airline<input type="text" name="flight_name" placeholder="e.g. Philippine Airlines" required></label>
+      <label class="full">Flight Number<input type="text" name="flight_number" placeholder="e.g. PR 2781"></label>
+      <label class="full">Departure Airport<input type="text" name="depart_airport" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
+      <label class="full">Departure Date & Time{{template "remiDateTimeField" (dict "name" "depart_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
+      <label class="full">Arrival Airport<input type="text" name="arrive_airport" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
+      <label class="full">Arrival Date & Time{{template "remiDateTimeField" (dict "name" "arrive_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
+      <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. FLT-1234"></label>
+      <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+      <label class="full">Boarding Pass / Ticket<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
+      <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
       <label class="full">Notes<input type="text" name="notes" placeholder="Add any additional details"></label>
       <button class="full" type="submit">Add {{.Details.Trip.FlightsSectionTitle}}</button>
     </form>
   </section>
   {{end}}
   {{if sidebarWidgetVisible "checklist" .Details.Trip}}
-  <section id="mobile-sheet-checklist" class="mobile-sheet mobile-sheet--keep-composer hidden" aria-hidden="true">
+  <section id="mobile-sheet-checklist" class="mobile-sheet mobile-sheet--trip-fab-flyout mobile-sheet--keep-composer hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
     <div class="mobile-sheet-head">
-      <h3>{{tripSidebarWidgetLabel "checklist"}}</h3>
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>{{tripSidebarWidgetLabel "checklist"}}</h3>
+      </div>
       <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add note or checklist">
         <span class="material-symbols-outlined">close</span>
       </button>
@@ -1561,5 +1726,6 @@
   {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "trip")}}
   {{template "tripKeepNoteViewDialog"}}
   {{template "appConfirmDialog"}}
+  {{if and .TripAccess.IsOwner .ShowFirstTripSetup}}{{template "firstTripSetupModal" .}}{{end}}
 </body>
 </html>

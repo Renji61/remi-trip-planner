@@ -10,6 +10,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.50.0] - 2026-04-15
+
+### Added
+
+- **Itinerary commute / travel legs:** first-class `commute` rows on `itinerary_items` (kind, linked from/to item IDs, transport mode, `sort_order` for list/calendar order). Same-day only; duplicate pairs rejected; deleting a neighbor clears links on the commute row. `POST /trips/{id}/itinerary/commute`, list + sidebar + inline edit, calendar blocks, connector suppression when a commute already links the same pair, optional “Add commute here” on timeline connectors, and the **ICS** subscription includes them like other timed itinerary lines.
+- **Google Maps directions for legs:** when both linked stops have coordinates, commute and travel-hint UI can open **Google Maps directions** with a **travel mode** derived from the commute (walk / transit / drive / bicycle fallbacks).
+- **First-trip setup wizard** (trip owners): multi-step modal + `POST /trips/{id}/first-trip-setup` for name, dates, description, cover upload or built-in presets, currency, and related defaults until `setup_complete` is set.
+- **Unified expense quick-add:** shared `trip_unified_expense_form.html` for sidebar, mobile flyouts, and calendar flows — personal expense or **split with group** (participant pickers, paid-by, receipt) in one form when group expenses are enabled.
+
+### Changed
+
+- **In-app trip notifications:** eligibility now requires the trip’s **start–end dates** (local midnight bounds) to include **today** and the trip not to be archived, matching “actively traveling” rather than all non-archived trips.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.50.0`** (and the **GHCR** image tag when CI builds) so **About** / `GET /api/about/update-check` shows the new version for installs on **1.49.4** or older.
+
 ## [1.49.4] - 2026-04-06
 
 ### Added
@@ -383,7 +400,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.4...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.0...HEAD
+[1.50.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.4...v1.50.0
 [1.49.4]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.3...v1.49.4
 [1.49.3]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.2...v1.49.3
 [1.49.2]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.1...v1.49.2

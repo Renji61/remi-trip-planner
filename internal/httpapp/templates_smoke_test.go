@@ -14,6 +14,22 @@ import (
 	"remi-trip-planner/internal/trips"
 )
 
+// stubJoinItineraryLocalDateTime mirrors routes.joinItineraryLocalDateTime for template parse smoke tests.
+func stubJoinItineraryLocalDateTime(dateISO, timeHM string) string {
+	dateISO = strings.TrimSpace(dateISO)
+	timeHM = strings.TrimSpace(timeHM)
+	if dateISO == "" {
+		return ""
+	}
+	if timeHM == "" {
+		timeHM = "09:00"
+	}
+	if len(timeHM) > 5 {
+		timeHM = timeHM[:5]
+	}
+	return dateISO + "T" + timeHM
+}
+
 func TestDashboardTripCardTemplateRenders(t *testing.T) {
 	root := findModuleRoot(t)
 	tmpl := ht.Must(
@@ -27,6 +43,7 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 				"formatTripDateShort":  func(any, trips.AppSettings, string, string) string { return "Jan 1 – 7" },
 				"siteUIDateIsMDY":      func(trips.AppSettings) bool { return false },
 				"effectiveUIDateIsMDY": func(trips.Trip, trips.AppSettings) bool { return false },
+				"effectiveUITimeIs24h": func(trips.Trip) bool { return false },
 				"formatTripMoney":      func(f float64) string { return fmt.Sprintf("%.0f", f) },
 				"humanFileSize":        func(_ int64) string { return "1 MB" },
 				"abbrevMoney":          func(sym string, f float64) string { return sym + fmt.Sprintf("%.2f", f) },
@@ -49,6 +66,7 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 				"sidebarWidgetVisible":                func(string, trips.Trip) bool { return true },
 				"tripMobileFabHasItems":               trips.TripMobileFabHasItems,
 				"tripDesktopCalendarFlyoutHasActions": trips.TripDesktopCalendarFlyoutHasActions,
+				"tripExpenseQuickAddVisible":          trips.TripExpenseQuickAddVisible,
 				"effectiveDistanceUnit": func(trip trips.Trip, settings trips.AppSettings) string {
 					return trips.EffectiveDistanceUnit(&trip, settings)
 				},
@@ -59,10 +77,12 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 				"googleMapsSearchURL": func(lat, lng float64, hint string) string {
 					return ""
 				},
-				"locationLineBeforeComma": func(s string) string { return s },
-				"itineraryNotesDisplay":   func(s string) string { return s },
-				"isImageWebPath":          func(string) bool { return true },
-				"itineraryGeocodeQuery":   func(any) string { return "" },
+				"googleMapsDirectionsURL":    func(fromLat, fromLng, toLat, toLng float64, mode string) string { return "" },
+				"joinItineraryLocalDateTime": stubJoinItineraryLocalDateTime,
+				"locationLineBeforeComma":    func(s string) string { return s },
+				"itineraryNotesDisplay":      func(s string) string { return s },
+				"isImageWebPath":             func(string) bool { return true },
+				"itineraryGeocodeQuery":      func(any) string { return "" },
 				"profileInitial": func(u trips.User) string {
 					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
 					return p.InitialForAvatar()
@@ -370,6 +390,7 @@ func htmlTemplateSmokeFuncs() ht.FuncMap {
 		"formatTripDateShort":   func(any, trips.AppSettings, string, string) string { return "Jan 1 – 7" },
 		"siteUIDateIsMDY":       func(trips.AppSettings) bool { return false },
 		"effectiveUIDateIsMDY":  func(trips.Trip, trips.AppSettings) bool { return false },
+		"effectiveUITimeIs24h":  func(trips.Trip) bool { return false },
 		"formatTripMoney":       func(f float64) string { return fmt.Sprintf("%.0f", f) },
 		"humanFileSize":         func(_ int64) string { return "1 MB" },
 		"abbrevMoney":           func(sym string, f float64) string { return sym + fmt.Sprintf("%.2f", f) },
@@ -388,6 +409,7 @@ func htmlTemplateSmokeFuncs() ht.FuncMap {
 		"sidebarWidgetVisible":                func(string, trips.Trip) bool { return true },
 		"tripMobileFabHasItems":               trips.TripMobileFabHasItems,
 		"tripDesktopCalendarFlyoutHasActions": trips.TripDesktopCalendarFlyoutHasActions,
+		"tripExpenseQuickAddVisible":          trips.TripExpenseQuickAddVisible,
 		"effectiveDistanceUnit": func(trip trips.Trip, settings trips.AppSettings) string {
 			return trips.EffectiveDistanceUnit(&trip, settings)
 		},
@@ -396,6 +418,8 @@ func htmlTemplateSmokeFuncs() ht.FuncMap {
 		"tripMainSectionVisibilityIcon":   trips.MainSectionVisibilityIcon,
 		"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
 		"googleMapsSearchURL":             func(lat, lng float64, hint string) string { return "" },
+		"googleMapsDirectionsURL":         func(fromLat, fromLng, toLat, toLng float64, mode string) string { return "" },
+		"joinItineraryLocalDateTime":      stubJoinItineraryLocalDateTime,
 		"locationLineBeforeComma":         func(s string) string { return s },
 		"itineraryNotesDisplay":           func(s string) string { return s },
 		"isImageWebPath":                  func(string) bool { return true },

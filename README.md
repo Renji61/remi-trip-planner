@@ -50,13 +50,16 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### Trips & dashboard
 
 - Create trips from the home page (optional **place lookup** for trip map center; falls back to site default location); view **active**, **draft**, and **archived** groups.
+- **First-trip setup** (owners): guided modal for a new trip until onboarding is complete — basics, cover image or preset, currency, and related defaults (`POST /trips/{id}/first-trip-setup`).
 - **Dashboard sidebar & mobile bottom bar:** up to **two** shortcuts to trips that are **in progress** or **upcoming** (in that priority order), in addition to **My Trip**, **Profile**, and **Settings**.
 - **Dashboard customization:** grid vs list cards, sort order, hero background style, heading text (app settings).
+- **In-app notifications** for a trip are limited to **active travel dates** (today within the trip’s start and end, local time) and non-archived trips, so drafts and future trips stay out of the bell until you are on the road.
 - Per-trip: name, description, dates, **cover image URL**, **currency**, archive/delete.
 
 ### Itinerary & map
 
 - **Day-grouped** stops with titles, locations, notes, optional cost and times.
+- **Commute / travel legs** between two itinerary items on the **same day** (`item_kind=commute`): transport mode, ordering, sidebar + timeline + calendar, **ICS** feed entries, and optional **Google Maps directions** when both endpoints have coordinates (`POST /trips/{id}/itinerary/commute`).
 - **Per-day descriptions** (labels) editable inline on the trip page.
 - **Interactive map** (Leaflet + OpenStreetMap by default, or **Google Maps** when an API key is set) with markers, optional **day filters**, and travel hints between stops; editing a stop **updates stored coordinates** and map pins after save.
 - **Search** across itinerary text from the trip header.
@@ -69,7 +72,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - Amounts are persisted as **integer minor units** (e.g. cents) in SQLite for accurate split math; the UI still uses familiar decimal entry.
 - **Optimistic concurrency** on many trip-scoped edits: if someone else saved first, the UI can receive **409 Conflict** with a structured error instead of silently overwriting.
 - **Budget summary** on the trip page (budgeted vs spent), including **Total group expense** on mobile and in the desktop sidebar when group expenses are enabled; dedicated expenses subpage with transactions and export.
-- **Quick expense** entry from the trip sidebar (when the expenses section is enabled).
+- **Quick expense** entry from the trip sidebar (when the expenses section is enabled) via a **unified form** that can post a **personal** expense or, when group expenses are on and the roster allows it, a **group** split in one flow.
 - Some expenses are **linked** to stay, vehicle, or flight bookings and edited from those flows.
 - **Departed participants** on group expenses keep historical splits and settlements consistent when collaborators leave; labels show **Left trip** where applicable.
 
@@ -166,6 +169,7 @@ Environment variables (all optional except as noted):
 | `REMI_RATE_LIMIT_AUTH_BURST` | `12` | Burst allowance for the same limiter. |
 | `REMI_HSTS_MAX_AGE` | `31536000` | `Strict-Transport-Security` **max-age** (seconds) when `REMI_ENV=production`. Set to `0` to disable HSTS. |
 | `REMI_HEALTHZ_DB` | _(unset)_ | If `1` / `true`, `GET /healthz` also runs **`SELECT 1`** against SQLite (returns **503** if the DB is unreachable). Default health check stays cheap (no DB). |
+| `REMI_ICS_TIMEZONE` | _(unset)_ | **IANA timezone** for the trip **calendar subscription** (`.ics` feed): `DTSTART`/`DTEND` are emitted with `TZID=…` and `X-WR-TIMEZONE` so Google Calendar shows that zone instead of plain UTC. Must match how the server interprets wall times (`time.Local` — usually the same as the `TZ` environment variable). If unset and `TZ` is unset or invalid, the feed uses **UTC (`Z`)** timestamps. Example: `Asia/Kolkata`, `America/New_York`, `Europe/London`. |
 
 Inside Docker, the image sets `APP_ADDR=:8080` and `SQLITE_PATH=/app/data/trips.db`.
 
@@ -218,7 +222,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.49.4` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.0` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 

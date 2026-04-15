@@ -44,11 +44,11 @@ const tripSelectCols = `id, name, description, start_date, end_date, cover_image
 		ui_main_section_hidden, ui_sidebar_widget_hidden,
 		ui_show_custom_links, ui_custom_sidebar_links,
 		created_at, updated_at, budget_cap_cents, ui_show_the_tab, ui_show_documents, ui_collaboration_enabled,
-		tab_default_split_mode, tab_default_split_json, distance_unit`
+		tab_default_split_mode, tab_default_split_json, distance_unit, setup_complete`
 
 func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
 	var t trips.Trip
-	var ss, sv, sf, sp, sit, sck, scl, stt, sdoc, scoll int
+	var ss, sv, sf, sp, sit, sck, scl, stt, sdoc, scoll, setupDone int
 	err := scan(
 		&t.ID, &t.Name, &t.Description, &t.StartDate, &t.EndDate, &t.CoverImage, &t.CurrencyName, &t.CurrencySymbol, &t.HomeMapLatitude, &t.HomeMapLongitude, &t.HomeMapPlaceLabel, &t.IsArchived, &t.OwnerUserID,
 		&ss, &sv, &sf, &sp, &sit, &sck,
@@ -61,6 +61,7 @@ func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
 		&t.BudgetCapCents, &stt, &sdoc, &scoll,
 		&t.TabDefaultSplitMode, &t.TabDefaultSplitJSON,
 		&t.DistanceUnit,
+		&setupDone,
 	)
 	if err != nil {
 		return t, err
@@ -75,6 +76,7 @@ func scanTrip(scan func(dest ...any) error) (trips.Trip, error) {
 	t.UIShowTheTab = stt != 0
 	t.UIShowDocuments = sdoc != 0
 	t.UICollaborationEnabled = scoll != 0
+	t.SetupComplete = setupDone != 0
 	t.UIDateFormat = trips.NormalizeTripUIDateStorage(t.UIDateFormat)
 	trips.SetTripBudgetCapCents(&t, t.BudgetCapCents)
 	return t, nil
@@ -98,12 +100,12 @@ func (r *Repository) CreateTrip(ctx context.Context, t trips.Trip) (string, erro
 			ui_main_section_order, ui_sidebar_widget_order,
 			ui_main_section_hidden, ui_sidebar_widget_hidden,
 			ui_show_custom_links, ui_custom_sidebar_links,
-			budget_cap, budget_cap_cents, ui_show_the_tab, ui_show_documents, ui_collaboration_enabled, tab_default_split_mode, tab_default_split_json, distance_unit,
+			budget_cap, budget_cap_cents, ui_show_the_tab, ui_show_documents, ui_collaboration_enabled, tab_default_split_mode, tab_default_split_json, distance_unit, setup_complete,
 			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 'first', 'first', 'first', '12h', ?, '', '', '', '', '', '', '', '', '', 1, '', ?, ?, 1, 1, 1, '', '', ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 'first', 'first', 'first', '12h', ?, '', '', '', '', '', '', '', '', '', 1, '', ?, ?, 1, 1, 1, '', '', ?, ?, ?, ?)`,
 		t.ID, t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude, t.HomeMapPlaceLabel, t.IsArchived, t.OwnerUserID,
 		trips.NormalizeTripUIDateStorage(t.UIDateFormat),
-		t.BudgetCap, t.BudgetCapCents, t.DistanceUnit, now, now,
+		t.BudgetCap, t.BudgetCapCents, t.DistanceUnit, sqliteBool(t.SetupComplete), now, now,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, t.ID, "trip", t.ID, "create", map[string]any{"name": t.Name})
@@ -155,7 +157,7 @@ func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
 		    ui_main_section_hidden = ?, ui_sidebar_widget_hidden = ?,
 		    ui_show_custom_links = ?, ui_custom_sidebar_links = ?,
 		    tab_default_split_mode = ?, tab_default_split_json = ?,
-		    distance_unit = ?,
+		    distance_unit = ?, setup_complete = ?,
 		    updated_at = ?
 		WHERE id = ?`,
 		t.Name, t.Description, t.StartDate, t.EndDate, t.CoverImage, t.CurrencyName, t.CurrencySymbol, t.HomeMapLatitude, t.HomeMapLongitude, t.HomeMapPlaceLabel,
@@ -172,11 +174,13 @@ func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
 		sqliteBool(t.UIShowCustomLinks), t.UICustomSidebarLinks,
 		t.TabDefaultSplitMode, t.TabDefaultSplitJSON,
 		t.DistanceUnit,
+		sqliteBool(t.SetupComplete),
 		now, t.ID,
 	)
 	if err == nil {
 		_ = r.logChange(ctx, t.ID, "trip", t.ID, "update", map[string]any{
 			"name": t.Name, "start_date": t.StartDate, "end_date": t.EndDate, "cover_image_url": t.CoverImage, "currency_name": t.CurrencyName, "currency_symbol": t.CurrencySymbol,
+			"setup_complete": t.SetupComplete,
 		})
 	}
 	return err
@@ -202,6 +206,24 @@ func (r *Repository) DeleteTrip(ctx context.Context, tripID string) error {
 	return err
 }
 
+func (r *Repository) nextItinerarySortOrder(ctx context.Context, tripID string, dayNumber int) (int, error) {
+	row := r.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), 0) FROM itinerary_items WHERE trip_id = ? AND day_number = ?`, tripID, dayNumber)
+	var m int64
+	if err := row.Scan(&m); err != nil {
+		return 0, err
+	}
+	next := int(m) + 100000
+	if next < 100000 {
+		return 100000, nil
+	}
+	return next, nil
+}
+
+// NextItinerarySortOrder returns a sort_order value after the current max for that trip day.
+func (r *Repository) NextItinerarySortOrder(ctx context.Context, tripID string, dayNumber int) (int, error) {
+	return r.nextItinerarySortOrder(ctx, tripID, dayNumber)
+}
+
 func (r *Repository) AddItineraryItem(ctx context.Context, item trips.ItineraryItem) error {
 	if item.ID == "" {
 		item.ID = uuid.NewString()
@@ -210,12 +232,23 @@ func (r *Repository) AddItineraryItem(ctx context.Context, item trips.ItineraryI
 		item.EstCostCents = trips.MoneyToCentsFloat(item.EstCost)
 	}
 	trips.SetItineraryEstCostCents(&item, item.EstCostCents)
+	kind := strings.TrimSpace(item.ItemKind)
+	if kind != trips.ItineraryItemKindCommute {
+		kind = trips.ItineraryItemKindStop
+	}
+	if item.SortOrder == 0 {
+		so, err := r.nextItinerarySortOrder(ctx, item.TripID, item.DayNumber)
+		if err != nil {
+			return err
+		}
+		item.SortOrder = so
+	}
 	now := time.Now().UTC()
 	_, err := r.execContext(ctx, `
 		INSERT INTO itinerary_items
-		(id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost, est_cost_cents, start_time, end_time, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, now, now,
+		(id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost, est_cost_cents, start_time, end_time, item_kind, commute_from_item_id, commute_to_item_id, transport_mode, sort_order, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.TransportMode, item.SortOrder, now, now,
 	)
 	if err == nil {
 		item.CreatedAt = now
@@ -237,20 +270,24 @@ func (r *Repository) UpdateItineraryItem(ctx context.Context, item trips.Itinera
 		res sql.Result
 		err error
 	)
+	kind := strings.TrimSpace(item.ItemKind)
+	if kind != trips.ItineraryItemKindCommute {
+		kind = trips.ItineraryItemKindStop
+	}
 	if item.EnforceOptimisticLock {
 		res, err = r.execContext(ctx, `
 			UPDATE itinerary_items
-			SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, est_cost_cents = ?, start_time = ?, end_time = ?, updated_at = ?
+			SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, est_cost_cents = ?, start_time = ?, end_time = ?, item_kind = ?, commute_from_item_id = ?, commute_to_item_id = ?, transport_mode = ?, sort_order = ?, updated_at = ?
 			WHERE id = ? AND trip_id = ? AND updated_at = ?`,
-			item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, now,
+			item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.TransportMode, item.SortOrder, now,
 			item.ID, item.TripID, item.ExpectedUpdatedAt,
 		)
 	} else {
 		res, err = r.execContext(ctx, `
 			UPDATE itinerary_items
-			SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, est_cost_cents = ?, start_time = ?, end_time = ?, updated_at = ?
+			SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, est_cost_cents = ?, start_time = ?, end_time = ?, item_kind = ?, commute_from_item_id = ?, commute_to_item_id = ?, transport_mode = ?, sort_order = ?, updated_at = ?
 			WHERE id = ? AND trip_id = ?`,
-			item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, now,
+			item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.TransportMode, item.SortOrder, now,
 			item.ID, item.TripID,
 		)
 	}
@@ -280,9 +317,9 @@ func (r *Repository) DeleteItineraryItem(ctx context.Context, tripID, itemID str
 
 func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]trips.ItineraryItem, error) {
 	rows, err := r.queryContext(ctx, `
-		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost_cents, start_time, end_time, created_at, updated_at
+		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost_cents, start_time, end_time, created_at, updated_at, item_kind, commute_from_item_id, commute_to_item_id, transport_mode, sort_order
 		FROM itinerary_items WHERE trip_id = ?
-		ORDER BY day_number ASC, created_at ASC`, tripID)
+		ORDER BY day_number ASC, sort_order ASC, created_at ASC, id ASC`, tripID)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +327,7 @@ func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]t
 	out := []trips.ItineraryItem{}
 	for rows.Next() {
 		var i trips.ItineraryItem
-		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCostCents, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCostCents, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt, &i.ItemKind, &i.CommuteFromItemID, &i.CommuteToItemID, &i.TransportMode, &i.SortOrder); err != nil {
 			return nil, err
 		}
 		trips.SetItineraryEstCostCents(&i, i.EstCostCents)
@@ -301,9 +338,9 @@ func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]t
 
 func (r *Repository) ListAllItineraryItems(ctx context.Context) ([]trips.ItineraryItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost_cents, start_time, end_time, created_at, updated_at
+		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost_cents, start_time, end_time, created_at, updated_at, item_kind, commute_from_item_id, commute_to_item_id, transport_mode, sort_order
 		FROM itinerary_items
-		ORDER BY trip_id, day_number ASC, start_time ASC, created_at ASC, id ASC`)
+		ORDER BY trip_id, day_number ASC, sort_order ASC, created_at ASC, id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -311,13 +348,53 @@ func (r *Repository) ListAllItineraryItems(ctx context.Context) ([]trips.Itinera
 	out := []trips.ItineraryItem{}
 	for rows.Next() {
 		var i trips.ItineraryItem
-		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCostCents, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCostCents, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt, &i.ItemKind, &i.CommuteFromItemID, &i.CommuteToItemID, &i.TransportMode, &i.SortOrder); err != nil {
 			return nil, err
 		}
 		trips.SetItineraryEstCostCents(&i, i.EstCostCents)
 		out = append(out, i)
 	}
 	return out, rows.Err()
+}
+
+// ClearCommuteRefsForDeletedItem blanks commute neighbor IDs on other rows that pointed at a deleted itinerary item.
+func (r *Repository) ClearCommuteRefsForDeletedItem(ctx context.Context, tripID, deletedItemID string) error {
+	now := time.Now().UTC()
+	_, err := r.execContext(ctx, `UPDATE itinerary_items SET commute_from_item_id = '', updated_at = ? WHERE trip_id = ? AND item_kind = ? AND commute_from_item_id = ?`,
+		now, tripID, trips.ItineraryItemKindCommute, deletedItemID)
+	if err != nil {
+		return err
+	}
+	_, err = r.execContext(ctx, `UPDATE itinerary_items SET commute_to_item_id = '', updated_at = ? WHERE trip_id = ? AND item_kind = ? AND commute_to_item_id = ?`,
+		now, tripID, trips.ItineraryItemKindCommute, deletedItemID)
+	return err
+}
+
+// RebalanceItineraryDaySortOrders rewrites sort_order for one trip day to evenly spaced values (after inserts collide).
+func (r *Repository) RebalanceItineraryDaySortOrders(ctx context.Context, tripID string, dayNumber int) error {
+	rows, err := r.queryContext(ctx, `SELECT id FROM itinerary_items WHERE trip_id = ? AND day_number = ? ORDER BY sort_order ASC, created_at ASC, id ASC`, tripID, dayNumber)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for i, id := range ids {
+		if _, err := r.execContext(ctx, `UPDATE itinerary_items SET sort_order = ?, updated_at = ? WHERE id = ? AND trip_id = ?`, (i+1)*100000, now, id, tripID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Repository) AddExpense(ctx context.Context, e trips.Expense) error {

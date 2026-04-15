@@ -442,7 +442,80 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 		)`); err != nil {
 		return nil, err
 	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN item_kind TEXT NOT NULL DEFAULT 'stop'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN commute_from_item_id TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN commute_to_item_id TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN transport_mode TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if err := backfillItinerarySortOrderIfNeeded(db); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN setup_complete INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
 	return db, nil
+}
+
+// backfillItinerarySortOrderIfNeeded assigns sort_order spacing for legacy rows (all zero) once.
+func backfillItinerarySortOrderIfNeeded(db *sql.DB) error {
+	var maxSo sql.NullInt64
+	if err := db.QueryRow(`SELECT MAX(sort_order) FROM itinerary_items`).Scan(&maxSo); err != nil {
+		return err
+	}
+	if maxSo.Valid && maxSo.Int64 > 0 {
+		return nil
+	}
+	rows, err := db.Query(`SELECT id, trip_id, day_number FROM itinerary_items ORDER BY trip_id, day_number, created_at ASC, id ASC`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type dayKey struct {
+		tripID string
+		day    int
+	}
+	var ids []string
+	var cur dayKey
+	first := true
+	flush := func() error {
+		for i, id := range ids {
+			if _, err := db.Exec(`UPDATE itinerary_items SET sort_order = ? WHERE id = ?`, (i+1)*100000, id); err != nil {
+				return err
+			}
+		}
+		ids = nil
+		return nil
+	}
+	for rows.Next() {
+		var id, tripID string
+		var dayNum int
+		if err := rows.Scan(&id, &tripID, &dayNum); err != nil {
+			return err
+		}
+		k := dayKey{tripID: tripID, day: dayNum}
+		if !first && k != cur {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		first = false
+		cur = k
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return flush()
 }
 
 func migrateAuthAndSharing(db *sql.DB) error {

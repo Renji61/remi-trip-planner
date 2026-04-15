@@ -62,7 +62,7 @@ type Trip struct {
 	UILabelGroupExpenses string
 	// Comma-separated section keys (map,itinerary,...); empty means default order.
 	UIMainSectionOrder string
-	// Comma-separated sidebar widget keys (add_stop,budget,...); empty means default.
+	// Comma-separated sidebar widget keys (add_stop,add_commute,budget,...); empty means default.
 	UISidebarWidgetOrder string
 	// Comma-separated keys hidden from the main column / sidebar (layout visibility). Empty with legacy UIShow* still applies migration path in MainSectionVisible / SidebarWidgetVisible.
 	UIMainSectionHidden   string
@@ -76,6 +76,23 @@ type Trip struct {
 	TabDefaultSplitJSON string
 	// DistanceUnit: per-trip override for labels (km | mi). Empty uses user then app default.
 	DistanceUnit string
+	// SetupComplete: first-trip onboarding wizard finished (owner); false shows wizard on trip page until saved or skipped session.
+	SetupComplete bool
+}
+
+// Itinerary item kinds (DB column item_kind; empty string is treated as stop).
+const (
+	ItineraryItemKindStop    = "stop"
+	ItineraryItemKindCommute = "commute"
+)
+
+// NormalizeItineraryItemKind maps stored/raw values to stop or commute.
+func NormalizeItineraryItemKind(raw string) string {
+	k := strings.TrimSpace(strings.ToLower(raw))
+	if k == ItineraryItemKindCommute {
+		return ItineraryItemKindCommute
+	}
+	return ItineraryItemKindStop
 }
 
 type ItineraryItem struct {
@@ -96,6 +113,14 @@ type ItineraryItem struct {
 	UpdatedAt             time.Time
 	ExpectedUpdatedAt     time.Time
 	EnforceOptimisticLock bool
+	// ItemKind is stop (default) or commute.
+	ItemKind string
+	// CommuteFromItemID / CommuteToItemID: neighbor itinerary rows (same day); may be empty if orphaned.
+	CommuteFromItemID string
+	CommuteToItemID   string
+	TransportMode     string
+	// SortOrder defines list/calendar order within a day (larger gaps allow inserts without rebalance).
+	SortOrder int
 }
 
 type Expense struct {
@@ -153,6 +178,7 @@ func init() {
 }
 
 const (
+	itineraryAccommodationUnifiedPrefix  = "Accommodation: "
 	itineraryAccommodationCheckInPrefix  = "Accommodation check-in: "
 	itineraryAccommodationCheckOutPrefix = "Accommodation check-out: "
 )
@@ -164,18 +190,19 @@ const (
 
 // AccommodationItineraryCheckInTitle is the itinerary row title for an accommodation check-in stop.
 func AccommodationItineraryCheckInTitle(propertyName string) string {
-	return itineraryAccommodationCheckInPrefix + propertyName
+	return itineraryAccommodationUnifiedPrefix + propertyName
 }
 
 // AccommodationItineraryCheckOutTitle is the itinerary row title for an accommodation check-out stop.
 func AccommodationItineraryCheckOutTitle(propertyName string) string {
-	return itineraryAccommodationCheckOutPrefix + propertyName
+	return itineraryAccommodationUnifiedPrefix + propertyName
 }
 
 func addAccommodationItineraryTitleKeys(m map[string]struct{}, name string) {
 	if name == "" {
 		return
 	}
+	m[itineraryAccommodationUnifiedPrefix+name] = struct{}{}
 	m[itineraryAccommodationCheckInPrefix+name] = struct{}{}
 	m[itineraryAccommodationCheckOutPrefix+name] = struct{}{}
 	m[legacyItineraryCheckInPrefix+name] = struct{}{}
@@ -184,6 +211,8 @@ func addAccommodationItineraryTitleKeys(m map[string]struct{}, name string) {
 
 func accommodationNameFromItineraryTitle(title string) (name string, ok bool) {
 	switch {
+	case strings.HasPrefix(title, itineraryAccommodationUnifiedPrefix):
+		return strings.TrimPrefix(title, itineraryAccommodationUnifiedPrefix), true
 	case strings.HasPrefix(title, itineraryAccommodationCheckInPrefix):
 		return strings.TrimPrefix(title, itineraryAccommodationCheckInPrefix), true
 	case strings.HasPrefix(title, itineraryAccommodationCheckOutPrefix):
@@ -407,6 +436,9 @@ type Repository interface {
 	AddItineraryItem(ctx context.Context, item ItineraryItem) error
 	UpdateItineraryItem(ctx context.Context, item ItineraryItem) (rowsAffected int64, err error)
 	DeleteItineraryItem(ctx context.Context, tripID, itemID string) error
+	ClearCommuteRefsForDeletedItem(ctx context.Context, tripID, deletedItemID string) error
+	RebalanceItineraryDaySortOrders(ctx context.Context, tripID string, dayNumber int) error
+	NextItinerarySortOrder(ctx context.Context, tripID string, dayNumber int) (int, error)
 	ListItineraryItems(ctx context.Context, tripID string) ([]ItineraryItem, error)
 	ListAllItineraryItems(ctx context.Context) ([]ItineraryItem, error)
 	AddExpense(ctx context.Context, expense Expense) error
@@ -619,8 +651,15 @@ func buildTravelStats(tripsList []Trip, items []ItineraryItem) TravelStats {
 	const kmToMiles = 0.621371
 	var kmTotal float64
 	for _, legs := range byTrip {
-		for i := 0; i < len(legs)-1; i++ {
-			a, b := legs[i], legs[i+1]
+		nonCommute := make([]ItineraryItem, 0, len(legs))
+		for _, x := range legs {
+			if strings.TrimSpace(x.ItemKind) == ItineraryItemKindCommute {
+				continue
+			}
+			nonCommute = append(nonCommute, x)
+		}
+		for i := 0; i < len(nonCommute)-1; i++ {
+			a, b := nonCommute[i], nonCommute[i+1]
 			if !validItineraryCoords(a.Latitude, a.Longitude) || !validItineraryCoords(b.Latitude, b.Longitude) {
 				continue
 			}
@@ -894,6 +933,13 @@ func (s *Service) AddItineraryItem(ctx context.Context, item ItineraryItem) erro
 	if item.TripID == "" || item.Title == "" {
 		return errors.New("trip and title are required")
 	}
+	if NormalizeItineraryItemKind(item.ItemKind) == ItineraryItemKindCommute {
+		return errors.New("use Add commute to create a commute leg")
+	}
+	item.ItemKind = ItineraryItemKindStop
+	item.CommuteFromItemID = ""
+	item.CommuteToItemID = ""
+	item.TransportMode = ""
 	if item.EstCostCents == 0 && item.EstCost != 0 {
 		item.EstCostCents = MoneyToCentsFloat(item.EstCost)
 	}
@@ -909,6 +955,131 @@ func (s *Service) AddItineraryItem(ctx context.Context, item ItineraryItem) erro
 		item.DayNumber = 1
 	}
 	return s.repo.AddItineraryItem(ctx, item)
+}
+
+// AddItineraryCommute inserts a first-class commute row between two same-day itinerary items (any kind).
+//
+// Validation rules (also enforced on commute updates where applicable):
+//   - fromID and toID must exist on the trip and share the same day_number as each other.
+//   - No second commute row with the same (fromID, toID) pair on the trip.
+//   - Title may be empty: default "{from title} → {to title}", optionally prefixed with transport_mode + ": ".
+//   - Lat/lng/location/image are cleared for commute rows (no extra map pin).
+//   - sort_order is placed strictly between the two neighbors; rebalance the day if integer gaps are exhausted.
+func (s *Service) AddItineraryCommute(ctx context.Context, fromID, toID string, item ItineraryItem) error {
+	fromID, toID = strings.TrimSpace(fromID), strings.TrimSpace(toID)
+	if item.TripID == "" {
+		return errors.New("trip is required")
+	}
+	if fromID == "" || toID == "" {
+		return errors.New("choose both a starting item and an ending item")
+	}
+	if fromID == toID {
+		return errors.New("commute needs two different itinerary items")
+	}
+	if item.EstCostCents == 0 && item.EstCost != 0 {
+		item.EstCostCents = MoneyToCentsFloat(item.EstCost)
+	}
+	SetItineraryEstCostCents(&item, item.EstCostCents)
+	trip, err := s.repo.GetTrip(ctx, item.TripID)
+	if err != nil {
+		return err
+	}
+	if trip.IsArchived {
+		return errors.New("archived trips are read-only")
+	}
+	items, err := s.repo.ListItineraryItems(ctx, item.TripID)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]ItineraryItem, len(items))
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+	fromIt, ok1 := byID[fromID]
+	toIt, ok2 := byID[toID]
+	if !ok1 || !ok2 {
+		return errors.New("one or both linked items are missing from this trip")
+	}
+	if fromIt.DayNumber != toIt.DayNumber {
+		return errors.New("commute must stay on the same day as both linked items")
+	}
+	item.Title = strings.TrimSpace(item.Title)
+	if item.Title == "" {
+		t1, t2 := strings.TrimSpace(fromIt.Title), strings.TrimSpace(toIt.Title)
+		if t1 == "" {
+			t1 = "Start"
+		}
+		if t2 == "" {
+			t2 = "End"
+		}
+		item.Title = t1 + " → " + t2
+	}
+	if m := strings.TrimSpace(item.TransportMode); m != "" {
+		item.Title = strings.TrimSpace(m) + ": " + item.Title
+	}
+	for _, it := range items {
+		if NormalizeItineraryItemKind(it.ItemKind) != ItineraryItemKindCommute {
+			continue
+		}
+		if it.CommuteFromItemID == fromID && it.CommuteToItemID == toID {
+			return errors.New("a commute already exists between those items")
+		}
+	}
+	item.DayNumber = fromIt.DayNumber
+	item.ItemKind = ItineraryItemKindCommute
+	item.CommuteFromItemID = fromID
+	item.CommuteToItemID = toID
+	item.Latitude, item.Longitude = 0, 0
+	item.Location = ""
+	item.ImagePath = ""
+	sortOrder, err := s.computeSortOrderBetween(ctx, item.TripID, item.DayNumber, fromID, toID)
+	if err != nil {
+		return err
+	}
+	item.SortOrder = sortOrder
+	return s.repo.AddItineraryItem(ctx, item)
+}
+
+func (s *Service) computeSortOrderBetween(ctx context.Context, tripID string, day int, fromID, toID string) (int, error) {
+	for attempt := 0; attempt < 4; attempt++ {
+		items, err := s.repo.ListItineraryItems(ctx, tripID)
+		if err != nil {
+			return 0, err
+		}
+		var fromSo, toSo int
+		var haveFrom, haveTo bool
+		for _, it := range items {
+			if it.DayNumber != day {
+				continue
+			}
+			if it.ID == fromID {
+				fromSo = it.SortOrder
+				haveFrom = true
+			}
+			if it.ID == toID {
+				toSo = it.SortOrder
+				haveTo = true
+			}
+		}
+		if !haveFrom || !haveTo {
+			return 0, errors.New("linked items not found for this day")
+		}
+		if fromSo >= toSo {
+			if err := s.repo.RebalanceItineraryDaySortOrders(ctx, tripID, day); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		mid := (fromSo + toSo) / 2
+		if mid <= fromSo || mid >= toSo {
+			if err := s.repo.RebalanceItineraryDaySortOrders(ctx, tripID, day); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		return mid, nil
+	}
+	return 0, errors.New("unable to place commute between those items; try reordering the day")
 }
 
 // SyncLodgingItinerary keeps itinerary check-in/out rows in sync with a lodging entry: it removes
@@ -1075,6 +1246,7 @@ func findLodgingItineraryPairFromItems(items []ItineraryItem, tripID, lodgingNam
 	if lodgingName == "" {
 		return "", ""
 	}
+	unified := itineraryAccommodationUnifiedPrefix + lodgingName
 	inTitles := map[string]struct{}{
 		itineraryAccommodationCheckInPrefix + lodgingName: {},
 		legacyItineraryCheckInPrefix + lodgingName:        {},
@@ -1083,8 +1255,13 @@ func findLodgingItineraryPairFromItems(items []ItineraryItem, tripID, lodgingNam
 		itineraryAccommodationCheckOutPrefix + lodgingName: {},
 		legacyItineraryCheckOutPrefix + lodgingName:        {},
 	}
+	var unifiedMatches []ItineraryItem
 	for _, it := range items {
 		if it.TripID != tripID {
+			continue
+		}
+		if it.Title == unified {
+			unifiedMatches = append(unifiedMatches, it)
 			continue
 		}
 		if _, ok := inTitles[it.Title]; ok && checkInID == "" {
@@ -1092,6 +1269,27 @@ func findLodgingItineraryPairFromItems(items []ItineraryItem, tripID, lodgingNam
 		}
 		if _, ok := outTitles[it.Title]; ok && checkOutID == "" {
 			checkOutID = it.ID
+		}
+	}
+	if len(unifiedMatches) >= 2 {
+		sort.Slice(unifiedMatches, func(i, j int) bool {
+			a, b := unifiedMatches[i], unifiedMatches[j]
+			if a.DayNumber != b.DayNumber {
+				return a.DayNumber < b.DayNumber
+			}
+			return strings.Compare(a.StartTime, b.StartTime) < 0
+		})
+		if checkInID == "" {
+			checkInID = unifiedMatches[0].ID
+		}
+		if checkOutID == "" {
+			checkOutID = unifiedMatches[len(unifiedMatches)-1].ID
+		}
+	} else if len(unifiedMatches) == 1 {
+		if checkInID == "" {
+			checkInID = unifiedMatches[0].ID
+		} else if checkOutID == "" {
+			checkOutID = unifiedMatches[0].ID
 		}
 	}
 	return checkInID, checkOutID
@@ -1143,6 +1341,50 @@ func (s *Service) UpdateItineraryItem(ctx context.Context, item ItineraryItem) e
 	if trip.IsArchived {
 		return errors.New("archived trips are read-only")
 	}
+	items, err := s.repo.ListItineraryItems(ctx, item.TripID)
+	if err != nil {
+		return err
+	}
+	var prior ItineraryItem
+	for _, it := range items {
+		if it.ID == item.ID {
+			prior = it
+			break
+		}
+	}
+	if prior.ID == "" {
+		return errors.New("itinerary item not found")
+	}
+	formKind := NormalizeItineraryItemKind(item.ItemKind)
+	if formKind != ItineraryItemKindCommute {
+		formKind = ItineraryItemKindStop
+	}
+	priorKind := NormalizeItineraryItemKind(prior.ItemKind)
+	if formKind == ItineraryItemKindCommute && priorKind != ItineraryItemKindCommute {
+		return errors.New("use Add commute to create a commute leg")
+	}
+	if formKind != ItineraryItemKindCommute && priorKind == ItineraryItemKindCommute {
+		return errors.New("this row is a commute leg — use the commute editor")
+	}
+	item.ItemKind = formKind
+	if formKind == ItineraryItemKindCommute {
+		if err := s.applyCommuteItineraryUpdate(ctx, items, prior, &item); err != nil {
+			return err
+		}
+	} else {
+		item.ItemKind = ItineraryItemKindStop
+		item.CommuteFromItemID = ""
+		item.CommuteToItemID = ""
+		item.TransportMode = ""
+		item.SortOrder = prior.SortOrder
+		if prior.DayNumber != item.DayNumber {
+			so, err := s.repo.NextItinerarySortOrder(ctx, item.TripID, item.DayNumber)
+			if err != nil {
+				return err
+			}
+			item.SortOrder = so
+		}
+	}
 	n, err := s.repo.UpdateItineraryItem(ctx, item)
 	if err != nil {
 		return err
@@ -1166,6 +1408,67 @@ func (s *Service) UpdateItineraryItem(ctx context.Context, item ItineraryItem) e
 	return nil
 }
 
+// applyCommuteItineraryUpdate normalizes commute rows: no map coordinates, optional neighbor IDs, sort_order between peers when links change.
+func (s *Service) applyCommuteItineraryUpdate(ctx context.Context, items []ItineraryItem, prior ItineraryItem, item *ItineraryItem) error {
+	fromID := strings.TrimSpace(item.CommuteFromItemID)
+	toID := strings.TrimSpace(item.CommuteToItemID)
+	if fromID != "" && toID != "" {
+		if fromID == toID {
+			return errors.New("commute needs two different itinerary items")
+		}
+		if err := s.validateCommuteEndpoints(items, fromID, toID, item.TripID, item.DayNumber); err != nil {
+			return err
+		}
+		for _, it := range items {
+			if it.ID == prior.ID {
+				continue
+			}
+			if NormalizeItineraryItemKind(it.ItemKind) == ItineraryItemKindCommute && it.CommuteFromItemID == fromID && it.CommuteToItemID == toID {
+				return errors.New("a commute already exists between those items")
+			}
+		}
+	}
+	item.ItemKind = ItineraryItemKindCommute
+	item.Latitude, item.Longitude = 0, 0
+	item.Location = ""
+	item.ImagePath = ""
+	item.SortOrder = prior.SortOrder
+	if prior.DayNumber != item.DayNumber {
+		so, err := s.repo.NextItinerarySortOrder(ctx, item.TripID, item.DayNumber)
+		if err != nil {
+			return err
+		}
+		item.SortOrder = so
+	}
+	if fromID != "" && toID != "" && (fromID != prior.CommuteFromItemID || toID != prior.CommuteToItemID || prior.DayNumber != item.DayNumber) {
+		so, err := s.computeSortOrderBetween(ctx, item.TripID, item.DayNumber, fromID, toID)
+		if err != nil {
+			return err
+		}
+		item.SortOrder = so
+	}
+	return nil
+}
+
+func (s *Service) validateCommuteEndpoints(items []ItineraryItem, fromID, toID, tripID string, day int) error {
+	byID := make(map[string]ItineraryItem, len(items))
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+	f, ok1 := byID[fromID]
+	t, ok2 := byID[toID]
+	if !ok1 || !ok2 {
+		return errors.New("linked itinerary item not found")
+	}
+	if f.TripID != tripID || t.TripID != tripID {
+		return errors.New("linked items must belong to this trip")
+	}
+	if f.DayNumber != day || t.DayNumber != day {
+		return errors.New("commute must use items on the same day as this commute row")
+	}
+	return nil
+}
+
 func (s *Service) DeleteItineraryItem(ctx context.Context, tripID, itemID string) error {
 	if tripID == "" || itemID == "" {
 		return errors.New("invalid itinerary item")
@@ -1176,6 +1479,9 @@ func (s *Service) DeleteItineraryItem(ctx context.Context, tripID, itemID string
 	}
 	if trip.IsArchived {
 		return errors.New("archived trips are read-only")
+	}
+	if err := s.repo.ClearCommuteRefsForDeletedItem(ctx, tripID, itemID); err != nil {
+		return err
 	}
 	if err := s.ClearLodgingItineraryRefs(ctx, tripID, itemID); err != nil {
 		return err
@@ -1463,22 +1769,27 @@ func (s *Service) SyncExpenseForLodging(ctx context.Context, l Lodging) error {
 }
 
 const (
+	itineraryVehicleUnifiedPrefix       = "Vehicle rental: "
 	itineraryVehiclePickUpPrefix        = "Vehicle rental pick-up: "
 	itineraryVehiclePickUpPrefixLegacy  = "Vehicle pick-up: "
 	itineraryVehicleDropOffPrefix       = "Vehicle rental drop-off: "
 	itineraryVehicleDropOffPrefixLegacy = "Vehicle drop-off: "
 )
 
-func VehicleRentalItineraryPickUpTitle(location string) string {
-	return itineraryVehiclePickUpPrefix + location
+// VehicleRentalItineraryPickUpTitle returns the itinerary title for the pick-up row (same string as drop-off).
+func VehicleRentalItineraryPickUpTitle(vehicleDetail, pickUpLocation string) string {
+	return itineraryVehicleUnifiedPrefix + VehicleRentalDisplayTitle(vehicleDetail, pickUpLocation)
 }
 
-func VehicleRentalItineraryDropOffTitle(location string) string {
-	return itineraryVehicleDropOffPrefix + location
+// VehicleRentalItineraryDropOffTitle returns the itinerary title for the drop-off row (same as pick-up).
+func VehicleRentalItineraryDropOffTitle(vehicleDetail, pickUpLocation string) string {
+	return VehicleRentalItineraryPickUpTitle(vehicleDetail, pickUpLocation)
 }
 
 func vehicleLocationFromItineraryTitle(title string) (location string, ok bool) {
 	switch {
+	case strings.HasPrefix(title, itineraryVehicleUnifiedPrefix):
+		return strings.TrimPrefix(title, itineraryVehicleUnifiedPrefix), true
 	case strings.HasPrefix(title, itineraryVehiclePickUpPrefix):
 		return strings.TrimPrefix(title, itineraryVehiclePickUpPrefix), true
 	case strings.HasPrefix(title, itineraryVehiclePickUpPrefixLegacy):
@@ -1493,16 +1804,17 @@ func vehicleLocationFromItineraryTitle(title string) (location string, ok bool) 
 }
 
 const (
-	itineraryFlightDepartPrefix = "Flight departure: "
-	itineraryFlightArrivePrefix = "Flight arrival: "
+	itineraryFlightUnifiedPrefix = "Flight: "
+	itineraryFlightDepartPrefix  = "Flight departure: "
+	itineraryFlightArrivePrefix  = "Flight arrival: "
 )
 
 func FlightItineraryDepartTitle(flightLabel string) string {
-	return itineraryFlightDepartPrefix + flightLabel
+	return itineraryFlightUnifiedPrefix + flightLabel
 }
 
 func FlightItineraryArriveTitle(flightLabel string) string {
-	return itineraryFlightArrivePrefix + flightLabel
+	return itineraryFlightUnifiedPrefix + flightLabel
 }
 
 func flightLabelValue(flightName, flightNumber string) string {
@@ -1522,6 +1834,8 @@ func flightLabelValue(flightName, flightNumber string) string {
 
 func flightLabelFromItineraryTitle(title string) (label string, ok bool) {
 	switch {
+	case strings.HasPrefix(title, itineraryFlightUnifiedPrefix):
+		return strings.TrimPrefix(title, itineraryFlightUnifiedPrefix), true
 	case strings.HasPrefix(title, itineraryFlightDepartPrefix):
 		return strings.TrimPrefix(title, itineraryFlightDepartPrefix), true
 	case strings.HasPrefix(title, itineraryFlightArrivePrefix):

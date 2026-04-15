@@ -1,0 +1,78 @@
+{{define "tripAddCommuteBlockInnerForm"}}
+{{$trip := index . "Trip"}}
+{{$settings := index . "Settings"}}
+{{$groups := index . "DayGroups"}}
+{{$formID := index . "FormID"}}
+{{if eq (len $groups) 0}}
+  <p class="muted small"><strong>Add at least two itinerary items</strong> on the same calendar day first (e.g. stops), then choose From and To.</p>
+{{end}}
+  <form method="post" action="/trips/{{$trip.ID}}/itinerary/commute" class="form-grid remi-trip-widget-form remi-add-commute-form" data-ajax-submit data-toast-message="Commute added." id="{{$formID}}">
+    <label class="full">Title (optional)<input type="text" name="title" placeholder="Leave blank for a smart default (mode + stops)"></label>
+    <label class="full">Start date &amp; time (same day as both items){{template "remiDateTimeField" (dict "name" "start_at" "value" (joinItineraryLocalDateTime $trip.StartDate "09:00") "min" (printf "%sT00:00" $trip.StartDate) "max" (printf "%sT23:59" $trip.EndDate) "mdy" (effectiveUIDateIsMDY $trip $settings) "time24h" (effectiveUITimeIs24h $trip) "required" true)}}</label>
+    <label class="full">End date &amp; time{{template "remiDateTimeField" (dict "name" "end_at" "value" (joinItineraryLocalDateTime $trip.StartDate "10:00") "min" (printf "%sT00:00" $trip.StartDate) "max" (printf "%sT23:59" $trip.EndDate) "mdy" (effectiveUIDateIsMDY $trip $settings) "time24h" (effectiveUITimeIs24h $trip) "required" true)}}</label>
+    <label class="full">Est. cost<input type="number" step="0.01" min="0" name="est_cost" placeholder="0.00"></label>
+    <label class="full">From<select name="commute_from_item_id" required>
+      <option value="">Select…</option>
+      {{range $groups}}
+      <optgroup label="Day {{.DayNumber}}{{if .DateLabel}} — {{formatTripUIDate $trip $settings .DateLabel}}{{end}}">
+        {{range .Items}}
+        {{if ne .Item.ItemKind "commute"}}
+        <option value="{{.Item.ID}}">{{.Item.Title}}</option>
+        {{end}}
+        {{end}}
+      </optgroup>
+      {{end}}
+    </select></label>
+    <label class="full">To<select name="commute_to_item_id" required>
+      <option value="">Select…</option>
+      {{range $groups}}
+      <optgroup label="Day {{.DayNumber}}{{if .DateLabel}} — {{formatTripUIDate $trip $settings .DateLabel}}{{end}}">
+        {{range .Items}}
+        {{if ne .Item.ItemKind "commute"}}
+        <option value="{{.Item.ID}}">{{.Item.Title}}</option>
+        {{end}}
+        {{end}}
+      </optgroup>
+      {{end}}
+    </select></label>
+    <label class="full">Transport
+      <select name="transport_mode">
+        <option value="">Other</option>
+        <option value="walk">Walk</option>
+        <option value="transit">Transit</option>
+        <option value="drive">Drive</option>
+        <option value="taxi">Taxi / ride-hail</option>
+      </select>
+    </label>
+    <label class="full">Notes<input type="text" name="notes" placeholder="Optional"></label>
+    <button class="full" type="submit">Add commute</button>
+  </form>
+{{end}}
+
+{{define "tripAddCommuteBlock"}}
+{{if eq (index . "Variant") "drawer"}}
+<div id="trip-itinerary-drawer-commute" class="trip-itinerary-drawer-section trip-itinerary-drawer-section--commute">
+  <h4 class="trip-itinerary-drawer-section-title">
+    <span class="material-symbols-outlined" aria-hidden="true">directions_car</span>
+    Commute leg
+  </h4>
+  <p class="trip-itinerary-drawer-section-intro muted small">Travel time between two items on the <strong>same day</strong> (day list and calendar; no map pin). Between located stops, use <strong>Add commute here</strong> on the connector.</p>
+  {{template "tripAddCommuteBlockInnerForm" .}}
+</div>
+{{else if eq (index . "Variant") "sidebar"}}
+<div class="trip-itinerary-drawer-section trip-itinerary-drawer-section--commute trip-sidebar-itinerary-section trip-sidebar-itinerary-section--commute">
+  <h4 class="trip-itinerary-drawer-section-title">
+    <span class="material-symbols-outlined" aria-hidden="true">directions_car</span>
+    Commute leg
+  </h4>
+  <p class="trip-itinerary-drawer-section-intro muted small">Travel time between two items on the <strong>same day</strong> (day list and calendar; no map pin). Between located stops, use <strong>Add commute here</strong> on the connector.</p>
+  {{template "tripAddCommuteBlockInnerForm" .}}
+</div>
+{{else}}
+<details class="add-commute-sidebar-details full" open>
+  <summary class="add-commute-summary"><span class="material-symbols-outlined" aria-hidden="true">route</span> Add commute leg</summary>
+  <p class="muted small" style="margin:8px 0">Block travel time between two items on the <strong>same day</strong>. Shown on the day list and calendar; no extra map pin. Between two stops with locations, open the travel hint and use <strong>Add commute here</strong>.</p>
+  {{template "tripAddCommuteBlockInnerForm" .}}
+</details>
+{{end}}
+{{end}}
