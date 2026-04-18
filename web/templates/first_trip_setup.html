@@ -146,6 +146,24 @@
                 </div>
               </div>
             </div>
+            <div class="first-trip-setup__card first-trip-setup__card--compact">
+              <h3 class="first-trip-setup__card-title">Formats</h3>
+              <label class="first-trip-setup__field full">
+                <span class="first-trip-setup__label">Time</span>
+                <select name="ui_time_format">
+                  <option value="12h" {{if eq .Details.Trip.UITimeFormat "24h"}}{{else}}selected{{end}}>12-hour</option>
+                  <option value="24h" {{if eq .Details.Trip.UITimeFormat "24h"}}selected{{end}}>24-hour</option>
+                </select>
+              </label>
+              <label class="first-trip-setup__field full">
+                <span class="first-trip-setup__label">Dates</span>
+                <select name="ui_date_format">
+                  <option value="inherit" {{if or (eq .Details.Trip.UIDateFormat "inherit") (eq .Details.Trip.UIDateFormat "")}}selected{{end}}>Use site default</option>
+                  <option value="dmy" {{if eq .Details.Trip.UIDateFormat "dmy"}}selected{{end}}>DD-MM-YYYY</option>
+                  <option value="mdy" {{if eq .Details.Trip.UIDateFormat "mdy"}}selected{{end}}>MM-DD-YYYY</option>
+                </select>
+              </label>
+            </div>
           </fieldset>
 
           <fieldset class="first-trip-setup__step first-trip-setup__step--hidden" data-fts-step="3" hidden>
@@ -172,30 +190,14 @@
               <span class="first-trip-setup__pill" data-fts-group-pill {{if eq .FirstTripSetupTravelMode "solo"}}hidden{{end}}>Recommended for groups</span>
             </div>
             <div class="first-trip-setup__toggle-grid">
-              {{template "ftsSectionToggle" (dict "id" "fts-itin" "name" "section_itinerary" "title" "Itinerary" "desc" "Daily schedules & maps" "icon" "calendar_month" "on" .Details.Trip.UIShowItinerary)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-itin" "name" "section_itinerary" "title" "Itinerary" "desc" "Daily schedules & maps" "icon" "route" "on" .Details.Trip.UIShowItinerary)}}
               {{template "ftsSectionToggle" (dict "id" "fts-flights" "name" "section_flights" "title" "Flights" "desc" "Tickets & airport details" "icon" "flight" "on" .Details.Trip.UIShowFlights)}}
-              {{template "ftsSectionToggle" (dict "id" "fts-hotels" "name" "section_hotels" "title" "Hotels" "desc" "Stays & lodging" "icon" "hotel" "on" .Details.Trip.UIShowStay)}}
-              {{template "ftsSectionToggle" (dict "id" "fts-exp" "name" "section_group_expenses" "title" "Group expenses" "desc" "Track common costs" "icon" "payments" "on" .Details.Trip.UIShowSpends "groupOnly" true)}}
-              {{template "ftsSectionToggle" (dict "id" "fts-tab" "name" "section_the_tab" "title" "The Tab" "desc" "Split bills effortlessly" "icon" "credit_card" "on" .Details.Trip.UIShowTheTab "groupOnly" true)}}
-              {{template "ftsSectionToggle" (dict "id" "fts-docs" "name" "section_documents" "title" "Documents" "desc" "Passports & reservations" "icon" "folder" "on" .Details.Trip.UIShowDocuments)}}
-            </div>
-            <div class="first-trip-setup__card first-trip-setup__card--compact">
-              <h3 class="first-trip-setup__card-title">Formats</h3>
-              <label class="first-trip-setup__field full">
-                <span class="first-trip-setup__label">Time</span>
-                <select name="ui_time_format">
-                  <option value="12h" {{if eq .Details.Trip.UITimeFormat "24h"}}{{else}}selected{{end}}>12-hour</option>
-                  <option value="24h" {{if eq .Details.Trip.UITimeFormat "24h"}}selected{{end}}>24-hour</option>
-                </select>
-              </label>
-              <label class="first-trip-setup__field full">
-                <span class="first-trip-setup__label">Dates</span>
-                <select name="ui_date_format">
-                  <option value="inherit" {{if or (eq .Details.Trip.UIDateFormat "inherit") (eq .Details.Trip.UIDateFormat "")}}selected{{end}}>Use site default</option>
-                  <option value="dmy" {{if eq .Details.Trip.UIDateFormat "dmy"}}selected{{end}}>DD-MM-YYYY</option>
-                  <option value="mdy" {{if eq .Details.Trip.UIDateFormat "mdy"}}selected{{end}}>MM-DD-YYYY</option>
-                </select>
-              </label>
+              {{template "ftsSectionToggle" (dict "id" "fts-stay" "name" "section_stay" "title" "Accommodation" "desc" "Stays, hotels & rentals" "icon" "hotel" "on" .Details.Trip.UIShowStay)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-vehicle" "name" "section_vehicle" "title" "Vehicle Rental" "desc" "Cars, vans & drives" "icon" "directions_car" "on" .Details.Trip.UIShowVehicle)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-spends" "name" "section_spends" "title" "Expenses" "desc" "Receipts & trip spending" "icon" "payments" "on" .Details.Trip.UIShowSpends)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-tab" "name" "section_the_tab" "title" "Group Expenses" "desc" "Shared tabs & splits" "icon" "post_add" "on" .Details.Trip.UIShowTheTab "groupOnly" true)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-checklist" "name" "section_checklist" "title" "Notes & Checklists" "desc" "Notes and packing lists" "icon" "checklist" "on" .Details.Trip.UIShowChecklist)}}
+              {{template "ftsSectionToggle" (dict "id" "fts-docs" "name" "section_documents" "title" "Trip Documents" "desc" "Passports & reservations" "icon" "description" "on" .Details.Trip.UIShowDocuments)}}
             </div>
           </fieldset>
           <footer class="first-trip-setup__footer">

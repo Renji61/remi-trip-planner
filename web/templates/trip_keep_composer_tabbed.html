@@ -38,7 +38,9 @@
           <p class="muted full checklist-builder-empty" data-checklist-draft-empty>No items added yet.</p>
           <ul class="list full checklist-draft-list hidden" data-checklist-draft-list></ul>
           <input type="hidden" name="items_json" value="[]" data-checklist-items-json>
-          <label class="full">Set Reminder (optional){{template "remiDateField" (dict "name" "due_at" "value" "" "min" "" "max" "" "mdy" (effectiveUIDateIsMDY .Trip .Settings) "clearable" true)}}</label>
+          <label class="trip-keep-label full">Set Reminder (optional)
+            {{template "remiDateField" (dict "name" "due_at" "value" "" "min" "" "max" "" "mdy" (effectiveUIDateIsMDY .Trip .Settings) "clearable" true "input_class" "trip-keep-input")}}
+          </label>
           <p class="location-hint full" data-checklist-builder-status></p>
           <button class="full" type="submit">Add Checklist</button>
         </form>

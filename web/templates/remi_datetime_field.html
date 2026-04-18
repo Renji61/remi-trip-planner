@@ -10,15 +10,21 @@
 {{- $tph := "hh:mm AM" -}}{{if $t24}}{{$tph = "HH:mm"}}{{end}}
 <span class="remi-datetime-field" data-remi-datetime data-mdy="{{if $mdy}}1{{else}}0{{end}}" data-time-24h="{{if $t24}}1{{else}}0{{end}}"{{if $min}} data-min="{{$min}}"{{end}}{{if $max}} data-max="{{$max}}"{{end}}>
   <input type="hidden" name="{{$name}}" value="{{$value}}" class="remi-datetime-iso" autocomplete="off">
-  <span class="remi-datetime-desktop-wrap">
+  <span class="remi-datetime-desktop-wrap remi-datetime-desktop-wrap--clearable">
     <input type="text" class="remi-date-visible remi-datetime-combined-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$dph}}, {{$tph}}" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Date and time">
+    <button type="button" class="remi-datetime-clear-btn" data-remi-datetime-clear aria-label="Clear date and time" disabled>
+      <span class="material-symbols-outlined" aria-hidden="true">close</span>
+    </button>
     <button type="button" class="remi-date-calendar-btn remi-datetime-desktop-calendar-btn" aria-label="Open calendar" tabindex="-1">
       <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
     </button>
   </span>
   <span class="remi-datetime-mobile-parts">
-    <span class="remi-datetime-date-wrap">
+    <span class="remi-datetime-date-wrap remi-datetime-date-wrap--clearable">
       <input type="text" class="remi-date-visible remi-datetime-date-part{{if $inputClass}} {{$inputClass}}{{end}}" placeholder="{{$dph}}" spellcheck="false" autocomplete="off" {{template "remiPmIgnoreExt"}}{{if index . "required"}} required{{end}} aria-label="Date">
+      <button type="button" class="remi-datetime-clear-btn" data-remi-datetime-clear aria-label="Clear date and time" disabled>
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
       <button type="button" class="remi-date-calendar-btn" aria-label="Open calendar" tabindex="-1">
         <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
       </button>

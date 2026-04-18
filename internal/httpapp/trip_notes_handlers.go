@@ -478,6 +478,10 @@ func (a *app) tripNotesPage(w http.ResponseWriter, r *http.Request) {
 		"ReturnTo":            tripNotesReturnURL(tripID, view),
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "notes")
+	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "notes"); err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
 	_ = a.templates.ExecuteTemplate(w, "trip_notes.html", pageData)
 }
 

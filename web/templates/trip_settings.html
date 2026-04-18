@@ -15,7 +15,7 @@
   <script defer src="/static/app.js?v=271"></script>
 </head>
 <body class="page-trip-settings">
-  <main class="app-shell" aria-label="Trip settings" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}">
+  <main class="app-shell trip-fab-flyout-root" aria-label="Trip settings" data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -557,6 +557,8 @@
       </div>
     </section>
   </main>
+
+  {{if not .Details.Trip.IsArchived}}{{template "tripFabFlyouts" .}}{{end}}
 
   <div class="settings-mobile-fab-dock" aria-label="Mobile settings actions">
     <button type="submit" form="trip-settings-save-form" class="mobile-fab-btn mobile-fab-btn--save" aria-label="Save all changes" title="Save all changes">

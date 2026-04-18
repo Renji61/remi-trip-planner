@@ -16,7 +16,7 @@
   <script defer src="/static/app.js?v=271"></script>
 </head>
 <body>
-  <main class="app-shell budget-page" aria-label="{{.Trip.SpendsSectionTitle}}" data-long-press-sheet-root data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
+  <main class="app-shell budget-page trip-fab-flyout-root" aria-label="{{.Trip.SpendsSectionTitle}}" data-long-press-sheet-root data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -364,6 +364,7 @@
       <div class="budget-spacer"></div>
     </section>
   </main>
+  {{if not .Trip.IsArchived}}{{template "tripFabFlyouts" .}}{{end}}
   <dialog id="budget-mobile-expense-edit" class="budget-mobile-expense-edit-dialog" aria-labelledby="budget-mobile-expense-edit-title">
     <div class="budget-mobile-expense-edit-dialog__panel">
       <div class="budget-mobile-expense-edit-dialog__head">

@@ -51,23 +51,18 @@ const (
 	SidebarAddChecklist = "checklist"
 )
 
+// Trip Details right column: fixed set and order (legacy keys in stored CSV are ignored).
 var DefaultSidebarWidgetOrder = []string{
-	SidebarAddStop,
-	SidebarAddCommute,
-	SidebarAddChecklist,
-	SidebarQuickSpends,
-	SidebarTabTotal,
-	SidebarAddTab,
 	SidebarBudget,
+	SidebarTabTotal,
+	SidebarAddStop,
+	SidebarAddChecklist,
 }
 
 var sidebarWidgetSet = map[string]struct{}{
 	SidebarAddStop:      {},
-	SidebarAddCommute:   {},
 	SidebarBudget:       {},
-	SidebarQuickSpends:  {},
 	SidebarTabTotal:     {},
-	SidebarAddTab:       {},
 	SidebarAddChecklist: {},
 }
 
@@ -79,37 +74,7 @@ func NormalizeMainSectionOrder(raw string) []string {
 
 // NormalizeSidebarWidgetOrder is like NormalizeMainSectionOrder for sidebar keys.
 func NormalizeSidebarWidgetOrder(raw string) []string {
-	out := normalizeOrder(raw, sidebarWidgetSet, DefaultSidebarWidgetOrder)
-	return ensureSidebarTabTotalBeforeAddTab(out)
-}
-
-// ensureSidebarTabTotalBeforeAddTab keeps the group-expense summary tile directly above
-// the add form when both appear in the sidebar order (including legacy saved orders).
-func ensureSidebarTabTotalBeforeAddTab(keys []string) []string {
-	hasAdd := false
-	for _, k := range keys {
-		if k == SidebarAddTab {
-			hasAdd = true
-			break
-		}
-	}
-	if !hasAdd {
-		return keys
-	}
-	without := make([]string, 0, len(keys))
-	for _, k := range keys {
-		if k != SidebarTabTotal {
-			without = append(without, k)
-		}
-	}
-	out := make([]string, 0, len(without)+1)
-	for _, k := range without {
-		if k == SidebarAddTab {
-			out = append(out, SidebarTabTotal)
-		}
-		out = append(out, k)
-	}
-	return out
+	return normalizeOrder(raw, sidebarWidgetSet, DefaultSidebarWidgetOrder)
 }
 
 // JoinMainSectionOrder encodes main section order for storage.
@@ -374,7 +339,7 @@ func SidebarWidgetLabel(key string) string {
 	case SidebarQuickSpends:
 		return "Add Expense"
 	case SidebarTabTotal:
-		return "Group Expense"
+		return "Total Group Expense"
 	case SidebarAddTab:
 		return "Add Group Expense"
 	case SidebarAddChecklist:

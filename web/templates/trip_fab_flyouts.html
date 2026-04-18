@@ -1,0 +1,181 @@
+{{define "tripFabFlyouts"}}
+  <div class="mobile-sheet-backdrop hidden" data-mobile-sheet-backdrop></div>
+  {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_stop" .Details.Trip)}}<section id="mobile-sheet-stop" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true" aria-labelledby="mobile-sheet-stop-title" aria-modal="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
+    <div class="mobile-sheet-head">
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3 id="mobile-sheet-stop-title">{{tripSidebarWidgetLabel "add_stop"}}</h3>
+      </div>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add stop">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="trip-itinerary-drawer-scroll">
+      <div class="trip-itinerary-drawer-section trip-itinerary-drawer-section--stop">
+        <h4 class="trip-itinerary-drawer-section-title">
+          <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+          Stop details
+        </h4>
+        <p class="trip-itinerary-drawer-section-intro muted small">Add a map pin and day-list row. <strong>Custom reminders</strong> live on the second tab below.</p>
+        <form method="post" action="/trips/{{.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-location-lookup-enabled="{{.Settings.EnableLocationLookup}}" data-trip-start="{{.Details.Trip.StartDate}}" data-trip-end="{{.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.EndDate}}">
+          {{template "tripAddStopFormInner" (dict "Trip" .Details.Trip "Settings" .Settings "TabNamespace" "mobile")}}
+          <label class="full remi-widget-file-label">Attach Image<input type="file" name="stop_image" accept="image/*"></label>
+          <button class="full trip-itinerary-drawer-stop-submit" type="submit">Add to Itinerary</button>
+        </form>
+      </div>
+    </div>
+  </section>{{end}}
+  {{if and .Details.Trip.UIShowItinerary (sidebarWidgetVisible "add_commute" .Details.Trip)}}<section id="mobile-sheet-commute" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true" aria-labelledby="mobile-sheet-commute-title" aria-modal="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
+    <div class="mobile-sheet-head">
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3 id="mobile-sheet-commute-title">{{tripSidebarWidgetLabel "add_commute"}}</h3>
+      </div>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add commute">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="trip-itinerary-drawer-scroll">
+      {{template "tripAddCommuteBlock" (dict "Trip" .Details.Trip "Settings" .Settings "DayGroups" .DayGroups "FormID" "mobile-add-commute-form" "Variant" "drawer")}}
+    </div>
+  </section>{{end}}
+  {{if tripExpenseQuickAddVisible .Details.Trip}}
+  <section id="mobile-sheet-expense" class="mobile-sheet mobile-sheet--trip-fab-flyout mobile-sheet--unified-expense hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
+    <div class="mobile-sheet-head">
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>Add expense</h3>
+      </div>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add expense">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <p class="mobile-sheet-subtitle muted">Personal spend or split with the group using the toggle below.</p>
+    {{template "tripUnifiedExpenseForm" (dict "Trip" .Details.Trip "Settings" .Settings "ExpenseCategories" .ExpenseCategories "CurrencySymbol" .CurrencySymbol "ExpenseFormDefaultDateISO" .ExpenseFormDefaultDateISO "Party" .Party "TripGuests" .TripGuests "TabDepartedParticipants" .TabDepartedParticipants "CurrentUserID" .CurrentUserID "Variant" "mobile" "ReturnTo" .FabReturnTo "FormSuffix" "mobile" "Subtitle" "" "TabSectionEnabled" .Details.Trip.SectionEnabledTheTab "FormClass" "")}}
+  </section>
+  {{end}}
+  {{if .Details.Trip.UIShowStay}}
+  <section id="mobile-sheet-accommodation" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
+    <div class="mobile-sheet-head">
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>Add {{.Details.Trip.StaySectionTitle}}</h3>
+      </div>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add accommodation">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <p class="trip-resource-form-subtitle mobile-sheet-subtitle">Details sync with your itinerary and expenses.</p>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid remi-trip-widget-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form>
+      <label class="full">Property Name<input type="text" name="name" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
+      <label class="full">Address<input type="text" name="address" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
+      <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
+      <label class="full">Check-in Date &amp; Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "check_in_at" "value" "" "required" true)}}</label>
+      <label class="full">Check-out Date &amp; Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "check_out_at" "value" "" "required" true)}}</label>
+      <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+      <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
+      <label class="full">Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+      <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+      <label class="full">Notes<input type="text" name="notes" placeholder="Breakfast included, high floor requested..."></label>
+      <button class="full" type="submit">Save Accommodation</button>
+    </form>
+  </section>
+  {{end}}
+  {{if .Details.Trip.UIShowVehicle}}
+  <section id="mobile-sheet-vehicle" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
+    <div class="mobile-sheet-head">
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>Add {{.Details.Trip.VehicleSectionTitle}}</h3>
+      </div>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add vehicle rental">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <p class="trip-resource-form-subtitle mobile-sheet-subtitle">Details sync with your itinerary and expenses.</p>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid remi-trip-widget-form vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form>
+      <label class="full">Vehicle<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
+      <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
+      <label class="full">Pickup Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+      <label class="full">Pickup Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "pick_up_at" "value" "" "required" true)}}</label>
+      <fieldset class="vehicle-dropoff-fieldset full">
+        <legend class="vehicle-dropoff-legend">Drop-off Location</legend>
+        <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pickup">
+        <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" checked data-vehicle-dropoff-same> Same as pickup</label>
+        <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="different" data-vehicle-dropoff-diff> Different drop-off location</label>
+        </div>
+        <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field hidden>Drop-off Location<input type="text" name="drop_off_location" value="" placeholder="Return location" autocomplete="off" data-location-autocomplete disabled></label>
+      </fieldset>
+      <label class="full">Drop-off Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "drop_off_at" "value" "" "required" true)}}</label>
+      <label class="full">Rental Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+      <label class="full">Insurance Cost<input type="number" step="0.01" min="0" name="insurance_cost" placeholder="0.00"></label>
+      <label class="full">Rental Agreement<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+      <label class="full">Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
+      <label class="full">Notes<input type="text" name="notes" placeholder="Notes about insurance coverage, keys, etc."></label>
+      <button class="full vehicle-submit-btn" type="submit">Save Vehicle Rental</button>
+    </form>
+  </section>
+  {{end}}
+  {{if .Details.Trip.UIShowFlights}}
+  <section id="mobile-sheet-flight" class="mobile-sheet mobile-sheet--trip-fab-flyout hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
+    <div class="mobile-sheet-head">
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>Add {{.Details.Trip.FlightsSectionTitle}}</h3>
+      </div>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add flight">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/flights" class="form-grid remi-trip-widget-form flight-form-grid" enctype="multipart/form-data">
+      <label class="full">Airline<input type="text" name="flight_name" placeholder="e.g. Philippine Airlines" required></label>
+      <label class="full">Flight Number<input type="text" name="flight_number" placeholder="e.g. PR 2781"></label>
+      <label class="full">Departure Airport<input type="text" name="depart_airport" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
+      <label class="full">Departure Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "depart_at" "value" "" "required" true)}}</label>
+      <label class="full">Arrival Airport<input type="text" name="arrive_airport" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
+      <label class="full">Arrival Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "arrive_at" "value" "" "required" true)}}</label>
+      <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. FLT-1234"></label>
+      <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+      <label class="full">Boarding Pass / Ticket<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
+      <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+      <label class="full">Notes<input type="text" name="notes" placeholder="Add any additional details"></label>
+      <button class="full" type="submit">Add {{.Details.Trip.FlightsSectionTitle}}</button>
+    </form>
+  </section>
+  {{end}}
+  {{if sidebarWidgetVisible "checklist" .Details.Trip}}
+  <section id="mobile-sheet-checklist" class="mobile-sheet mobile-sheet--trip-fab-flyout mobile-sheet--keep-composer hidden" aria-hidden="true">
+    <div class="mobile-sheet-grabber-wrap" data-mobile-sheet-drag-region aria-hidden="true">
+      <div class="mobile-sheet-grabber"></div>
+    </div>
+    <div class="mobile-sheet-head">
+      <div class="mobile-sheet-title-row">
+        <span class="mobile-sheet-header-icon-slot" data-mobile-sheet-header-icon-slot aria-hidden="true"></span>
+        <h3>{{tripSidebarWidgetLabel "checklist"}}</h3>
+      </div>
+      <button type="button" class="icon-btn" data-mobile-sheet-close aria-label="Close add note or checklist">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    {{template "tripKeepComposerTabbed" (dict "Trip" .Details.Trip "Settings" .Settings "CSRFToken" .CSRFToken "KeepNoteColors" .KeepNoteColors "ReminderCategories" .ChecklistCategories "Prefix" "mobile-keep-composer" "ColorPickerID" "mobile-keep-composer")}}
+  </section>
+  {{end}}
+{{end}}

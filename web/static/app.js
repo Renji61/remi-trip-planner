@@ -957,19 +957,28 @@ if ("serviceWorker" in navigator) {
   window.remiSyncUnifiedExpenseGroupMode = remiSyncUnifiedExpenseGroupMode;
   window.remiUpdateUnifiedSplitJSON = remiUpdateUnifiedSplitJSON;
 
+  /** Reject attrs like "T00:00" from empty trip dates — they corrupt string compares and ISO parsing. */
+  function isUsableTripDateTimeBound(s) {
+    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(s || "").trim());
+  }
+
   function clampDateTimeLocal(isoDt, min, max) {
     if (!isoDt) return isoDt;
     let v = isoDt;
-    if (min && v < min) v = min;
-    if (max && v > max) v = max;
+    const mn = String(min || "").trim();
+    const mx = String(max || "").trim();
+    if (isUsableTripDateTimeBound(mn) && v < mn) v = mn;
+    if (isUsableTripDateTimeBound(mx) && v > mx) v = mx;
     return v;
   }
 
   function isDateTimeWithinBounds(isoDt, min, max) {
     const v = String(isoDt || "").trim();
     if (!v) return false;
-    if (min && v < min) return false;
-    if (max && v > max) return false;
+    const mn = String(min || "").trim();
+    const mx = String(max || "").trim();
+    if (isUsableTripDateTimeBound(mn) && v < mn) return false;
+    if (isUsableTripDateTimeBound(mx) && v > mx) return false;
     return true;
   }
 
@@ -1802,6 +1811,13 @@ if ("serviceWorker" in navigator) {
   function wireDateTimeWrap(wrap) {
     if (!(wrap instanceof HTMLElement) || wrap.dataset.remiDatetimeWired === "1") return;
     wrap.dataset.remiDatetimeWired = "1";
+    /** Empty trip dates in templates can yield attrs like "T00:00" — ignore unless YYYY-MM-DD prefix is valid. */
+    const tripRangeDateIso = (attr) => {
+      const s = String(attr || "").trim();
+      if (s.length < 10) return "";
+      const head = s.slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(head) ? head : "";
+    };
     const mdy = wrap.getAttribute("data-mdy") === "1";
     const min = wrap.getAttribute("data-min") || "";
     const max = wrap.getAttribute("data-max") || "";
@@ -1822,8 +1838,8 @@ if ("serviceWorker" in navigator) {
     const formForWrap = wrap.closest("form");
     const formAction = formForWrap instanceof HTMLFormElement ? (formForWrap.getAttribute("action") || "") : "";
     const isTripBoundDateTime = /\/trips(\/|$)/i.test(formAction);
-    const minDateIso = min ? min.slice(0, 10) : "";
-    const maxDateIso = max ? max.slice(0, 10) : "";
+    const minDateIso = tripRangeDateIso(min);
+    const maxDateIso = tripRangeDateIso(max);
     const rangeMessage =
       minDateIso && maxDateIso
         ? `This date is outside your trip (${isoToDisplay(minDateIso, mdy)} – ${isoToDisplay(maxDateIso, mdy)}).`
@@ -1845,6 +1861,22 @@ if ("serviceWorker" in navigator) {
       inlineErr.hidden = !on;
       wrap.classList.toggle("remi-datetime-field--has-error", Boolean(on));
     };
+    const hasClearableDatetime = () => {
+      if ((hidden.value || "").trim()) return true;
+      if (combinedVis instanceof HTMLInputElement && (combinedVis.value || "").trim()) return true;
+      if (dateVis instanceof HTMLInputElement && (dateVis.value || "").trim()) return true;
+      if (timeVis instanceof HTMLInputElement && (timeVis.value || "").trim()) return true;
+      return false;
+    };
+    const updateDatetimeClearButtons = () => {
+      const has = hasClearableDatetime();
+      wrap.querySelectorAll("[data-remi-datetime-clear]").forEach((el) => {
+        if (el instanceof HTMLButtonElement) {
+          el.disabled = !has;
+          el.setAttribute("aria-disabled", has ? "false" : "true");
+        }
+      });
+    };
     const isMobileLayout = () => window.matchMedia(`(max-width: ${MOBILE_BP}px)`).matches;
     const sync = () => {
       const sp = splitIsoLocalDateTime(hidden.value);
@@ -1864,6 +1896,7 @@ if ("serviceWorker" in navigator) {
         const hasOutOfRange = sp.dateIso && sp.time && !isDateTimeWithinBounds(`${sp.dateIso}T${sp.time}`, min, max);
         setRangeError(Boolean(hasOutOfRange));
       }
+      updateDatetimeClearButtons();
     };
     const syncModeDisabled = () => {
       const mobile = isMobileLayout();
@@ -1961,6 +1994,20 @@ if ("serviceWorker" in navigator) {
       }
       return !!(sp.dateIso && sp.time);
     };
+    wrap.querySelectorAll("[data-remi-datetime-clear]").forEach((el) => {
+      if (!(el instanceof HTMLButtonElement)) return;
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        hidden.value = "";
+        setRangeError(false);
+        if (combinedVis instanceof HTMLInputElement) combinedVis.setCustomValidity("");
+        if (dateVis instanceof HTMLInputElement) dateVis.setCustomValidity("");
+        if (timeVis instanceof HTMLInputElement) timeVis.setCustomValidity("");
+        sync();
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
     sync();
     syncModeDisabled();
     window.addEventListener("resize", syncModeDisabled);
@@ -1994,54 +2041,58 @@ if ("serviceWorker" in navigator) {
        */
       combinedVis.addEventListener("input", (ev) => {
         if (isMobileLayout()) return;
-        const pos0 = combinedVis.selectionStart ?? combinedVis.value.length;
-        const vlen = combinedVis.value.length;
-        const dcnt = digitsOnly(combinedVis.value).length;
-        const fromBeforeInput = combinedVis.dataset.remiDatetimeDelete === "1";
-        if (fromBeforeInput) delete combinedVis.dataset.remiDatetimeDelete;
-        const isDel =
-          fromBeforeInput ||
-          ev.inputType === "deleteContentBackward" ||
-          ev.inputType === "deleteContentForward" ||
-          ev.inputType === "deleteByCut" ||
-          ev.inputType === "deleteCompositionText" ||
-          (lastCombinedDigitCount >= 0 && dcnt < lastCombinedDigitCount) ||
-          (lastCombinedValueLen >= 0 && vlen < lastCombinedValueLen);
-        const masked = remiFormatCombinedDateTimeTypingMask(combinedVis.value, mdy, pos0, isDel);
-        if (masked.text !== combinedVis.value) {
-          combinedVis.value = masked.text;
-          combinedVis.setSelectionRange(masked.caret, masked.caret);
-        }
-        lastCombinedDigitCount = digitsOnly(combinedVis.value).length;
-        lastCombinedValueLen = combinedVis.value.length;
-        let isoDt = parseCombinedDateTimeDisplay(combinedVis.value, mdy, true);
-        if (isoDt) {
-          const { timePart } = splitCombinedDisplayDateTimeParts(combinedVis.value, mdy);
-          if (!uiTime24h) {
-            const spTyped = splitIsoLocalDateTime(isoDt);
-            const hmAdj = maybeForceTopOfHourForTyped24h(timePart, spTyped.time);
-            if (spTyped.dateIso && hmAdj) isoDt = `${spTyped.dateIso}T${hmAdj}`;
+        try {
+          const pos0 = combinedVis.selectionStart ?? combinedVis.value.length;
+          const vlen = combinedVis.value.length;
+          const dcnt = digitsOnly(combinedVis.value).length;
+          const fromBeforeInput = combinedVis.dataset.remiDatetimeDelete === "1";
+          if (fromBeforeInput) delete combinedVis.dataset.remiDatetimeDelete;
+          const isDel =
+            fromBeforeInput ||
+            ev.inputType === "deleteContentBackward" ||
+            ev.inputType === "deleteContentForward" ||
+            ev.inputType === "deleteByCut" ||
+            ev.inputType === "deleteCompositionText" ||
+            (lastCombinedDigitCount >= 0 && dcnt < lastCombinedDigitCount) ||
+            (lastCombinedValueLen >= 0 && vlen < lastCombinedValueLen);
+          const masked = remiFormatCombinedDateTimeTypingMask(combinedVis.value, mdy, pos0, isDel);
+          if (masked.text !== combinedVis.value) {
+            combinedVis.value = masked.text;
+            combinedVis.setSelectionRange(masked.caret, masked.caret);
           }
-          if (useRangeValidation && !isDateTimeWithinBounds(isoDt, min, max)) {
-            setRangeError(true);
-            return;
-          }
-          setRangeError(false);
-          const nextIso = useRangeValidation ? isoDt : clampDateTimeLocal(isoDt, min, max);
-          hidden.value = nextIso;
-          hidden.dispatchEvent(new Event("change", { bubbles: true }));
-          /* Never sync() here while focused: if clamped !== isoDt (outside trip min/max), sync() would
-           * replace the visible text with the clamped value and feel like the edit "reverted". Blur still normalizes. */
-          /* Do not canonicalize during delete; otherwise trailing tokens can reappear and block backspace flow. */
-          if (nextIso === isoDt && !uiTime24h && !isDel) {
-            if (combinedTimeNeeds12hCanonVisual(timePart)) {
-              const canon = dateTimeLocalToDisplay(nextIso, mdy, uiTime24h);
-              if (canon && canon.replace(/\s+/g, " ").trim() !== combinedVis.value.replace(/\s+/g, " ").trim()) {
-                combinedVis.value = canon;
-                combinedVis.setSelectionRange(canon.length, canon.length);
+          lastCombinedDigitCount = digitsOnly(combinedVis.value).length;
+          lastCombinedValueLen = combinedVis.value.length;
+          let isoDt = parseCombinedDateTimeDisplay(combinedVis.value, mdy, true);
+          if (isoDt) {
+            const { timePart } = splitCombinedDisplayDateTimeParts(combinedVis.value, mdy);
+            if (!uiTime24h) {
+              const spTyped = splitIsoLocalDateTime(isoDt);
+              const hmAdj = maybeForceTopOfHourForTyped24h(timePart, spTyped.time);
+              if (spTyped.dateIso && hmAdj) isoDt = `${spTyped.dateIso}T${hmAdj}`;
+            }
+            if (useRangeValidation && !isDateTimeWithinBounds(isoDt, min, max)) {
+              setRangeError(true);
+              return;
+            }
+            setRangeError(false);
+            const nextIso = useRangeValidation ? isoDt : clampDateTimeLocal(isoDt, min, max);
+            hidden.value = nextIso;
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
+            /* Never sync() here while focused: if clamped !== isoDt (outside trip min/max), sync() would
+             * replace the visible text with the clamped value and feel like the edit "reverted". Blur still normalizes. */
+            /* Do not canonicalize during delete; otherwise trailing tokens can reappear and block backspace flow. */
+            if (nextIso === isoDt && !uiTime24h && !isDel) {
+              if (combinedTimeNeeds12hCanonVisual(timePart)) {
+                const canon = dateTimeLocalToDisplay(nextIso, mdy, uiTime24h);
+                if (canon && canon.replace(/\s+/g, " ").trim() !== combinedVis.value.replace(/\s+/g, " ").trim()) {
+                  combinedVis.value = canon;
+                  combinedVis.setSelectionRange(canon.length, canon.length);
+                }
               }
             }
           }
+        } finally {
+          updateDatetimeClearButtons();
         }
       });
       combinedVis.addEventListener("keydown", (ev) => {
@@ -2134,34 +2185,38 @@ if ("serviceWorker" in navigator) {
       });
       dateVis.addEventListener("input", (ev) => {
         if (!isMobileLayout()) return;
-        const p0 = dateVis.selectionStart ?? dateVis.value.length;
-        const vlen = dateVis.value.length;
-        const dcnt = digitsOnly(dateVis.value).length;
-        const fromBeforeInput = dateVis.dataset.remiDatetimeDelete === "1";
-        if (fromBeforeInput) delete dateVis.dataset.remiDatetimeDelete;
-        const isDel =
-          fromBeforeInput ||
-          ev.inputType === "deleteContentBackward" ||
-          ev.inputType === "deleteContentForward" ||
-          ev.inputType === "deleteByCut" ||
-          ev.inputType === "deleteCompositionText" ||
-          (lastDateDigitCount >= 0 && dcnt < lastDateDigitCount) ||
-          (lastDateValueLen >= 0 && vlen < lastDateValueLen);
-        const dMasked = remiFormatDatePartTypingMask(dateVis.value, p0, isDel);
-        if (dMasked.text !== dateVis.value) {
-          dateVis.value = dMasked.text;
-          dateVis.setSelectionRange(dMasked.caret, dMasked.caret);
+        try {
+          const p0 = dateVis.selectionStart ?? dateVis.value.length;
+          const vlen = dateVis.value.length;
+          const dcnt = digitsOnly(dateVis.value).length;
+          const fromBeforeInput = dateVis.dataset.remiDatetimeDelete === "1";
+          if (fromBeforeInput) delete dateVis.dataset.remiDatetimeDelete;
+          const isDel =
+            fromBeforeInput ||
+            ev.inputType === "deleteContentBackward" ||
+            ev.inputType === "deleteContentForward" ||
+            ev.inputType === "deleteByCut" ||
+            ev.inputType === "deleteCompositionText" ||
+            (lastDateDigitCount >= 0 && dcnt < lastDateDigitCount) ||
+            (lastDateValueLen >= 0 && vlen < lastDateValueLen);
+          const dMasked = remiFormatDatePartTypingMask(dateVis.value, p0, isDel);
+          if (dMasked.text !== dateVis.value) {
+            dateVis.value = dMasked.text;
+            dateVis.setSelectionRange(dMasked.caret, dMasked.caret);
+          }
+          lastDateDigitCount = digitsOnly(dateVis.value).length;
+          lastDateValueLen = dateVis.value.length;
+          const iso = parseDisplayToIso(dateVis.value.trim(), mdy);
+          if (iso) {
+            const sp = splitIsoLocalDateTime(hidden.value);
+            const tPart = normalizeTimeHM(sp.time || "08:30");
+            hidden.value = clampDateTimeLocal(`${iso}T${tPart}`, min, max);
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          if (typeof activeDatePickerSync === "function") activeDatePickerSync(dateVis.value);
+        } finally {
+          updateDatetimeClearButtons();
         }
-        lastDateDigitCount = digitsOnly(dateVis.value).length;
-        lastDateValueLen = dateVis.value.length;
-        const iso = parseDisplayToIso(dateVis.value.trim(), mdy);
-        if (iso) {
-          const sp = splitIsoLocalDateTime(hidden.value);
-          const tPart = normalizeTimeHM(sp.time || "08:30");
-          hidden.value = clampDateTimeLocal(`${iso}T${tPart}`, min, max);
-          hidden.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        if (typeof activeDatePickerSync === "function") activeDatePickerSync(dateVis.value);
       });
       dateVis.addEventListener("blur", () => {
         if (!isMobileLayout()) return;
@@ -2198,37 +2253,41 @@ if ("serviceWorker" in navigator) {
       /* Same normalization rules as combined field, but for mobile split time input. */
       timeVis.addEventListener("input", (ev) => {
         if (!isMobileLayout()) return;
-        const t0 = timeVis.selectionStart ?? timeVis.value.length;
-        const vlen = timeVis.value.length;
-        const dcnt = digitsOnly(timeVis.value).length;
-        const fromBeforeInput = timeVis.dataset.remiDatetimeDelete === "1";
-        if (fromBeforeInput) delete timeVis.dataset.remiDatetimeDelete;
-        const isDel =
-          fromBeforeInput ||
-          ev.inputType === "deleteContentBackward" ||
-          ev.inputType === "deleteContentForward" ||
-          ev.inputType === "deleteByCut" ||
-          ev.inputType === "deleteCompositionText" ||
-          (lastTimeDigitCount >= 0 && dcnt < lastTimeDigitCount) ||
-          (lastTimeValueLen >= 0 && vlen < lastTimeValueLen);
-        const tMasked = remiFormatTimePartTypingMask(timeVis.value, t0, isDel);
-        if (tMasked.text !== timeVis.value) {
-          timeVis.value = tMasked.text;
-          timeVis.setSelectionRange(tMasked.caret, tMasked.caret);
-        }
-        lastTimeDigitCount = digitsOnly(timeVis.value).length;
-        lastTimeValueLen = timeVis.value.length;
-        const tv = timeVis.value.trim();
-        if (isTimePartIncompleteForCombinedInput(tv)) {
+        try {
+          const t0 = timeVis.selectionStart ?? timeVis.value.length;
+          const vlen = timeVis.value.length;
+          const dcnt = digitsOnly(timeVis.value).length;
+          const fromBeforeInput = timeVis.dataset.remiDatetimeDelete === "1";
+          if (fromBeforeInput) delete timeVis.dataset.remiDatetimeDelete;
+          const isDel =
+            fromBeforeInput ||
+            ev.inputType === "deleteContentBackward" ||
+            ev.inputType === "deleteContentForward" ||
+            ev.inputType === "deleteByCut" ||
+            ev.inputType === "deleteCompositionText" ||
+            (lastTimeDigitCount >= 0 && dcnt < lastTimeDigitCount) ||
+            (lastTimeValueLen >= 0 && vlen < lastTimeValueLen);
+          const tMasked = remiFormatTimePartTypingMask(timeVis.value, t0, isDel);
+          if (tMasked.text !== timeVis.value) {
+            timeVis.value = tMasked.text;
+            timeVis.setSelectionRange(tMasked.caret, tMasked.caret);
+          }
+          lastTimeDigitCount = digitsOnly(timeVis.value).length;
+          lastTimeValueLen = timeVis.value.length;
+          const tv = timeVis.value.trim();
+          if (isTimePartIncompleteForCombinedInput(tv)) {
+            if (typeof activeTimePickerSync === "function") activeTimePickerSync(timeVis.value);
+            return;
+          }
+          const hm = normalizeTimeHM(tv);
+          if (hm) {
+            const hmAdj = uiTime24h ? hm : maybeForceTopOfHourForTyped24h(tv, hm);
+            if (hmAdj) updateTime(hmAdj);
+          }
           if (typeof activeTimePickerSync === "function") activeTimePickerSync(timeVis.value);
-          return;
+        } finally {
+          updateDatetimeClearButtons();
         }
-        const hm = normalizeTimeHM(tv);
-        if (hm) {
-          const hmAdj = uiTime24h ? hm : maybeForceTopOfHourForTyped24h(tv, hm);
-          if (hmAdj) updateTime(hmAdj);
-        }
-        if (typeof activeTimePickerSync === "function") activeTimePickerSync(timeVis.value);
       });
       timeVis.addEventListener("keydown", (ev) => {
         if (!isMobileLayout() || uiTime24h) return;
@@ -2265,12 +2324,45 @@ if ("serviceWorker" in navigator) {
     const dateCalBtn = wrap.querySelector(".remi-datetime-date-wrap .remi-date-calendar-btn");
     const openDateCal = () => {
       const dateIso = getVisibleDateIso();
+      /* Desktop: OS/browser native date picker (no custom "Select Date" modal). */
+      if (!isMobileLayout()) {
+        const desktopWrap = wrap.querySelector(".remi-datetime-desktop-wrap");
+        if (!(desktopWrap instanceof HTMLElement)) return;
+        let nd = wrap.querySelector("input.remi-datetime-native-date");
+        if (!nd) {
+          nd = document.createElement("input");
+          nd.type = "date";
+          nd.className = "remi-datetime-native-date";
+          nd.setAttribute("aria-hidden", "true");
+          nd.tabIndex = -1;
+          desktopWrap.appendChild(nd);
+          nd.addEventListener("change", () => {
+            const v = nd.value;
+            if (v) updateDate(v);
+          });
+        }
+        const dmin = tripRangeDateIso(min);
+        const dmax = tripRangeDateIso(max);
+        nd.min = dmin || "";
+        nd.max = dmax || "";
+        nd.value = dateIso || "";
+        requestAnimationFrame(() => {
+          if (typeof nd.showPicker === "function") {
+            nd.showPicker().catch(() => {
+              nd.focus();
+            });
+          } else {
+            nd.focus();
+          }
+        });
+        return;
+      }
       const anchor = !isMobileLayout() && combinedVis instanceof HTMLInputElement ? combinedVis : dateVis;
       if (!(anchor instanceof HTMLInputElement)) return;
       openDatePicker(anchor, {
         value: dateIso,
-        min: min ? min.slice(0, 10) : "",
-        max: max ? max.slice(0, 10) : "",
+        min: tripRangeDateIso(min),
+        max: tripRangeDateIso(max),
         mdy,
         onConfirm: (iso) => updateDate(iso)
       });
@@ -3999,7 +4091,7 @@ window.addEventListener("load", () => {
         return matches.find((f) => !f.closest(".mobile-sheet")) || matches[0] || null;
       };
       const sheetFormForKindOnDesktop = (kind) => {
-        if (window.innerWidth <= 920 || !document.querySelector("main.trip-details-page")) return null;
+        if (window.innerWidth <= 920 || !document.querySelector("main.trip-fab-flyout-root")) return null;
         const id =
           kind === "stop"
             ? "mobile-sheet-stop"
@@ -4036,7 +4128,7 @@ window.addEventListener("load", () => {
         sheetEl.classList.remove("hidden");
         sheetEl.setAttribute("aria-hidden", "false");
         if (bd) bd.classList.remove("hidden");
-        if (sheetEl.classList.contains("mobile-sheet--trip-fab-flyout") && document.querySelector("main.trip-details-page")) {
+        if (sheetEl.classList.contains("mobile-sheet--trip-fab-flyout") && document.querySelector("main.trip-fab-flyout-root")) {
           sheetEl.classList.remove("mobile-sheet--trip-fab-flyout-open");
           void sheetEl.offsetWidth;
           requestAnimationFrame(() => {
@@ -4106,7 +4198,7 @@ window.addEventListener("load", () => {
         }
         const mobileSheet = form.closest(".mobile-sheet");
         const onTripDesktop =
-          !!document.querySelector("main.trip-details-page") && window.innerWidth > 920 && mobileSheet;
+          !!document.querySelector("main.trip-fab-flyout-root") && window.innerWidth > 920 && mobileSheet;
         if (kind === "commute") {
           form.closest("details")?.setAttribute("open", "");
         }
@@ -8254,7 +8346,7 @@ window.addEventListener("load", () => {
   let tripFabIconBridgeGeneration = 0;
   const isTripFabFlyoutSheet = (el) =>
     el instanceof HTMLElement && el.classList.contains("mobile-sheet--trip-fab-flyout");
-  const isTripFabFlyoutSlideContext = () => !!document.querySelector("main.trip-details-page");
+  const isTripFabFlyoutSlideContext = () => !!document.querySelector("main.trip-fab-flyout-root");
   const clearMobileSheetHeaderIconSlots = () => {
     document.querySelectorAll("[data-mobile-sheet-header-icon-slot]").forEach((el) => {
       el.replaceChildren();
@@ -8495,9 +8587,9 @@ window.addEventListener("load", () => {
     if (!(form instanceof HTMLFormElement)) return false;
     const parsed = parseTripFlyoutKindAndIDFromForm(form, formId || "");
     if (!parsed) return false;
-    const tripPage = document.querySelector("main.trip-details-page");
+    const tripFabRoot = document.querySelector("main.trip-fab-flyout-root");
     const sheet = document.getElementById(parsed.sheetId);
-    if (!(tripPage instanceof HTMLElement) || !(sheet instanceof HTMLElement) || typeof openMobileSheet !== "function") {
+    if (!(tripFabRoot instanceof HTMLElement) || !(sheet instanceof HTMLElement) || typeof openMobileSheet !== "function") {
       const tripID = parseTripIDFromAction(form.getAttribute("action") || "");
       if (!tripID) return false;
       const meta = tripFlyoutEditMetaBySheetId[parsed.sheetId];
@@ -8612,7 +8704,7 @@ window.addEventListener("load", () => {
 
   const getDismissableTripFabSheet = () => {
     if (window.innerWidth > MOBILE_SHEET_BREAKPOINT) return null;
-    if (!document.querySelector("main.trip-details-page")) return null;
+    if (!document.querySelector("main.trip-fab-flyout-root")) return null;
     return (
       mobileSheets.find(
         (s) =>
@@ -8681,6 +8773,12 @@ window.addEventListener("load", () => {
     });
     if (mobileBackdrop) mobileBackdrop.classList.add("hidden");
     resetAllTripFlyoutSheets();
+    /*
+     * Desktop itinerary/booking edit uses trip-inline-actions-dropdown with the <details> kept
+     * open for CSS (see applyExpenseActionsDropdownOpen). Opening the flyout clears `open`;
+     * closing the sheet must restore it or Edit/Delete stay hidden until reload.
+     */
+    window.remiApplyExpenseActionsDropdownOpen?.();
   };
 
   const closeMobileSheets = () => finalizeCloseMobileSheets();
@@ -8896,7 +8994,6 @@ window.addEventListener("load", () => {
     const canBridge =
       fabSourceBtn instanceof HTMLElement &&
       fabSourceBtn.closest("[data-mobile-fab-menu]") &&
-      fabSourceBtn.tagName !== "A" &&
       isTripFabFlyoutSheet(target) &&
       isTripFabFlyoutSlideContext();
     let bridgeSnapshot = null;
@@ -8956,7 +9053,7 @@ window.addEventListener("load", () => {
   };
   const openDesktopFabFallback = (sheetId) => {
     if (!sheetId || window.innerWidth <= 920) return false;
-    if (document.querySelector("main.trip-details-page") && document.getElementById(sheetId)) {
+    if (document.getElementById(sheetId)) {
       return false;
     }
     const tripId = tripIdFromPath();
@@ -8965,7 +9062,7 @@ window.addEventListener("load", () => {
     const navMap = {
       "mobile-sheet-stop": `${pathBase}?open=stop`,
       "mobile-sheet-commute": `${pathBase}?open=commute`,
-      "mobile-sheet-expense": `${pathBase}/expenses#add-expense`,
+      "mobile-sheet-expense": `${pathBase}?open=expense`,
       "mobile-sheet-tab": `${pathBase}?open=expense`,
       "mobile-sheet-accommodation": `${pathBase}?open=accommodation`,
       "mobile-sheet-vehicle": `${pathBase}?open=vehicle`,
@@ -8987,6 +9084,20 @@ window.addEventListener("load", () => {
         }
         openMobileSheet(sheetId, btn);
         closeMobileFab();
+        if (
+          btn.getAttribute("data-fab-prefer-group-split") === "1" &&
+          sheetId === "mobile-sheet-expense"
+        ) {
+          window.setTimeout(() => {
+            const sheet = document.getElementById("mobile-sheet-expense");
+            const form = sheet?.querySelector("form[data-remi-unified-expense-add-form]");
+            const splitCb = form?.querySelector(".remi-unified-expense-split-checkbox");
+            if (splitCb instanceof HTMLInputElement && !splitCb.disabled && !splitCb.checked) {
+              splitCb.checked = true;
+              splitCb.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }, 60);
+        }
         const dcf = document.querySelector("[data-desktop-calendar-flyout]");
         if (dcf) {
           dcf.classList.add("hidden");
@@ -9026,6 +9137,39 @@ window.addEventListener("load", () => {
       }
     });
     window.addEventListener("resize", closeMobileFab);
+  }
+  /* Trip details: FAB uses the same links as other trip pages; intercept ?open= on the main trip URL so we open flyouts without a full reload. */
+  if (mobileFabMenu && document.querySelector("main.trip-fab-flyout-root")) {
+    mobileFabMenu.addEventListener("click", (e) => {
+      const a = e.target.closest("a.mobile-fab-option[href]");
+      if (!(a instanceof HTMLAnchorElement)) return;
+      let url;
+      try {
+        url = new URL(a.getAttribute("href") || "", window.location.origin);
+      } catch {
+        return;
+      }
+      if (url.origin !== window.location.origin) return;
+      const pathTrip = url.pathname.match(/^\/trips\/([^/]+)\/?$/);
+      if (!pathTrip) return;
+      const pageTrip = window.location.pathname.match(/^\/trips\/([^/]+)/)?.[1];
+      if (!pageTrip || pathTrip[1] !== pageTrip) return;
+      const openKey = (url.searchParams.get("open") || "").toLowerCase();
+      if (!openKey) return;
+      const sheetId = tripFlyoutSheetByOpenKey[openKey];
+      if (!sheetId || typeof openMobileSheet !== "function") return;
+      if (!(document.getElementById(sheetId) instanceof HTMLElement)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openMobileSheet(sheetId, a);
+      closeMobileFab();
+      const dcf = document.querySelector("[data-desktop-calendar-flyout]");
+      if (dcf) {
+        dcf.classList.add("hidden");
+        dcf.setAttribute("aria-hidden", "true");
+        dcf.classList.remove("is-expanded");
+      }
+    });
   }
 
   document.querySelectorAll(".mobile-sheet").forEach((sheet) => {
@@ -13139,7 +13283,7 @@ function initTabOverTimeChart() {
       step: "STEP 03 — LOGISTICS",
       k: "03",
       sidebarTitle: "Logistics",
-      sidebarDesc: "Set currency, symbol, and distance units so totals and maps feel right for this trip.",
+      sidebarDesc: "Set currency, distance units, and how times and dates display on this trip.",
       nextHint: "Next: Personalization",
     },
     {
@@ -13467,6 +13611,21 @@ function initTabOverTimeChart() {
 
     showStep(0);
 
+    function onEscapeDismiss(e) {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      dismissFirstTripSetup();
+    }
+
+    function dismissFirstTripSetup() {
+      if (root.classList.contains("first-trip-setup--dismissed")) return;
+      root.classList.add("first-trip-setup--dismissed");
+      document.body.classList.remove("first-trip-setup-lock");
+      document.removeEventListener("keydown", onEscapeDismiss, true);
+    }
+
+    document.addEventListener("keydown", onEscapeDismiss, true);
+
     btnCont?.addEventListener("click", () => {
       if (idx === 0) {
         const name = form.querySelector('input[name="name"]');
@@ -13481,8 +13640,7 @@ function initTabOverTimeChart() {
       if (idx > 0) showStep(idx - 1);
     });
     btnSkip?.addEventListener("click", () => {
-      root.classList.add("first-trip-setup--dismissed");
-      document.body.classList.remove("first-trip-setup-lock");
+      dismissFirstTripSetup();
     });
   }
 

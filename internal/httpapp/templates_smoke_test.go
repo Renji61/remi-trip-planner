@@ -78,6 +78,7 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 					return ""
 				},
 				"googleMapsDirectionsURL":    func(fromLat, fromLng, toLat, toLng float64, mode string) string { return "" },
+				"itineraryDayGoogleMapsURL":  func([]itineraryItemView) string { return "" },
 				"joinItineraryLocalDateTime": stubJoinItineraryLocalDateTime,
 				"locationLineBeforeComma":    func(s string) string { return s },
 				"itineraryNotesDisplay":      func(s string) string { return s },
@@ -419,6 +420,7 @@ func htmlTemplateSmokeFuncs() ht.FuncMap {
 		"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
 		"googleMapsSearchURL":             func(lat, lng float64, hint string) string { return "" },
 		"googleMapsDirectionsURL":         func(fromLat, fromLng, toLat, toLng float64, mode string) string { return "" },
+		"itineraryDayGoogleMapsURL":       func([]itineraryItemView) string { return "" },
 		"joinItineraryLocalDateTime":      stubJoinItineraryLocalDateTime,
 		"locationLineBeforeComma":         func(s string) string { return s },
 		"itineraryNotesDisplay":           func(s string) string { return s },
@@ -659,6 +661,12 @@ func TestTripNotesPageTemplateRenders(t *testing.T) {
 			},
 		},
 		"KeepChecklistGroups": []KeepChecklistGroup(nil),
+		"DayGroups":           []itineraryDayGroup{},
+		"FabReturnTo":         "/trips/t-notes-smoke/notes",
+		"ExpenseCategories":   trips.QuickExpenseCategories,
+		"ChecklistCategories": trips.ReminderChecklistCategories,
+		"CurrencySymbol":      "$",
+		"CurrentUserID":       "owner-smoke",
 	}
 
 	var buf bytes.Buffer

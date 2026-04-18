@@ -883,15 +883,23 @@ func (s *Service) UpdateTrip(ctx context.Context, t Trip) error {
 		t.BudgetCapCents = MoneyToCentsFloat(t.BudgetCap)
 	}
 	SetTripBudgetCapCents(&t, t.BudgetCapCents)
-	current, err := s.repo.GetTrip(ctx, t.ID)
-	if err != nil {
-		return err
-	}
-	if current.IsArchived {
-		return errors.New("archived trips are read-only")
-	}
 	t.CoverImage = NormalizeTripCoverValue(t.CoverImage)
-	return s.repo.UpdateTrip(ctx, t)
+
+	return s.withRepoTransaction(ctx, func(txs *Service) error {
+		current, err := txs.repo.GetTrip(ctx, t.ID)
+		if err != nil {
+			return err
+		}
+		if current.IsArchived {
+			return errors.New("archived trips are read-only")
+		}
+		if IsDraftTripForDateBounds(current.StartDate, current.EndDate) && !IsDraftTripForDateBounds(t.StartDate, t.EndDate) {
+			if err := txs.migrateDraftItineraryDayNumbersToTripWindow(ctx, t.ID, t.StartDate, t.EndDate); err != nil {
+				return err
+			}
+		}
+		return txs.repo.UpdateTrip(ctx, t)
+	})
 }
 
 func (s *Service) ArchiveTrip(ctx context.Context, tripID string) error {

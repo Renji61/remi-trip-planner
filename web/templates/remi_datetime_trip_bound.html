@@ -1,0 +1,12 @@
+{{define "remiDateTimeFieldTripBound"}}
+{{- $trip := index . "Trip" -}}
+{{- $sett := index . "Settings" -}}
+{{- $name := index . "name" -}}
+{{- $value := index . "value" -}}
+{{- $req := index . "required" -}}
+{{if and $trip.StartDate $trip.EndDate}}
+{{template "remiDateTimeField" (dict "name" $name "value" $value "min" (printf "%sT00:00" $trip.StartDate) "max" (printf "%sT23:59" $trip.EndDate) "mdy" (effectiveUIDateIsMDY $trip $sett) "time24h" (effectiveUITimeIs24h $trip) "required" $req)}}
+{{else}}
+{{template "remiDateTimeField" (dict "name" $name "value" $value "mdy" (effectiveUIDateIsMDY $trip $sett) "time24h" (effectiveUITimeIs24h $trip) "required" $req)}}
+{{end}}
+{{end}}

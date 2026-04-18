@@ -42,21 +42,26 @@ func TestNormalizeSidebarWidgetOrder(t *testing.T) {
 	}
 }
 
-func TestNormalizeSidebarWidgetOrder_tabTotalBeforeAddTab(t *testing.T) {
-	got := NormalizeSidebarWidgetOrder("add_tab,checklist")
-	var idxTab, idxAdd int
-	idxTab = -1
-	idxAdd = -1
-	for i, k := range got {
-		if k == SidebarTabTotal {
-			idxTab = i
-		}
-		if k == SidebarAddTab {
-			idxAdd = i
+func TestNormalizeSidebarWidgetOrder_defaultOrder(t *testing.T) {
+	got := NormalizeSidebarWidgetOrder("")
+	want := []string{SidebarBudget, SidebarTabTotal, SidebarAddStop, SidebarAddChecklist}
+	if len(got) != len(want) {
+		t.Fatalf("len %d want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("idx %d: %q want %q", i, got[i], want[i])
 		}
 	}
-	if idxTab < 0 || idxAdd < 0 || idxTab != idxAdd-1 {
-		t.Fatalf("want tab_total immediately before add_tab, got %v", got)
+}
+
+func TestNormalizeSidebarWidgetOrder_stripsLegacyKeys(t *testing.T) {
+	got := NormalizeSidebarWidgetOrder("add_commute,quick_spends,add_tab,budget")
+	if containsString(got, "add_commute") || containsString(got, "quick_spends") || containsString(got, "add_tab") {
+		t.Fatalf("legacy keys should drop: %v", got)
+	}
+	if !containsString(got, SidebarBudget) {
+		t.Fatal("expected budget kept")
 	}
 }
 

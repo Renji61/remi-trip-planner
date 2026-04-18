@@ -142,7 +142,7 @@ func (r *Repository) UpdateTrip(ctx context.Context, t trips.Trip) error {
 	}
 	trips.SetTripBudgetCapCents(&t, t.BudgetCapCents)
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.execContext(ctx, `
 		UPDATE trips
 		SET name = ?, description = ?, start_date = ?, end_date = ?, cover_image_url = ?, currency_name = ?, currency_symbol = ?,
 		    home_map_latitude = ?, home_map_longitude = ?, home_map_place_label = ?,
@@ -207,7 +207,7 @@ func (r *Repository) DeleteTrip(ctx context.Context, tripID string) error {
 }
 
 func (r *Repository) nextItinerarySortOrder(ctx context.Context, tripID string, dayNumber int) (int, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), 0) FROM itinerary_items WHERE trip_id = ? AND day_number = ?`, tripID, dayNumber)
+	row := r.queryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), 0) FROM itinerary_items WHERE trip_id = ? AND day_number = ?`, tripID, dayNumber)
 	var m int64
 	if err := row.Scan(&m); err != nil {
 		return 0, err
@@ -1311,7 +1311,7 @@ func (r *Repository) SaveAppSettings(ctx context.Context, settings trips.AppSett
 }
 
 func (r *Repository) GetTripDayLabels(ctx context.Context, tripID string) (map[int]string, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.queryContext(ctx, `
 		SELECT day_number, label
 		FROM trip_day_labels
 		WHERE trip_id = ?`, tripID)
@@ -1334,7 +1334,7 @@ func (r *Repository) GetTripDayLabels(ctx context.Context, tripID string) (map[i
 func (r *Repository) SaveTripDayLabel(ctx context.Context, tripID string, dayNumber int, label string) error {
 	trimmed := strings.TrimSpace(label)
 	if trimmed == "" {
-		_, err := r.db.ExecContext(ctx, `
+		_, err := r.execContext(ctx, `
 			DELETE FROM trip_day_labels
 			WHERE trip_id = ? AND day_number = ?`, tripID, dayNumber)
 		if err == nil {
@@ -1342,7 +1342,7 @@ func (r *Repository) SaveTripDayLabel(ctx context.Context, tripID string, dayNum
 		}
 		return err
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.execContext(ctx, `
 		INSERT INTO trip_day_labels (trip_id, day_number, label, updated_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(trip_id, day_number) DO UPDATE SET

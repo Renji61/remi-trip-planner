@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -47,6 +48,58 @@ func googleMapsSearchURL(lat, lng float64, hint string) string {
 		return ""
 	}
 	return "https://www.google.com/maps/search/?api=1&query=" + url.QueryEscape(hint)
+}
+
+func validMapCoords(lat, lng float64) bool {
+	return !math.IsNaN(lat) && !math.IsNaN(lng) && (math.Abs(lat) > 1e-7 || math.Abs(lng) > 1e-7)
+}
+
+// parseLatLngPair parses a single "lat,lng" string (from fmt %g,%g) for single-waypoint URLs.
+func parseLatLngPair(s string) (lat, lng float64, ok bool) {
+	s = strings.TrimSpace(s)
+	i := strings.LastIndex(s, ",")
+	if i <= 0 || i >= len(s)-1 {
+		return 0, 0, false
+	}
+	lat, err1 := strconv.ParseFloat(strings.TrimSpace(s[:i]), 64)
+	lng, err2 := strconv.ParseFloat(strings.TrimSpace(s[i+1:]), 64)
+	if err1 != nil || err2 != nil || math.IsNaN(lat) || math.IsNaN(lng) {
+		return 0, 0, false
+	}
+	if math.Abs(lat) > 90 || math.Abs(lng) > 180 {
+		return 0, 0, false
+	}
+	return lat, lng, true
+}
+
+// googleMapsMultiPlaceURL opens Google Maps with one search result or multi-stop directions.
+func googleMapsMultiPlaceURL(waypoints []string) string {
+	var parts []string
+	for _, w := range waypoints {
+		w = strings.TrimSpace(w)
+		if w != "" {
+			parts = append(parts, w)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		p := parts[0]
+		if lat, lng, ok := parseLatLngPair(p); ok {
+			return googleMapsSearchURL(lat, lng, "")
+		}
+		return googleMapsSearchURL(math.NaN(), math.NaN(), p)
+	}
+	var b strings.Builder
+	b.WriteString("https://www.google.com/maps/dir/")
+	for i, p := range parts {
+		if i > 0 {
+			b.WriteByte('/')
+		}
+		b.WriteString(url.PathEscape(p))
+	}
+	return b.String()
 }
 
 // locationLineBeforeComma returns the substring before the first comma, trimmed,

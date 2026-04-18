@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=289">
+  <link rel="stylesheet" href="/static/app.css?v=295">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script defer src="/static/app.js?v=277"></script>
+  <script defer src="/static/app.js?v=283"></script>
 </head>
 <body>
-  <main class="app-shell" aria-label="{{.Details.Trip.VehicleSectionTitle}}" data-long-press-sheet-root data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
+  <main class="app-shell trip-fab-flyout-root" aria-label="{{.Details.Trip.VehicleSectionTitle}}" data-long-press-sheet-root data-location-lookup-enabled="{{if .Settings.EnableLocationLookup}}true{{else}}false{{end}}" data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -239,6 +239,7 @@
       </div>
     </section>
   </main>
+  {{if not .Details.Trip.IsArchived}}
   {{if tripMobileFabHasItems .Details.Trip}}
   <div class="mobile-fab-wrap" data-mobile-fab>
     <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation">
@@ -248,6 +249,8 @@
       {{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}
     </div>
   </div>
+  {{end}}
+  {{template "tripFabFlyouts" .}}
   {{end}}
   {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "vehicle")}}
   {{template "tripLongPressSheet"}}

@@ -10,6 +10,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.50.1] - 2026-04-18
+
+### Added
+
+- **Draft itinerary calendar-day support:** trips without a valid start/end window now store itinerary day numbers as encoded calendar dates (`YYYYMMDD`), so draft planning can still use real dates. When dates are added later, itinerary rows and day labels are migrated in a transaction to relative trip days with clamping to the trip window.
+- **Day-level Google Maps routes:** itinerary day headers now expose an “open in Google Maps” shortcut that builds a multi-stop route/search URL from that day’s non-commute itinerary places in timeline order.
+
+### Changed
+
+- **Shared mobile quick-add flyouts across trip pages:** the same trip FAB sheet set (stop, commute, expense/group expense, stay, vehicle, flights, checklist) is now available from trip subpages such as Notes, Expenses, Group Expenses, Settings, Trip Documents, Accommodation, Vehicle Rental, and Flights.
+- **Trip Details right column defaults:** sidebar widgets on the main trip page are now a fixed “read-first, then actions” sequence (`Total Budgeted Cost`, `Total Group Expense`, `Add New Stop`, `Add to Checklist`) to reduce noisy per-trip variance from legacy widget-order keys.
+- **Expense/group-expense day summary rows:** day accordions now show a per-day total in the heading.
+
+### Fixed
+
+- **First-trip setup section toggles:** setup submissions now persist stay, vehicle, checklist, and spends visibility flags correctly (including compatibility with legacy `section_hotels` input names).
+- **Trip date-time bounds for draft flows:** shared datetime inputs used by itinerary, stays, rentals, and flights no longer enforce trip `min/max` when a draft trip has no valid start/end dates.
+- **Trip updates when promoting draft to dated:** changing a draft trip to dated now migrates existing draft-encoded itinerary day numbers and labels within the same update transaction.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.50.1`** (and the **GHCR** image tag when CI builds) so **About** / `GET /api/about/update-check` reports an update for installs on **1.50.0** or older.
+
 ## [1.50.0] - 2026-04-15
 
 ### Added
@@ -396,7 +419,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.0...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.1...HEAD
+[1.50.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.0...v1.50.1
 [1.50.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.4...v1.50.0
 [1.49.4]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.3...v1.49.4
 [1.49.3]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.2...v1.49.3

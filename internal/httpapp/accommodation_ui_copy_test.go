@@ -24,6 +24,11 @@ func TestAccommodationPageAndFormsCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	trip := string(tripB)
+	fabB, err := os.ReadFile(filepath.Join(root, "web", "templates", "trip_fab_flyouts.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tripAndFab := trip + "\n" + string(fabB)
 
 	jsB, err := os.ReadFile(filepath.Join(root, "web", "static", "app.js"))
 	if err != nil {
@@ -88,8 +93,8 @@ func TestAccommodationPageAndFormsCopy(t *testing.T) {
 		`<strong>{{.BookingConfirmation}}</strong><small>Booking Reference</small>`,
 	}
 	for _, s := range tripWant {
-		if !strings.Contains(trip, s) {
-			t.Errorf("trip.html (accommodation) missing %q", s)
+		if !strings.Contains(tripAndFab, s) {
+			t.Errorf("trip templates (accommodation) missing %q", s)
 		}
 	}
 	tripAccAvoid := []string{
@@ -97,8 +102,8 @@ func TestAccommodationPageAndFormsCopy(t *testing.T) {
 		"We will try to auto-fill address from the name you enter.",
 	}
 	for _, s := range tripAccAvoid {
-		if strings.Contains(trip, s) {
-			t.Errorf("trip.html should not contain (accommodation legacy) %q", s)
+		if strings.Contains(tripAndFab, s) {
+			t.Errorf("trip templates should not contain (accommodation legacy) %q", s)
 		}
 	}
 

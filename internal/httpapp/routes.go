@@ -143,6 +143,8 @@ type itineraryItemView struct {
 type itineraryDayGroup struct {
 	DayNumber      int
 	DateLabel      string
+	// DraftDay is true when DayNumber stores a YYYY-MM-DD calendar encoding (draft trips with no trip start/end).
+	DraftDay       bool
 	DayDescription string
 	Items          []itineraryItemView
 }
@@ -151,6 +153,7 @@ type expenseDayGroup struct {
 	DayNumber int
 	DateLabel string
 	Items     []trips.Expense
+	Total     float64
 }
 
 type checklistCategoryGroup struct {
@@ -397,6 +400,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
 				"googleMapsSearchURL":             googleMapsSearchURL,
 				"googleMapsDirectionsURL":         googleMapsDirectionsURL,
+				"itineraryDayGoogleMapsURL":       itineraryDayGoogleMapsURL,
 				"locationLineBeforeComma":         locationLineBeforeComma,
 				"itineraryNotesDisplay":           itineraryNotesDisplay,
 				"isImageWebPath":                  isImageWebPath,
@@ -1467,6 +1471,7 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	}
 	pageData := map[string]any{
 		"Details":                        details,
+		"FabReturnTo":                    "/trips/" + tripID,
 		"DayGroups":                      dayGroups,
 		"ExpenseGroups":                  expenseGroups,
 		"Settings":                       settings,
@@ -1532,16 +1537,17 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) tripSettingsPage(w http.ResponseWriter, r *http.Request) {
 	tripID := chi.URLParam(r, "tripID")
-	t, err := a.tripService.GetTrip(r.Context(), tripID)
+	uid := CurrentUserID(r.Context())
+	details, err := a.tripService.GetTripDetailsVisible(r.Context(), tripID, uid)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if tripForbiddenOrMissing(err) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	uid := CurrentUserID(r.Context())
+	t := details.Trip
 	settings, err := a.tripService.MergedSettingsForUI(r.Context(), uid)
 	if err != nil {
 		writeInternalServerError(w, r, err)
@@ -1552,7 +1558,7 @@ func (a *app) tripSettingsPage(w http.ResponseWriter, r *http.Request) {
 	mainSectionOrder := trips.NormalizeMainSectionOrder(t.UIMainSectionOrder)
 	sidebarWidgetOrder := trips.NormalizeSidebarWidgetOrder(t.UISidebarWidgetOrder)
 	pageData := map[string]any{
-		"Details":                   trips.TripDetails{Trip: t},
+		"Details":                   details,
 		"Settings":                  settings,
 		"CSRFToken":                 CSRFToken(r.Context()),
 		"CurrencySymbol":            currencySymbol,
@@ -1566,7 +1572,11 @@ func (a *app) tripSettingsPage(w http.ResponseWriter, r *http.Request) {
 		"Reset":                     r.URL.Query().Get("reset") == "1",
 		"HideSettingsNavOnMobile":   true,
 	}
-	a.mergeTripSidebarContext(r.Context(), r, tripID, trips.TripDetails{Trip: t}, pageData, "settings")
+	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "settings")
+	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "settings"); err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
 	hasFeed, _ := a.tripService.HasCalendarFeedToken(r.Context(), tripID)
 	pageData["CalendarFeedEnabled"] = hasFeed
 	guestSeed := template.JS("[]")
@@ -1880,6 +1890,10 @@ func (a *app) budgetPage(w http.ResponseWriter, r *http.Request) {
 		"CurrentUserID":             uid,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "expenses")
+	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "expenses"); err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
 	_ = a.templates.ExecuteTemplate(w, "budget.html", pageData)
 }
 
@@ -2125,6 +2139,10 @@ func (a *app) theTabPage(w http.ResponseWriter, r *http.Request) {
 		"ExpenseFormDefaultDateISO": time.Now().Format("2006-01-02"),
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "group-expenses")
+	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "group-expenses"); err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
 	_ = a.templates.ExecuteTemplate(w, "the_tab.html", pageData)
 }
 
@@ -2562,10 +2580,59 @@ func itineraryGeocodeQuery(v itineraryItemView) string {
 	return strings.TrimSpace(v.Item.Location)
 }
 
+// mapHintForItineraryItem matches per-row map hints in trip.html (lodging / vehicle leg / flight / stop).
+func mapHintForItineraryItem(v itineraryItemView) string {
+	if v.Lodging.ID != "" {
+		if a := strings.TrimSpace(v.Lodging.Address); a != "" {
+			return a
+		}
+	}
+	if v.Vehicle.ID != "" {
+		if v.Item.ID == v.Vehicle.PickUpItineraryID {
+			if p := strings.TrimSpace(v.Vehicle.PickUpLocation); p != "" {
+				return p
+			}
+		} else {
+			if d := strings.TrimSpace(v.Vehicle.DropOffLocation); d != "" {
+				return d
+			}
+			if p := strings.TrimSpace(v.Vehicle.PickUpLocation); p != "" {
+				return p
+			}
+		}
+	}
+	return strings.TrimSpace(v.Item.Location)
+}
+
+func itineraryItemMapWaypoint(v itineraryItemView) string {
+	if trips.NormalizeItineraryItemKind(v.Item.ItemKind) == trips.ItineraryItemKindCommute {
+		return ""
+	}
+	lat, lng := v.Item.Latitude, v.Item.Longitude
+	if validMapCoords(lat, lng) {
+		return fmt.Sprintf("%g,%g", lat, lng)
+	}
+	if h := mapHintForItineraryItem(v); h != "" {
+		return h
+	}
+	return strings.TrimSpace(v.Item.Title)
+}
+
+// itineraryDayGoogleMapsURL builds a Google Maps URL for all non-commute itinerary places on that day (ordered).
+func itineraryDayGoogleMapsURL(items []itineraryItemView) string {
+	var wps []string
+	for _, v := range items {
+		if w := itineraryItemMapWaypoint(v); w != "" {
+			wps = append(wps, w)
+		}
+	}
+	return googleMapsMultiPlaceURL(wps)
+}
+
 func buildItineraryDayGroups(startDate string, items []trips.ItineraryItem, lodgings []trips.Lodging, vehicles []trips.VehicleRental, flights []trips.Flight, dayLabels map[int]string) []itineraryDayGroup {
 	groups := make([]itineraryDayGroup, 0)
 	indexByDay := make(map[int]int)
-	parsedStart, hasStart := time.Parse("2006-01-02", startDate)
+	parsedStart, startErr := time.Parse("2006-01-02", strings.TrimSpace(startDate))
 	byItem := trips.LodgingByItineraryItemID(lodgings, items)
 	byVehicleItem := trips.VehicleRentalByItineraryItemID(vehicles, items)
 	byFlightItem := trips.FlightByItineraryItemID(flights, items)
@@ -2573,12 +2640,17 @@ func buildItineraryDayGroups(startDate string, items []trips.ItineraryItem, lodg
 		idx, exists := indexByDay[item.DayNumber]
 		if !exists {
 			dateLabel := ""
-			if hasStart == nil {
+			draftDay := false
+			if startErr == nil {
 				dateLabel = parsedStart.AddDate(0, 0, item.DayNumber-1).Format("2006-01-02")
+			} else if iso, ok := trips.CalendarDateFromDraftItineraryDayNumber(item.DayNumber); ok {
+				dateLabel = iso
+				draftDay = true
 			}
 			groups = append(groups, itineraryDayGroup{
 				DayNumber:      item.DayNumber,
 				DateLabel:      dateLabel,
+				DraftDay:       draftDay,
 				DayDescription: strings.TrimSpace(dayLabels[item.DayNumber]),
 				Items:          []itineraryItemView{},
 			})
@@ -2688,6 +2760,11 @@ func buildExpenseDayGroups(startDate string, expenses []trips.Expense) []expense
 	start, startErr := time.Parse("2006-01-02", startDate)
 	out := make([]expenseDayGroup, 0, len(keys))
 	for _, key := range keys {
+		items := groupMap[key]
+		var total float64
+		for _, e := range items {
+			total += e.Amount
+		}
 		dayNum := 0
 		if key != "" && startErr == nil {
 			if d, err := time.Parse("2006-01-02", key); err == nil {
@@ -2700,7 +2777,8 @@ func buildExpenseDayGroups(startDate string, expenses []trips.Expense) []expense
 		out = append(out, expenseDayGroup{
 			DayNumber: dayNum,
 			DateLabel: key,
-			Items:     groupMap[key],
+			Items:     items,
+			Total:     total,
 		})
 	}
 	return out
@@ -3089,13 +3167,14 @@ func (a *app) saveFirstTripSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	existing.UIShowItinerary = r.FormValue("section_itinerary") == "1"
 	existing.UIShowFlights = r.FormValue("section_flights") == "1"
-	existing.UIShowStay = r.FormValue("section_hotels") == "1"
+	existing.UIShowStay = r.FormValue("section_stay") == "1" || r.FormValue("section_hotels") == "1"
+	existing.UIShowVehicle = r.FormValue("section_vehicle") == "1"
+	existing.UIShowChecklist = r.FormValue("section_checklist") == "1"
 	existing.UIShowDocuments = r.FormValue("section_documents") == "1"
+	existing.UIShowSpends = r.FormValue("section_spends") == "1" || r.FormValue("section_group_expenses") == "1"
 	if mode == "group" {
-		existing.UIShowSpends = r.FormValue("section_group_expenses") == "1"
 		existing.UIShowTheTab = r.FormValue("section_the_tab") == "1"
 	} else {
-		existing.UIShowSpends = false
 		existing.UIShowTheTab = false
 	}
 	if !existing.UIShowSpends {
@@ -3923,6 +4002,10 @@ func (a *app) accommodationPage(w http.ResponseWriter, r *http.Request) {
 		"CurrencySymbol": currencySymbol,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "stay")
+	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "stay"); err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
 	_ = a.templates.ExecuteTemplate(w, "accommodation.html", pageData)
 }
 
@@ -4270,6 +4353,10 @@ func (a *app) vehicleRentalPage(w http.ResponseWriter, r *http.Request) {
 		"CurrencySymbol": currencySymbol,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "vehicle")
+	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "vehicle"); err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
 	_ = a.templates.ExecuteTemplate(w, "vehicle_rental.html", pageData)
 }
 
@@ -4685,6 +4772,10 @@ func (a *app) tripDocumentsPage(w http.ResponseWriter, r *http.Request) {
 		"DocumentCategories": []string{"Accommodation", "Flights", "General Documents", "Group Expenses", "Vehicle Rental"},
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "documents")
+	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "documents"); err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
 	_ = a.templates.ExecuteTemplate(w, "trip_documents.html", pageData)
 }
 
@@ -4987,6 +5078,10 @@ func (a *app) flightsPage(w http.ResponseWriter, r *http.Request) {
 		"CurrencySymbol": currencySymbol,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "flights")
+	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "flights"); err != nil {
+		writeInternalServerError(w, r, err)
+		return
+	}
 	_ = a.templates.ExecuteTemplate(w, "flights.html", pageData)
 }
 
@@ -5643,6 +5738,54 @@ func (a *app) syncChanges(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
+// fabReturnPathForNav is the safe return_to target for quick-add forms opened from the FAB on a given trip subpage.
+func fabReturnPathForNav(tripID, sidebarNavActive string) string {
+	base := "/trips/" + tripID
+	switch sidebarNavActive {
+	case "flights":
+		return base + "/flights"
+	case "stay":
+		return base + "/accommodation"
+	case "vehicle":
+		return base + "/vehicle-rental"
+	case "documents":
+		return base + "/documents"
+	case "notes":
+		return base + "/notes"
+	case "expenses":
+		return base + "/expenses"
+	case "group-expenses":
+		return base + "/group-expenses"
+	case "settings":
+		return base + "/settings"
+	default:
+		return base
+	}
+}
+
+// mergeTripFabFlyoutContext adds DayGroups and shared composer data so trip FAB flyouts can render on any trip page.
+func (a *app) mergeTripFabFlyoutContext(ctx context.Context, tripID string, details trips.TripDetails, into map[string]any, sidebarNavActive string) error {
+	dayLabels, err := a.tripService.GetTripDayLabels(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	dayGroups := buildItineraryDayGroups(details.Trip.StartDate, details.Itinerary, details.Lodgings, details.Vehicles, details.Flights, dayLabels)
+	enrichItineraryCommuteLabels(details.Itinerary, dayGroups)
+	into["DayGroups"] = dayGroups
+	into["ExpenseFormDefaultDateISO"] = time.Now().Format("2006-01-02")
+	if _, ok := into["ExpenseCategories"]; !ok {
+		into["ExpenseCategories"] = trips.QuickExpenseCategories
+	}
+	into["ChecklistCategories"] = trips.ReminderChecklistCategories
+	into["KeepNoteColors"] = keepNotePickerColors
+	into["FabReturnTo"] = fabReturnPathForNav(tripID, sidebarNavActive)
+	uid := CurrentUserID(ctx)
+	if _, ok := into["CurrentUserID"]; !ok {
+		into["CurrentUserID"] = uid
+	}
+	return nil
+}
+
 // mergeTripSidebarContext adds Details, CustomSidebarLinks, TripAccess, Party, PendingInvites, and SidebarNavActive
 // for shared trip sidebar templates (tripSidebarNav, tripMembersPanel).
 func (a *app) mergeTripSidebarContext(ctx context.Context, r *http.Request, tripID string, details trips.TripDetails, into map[string]any, sidebarNavActive string) {
@@ -6062,20 +6205,24 @@ func deleteTripUploadDirs(tripID string) error {
 }
 
 func dayNumberFromDate(startDate, endDate, itineraryDate string) (int, error) {
+	itineraryDate = strings.TrimSpace(itineraryDate)
 	if itineraryDate == "" {
 		return 0, errors.New("date is required")
-	}
-	start, err := time.Parse("2006-01-02", startDate)
-	if err != nil {
-		return 0, errors.New("trip start date is invalid")
-	}
-	end, err := time.Parse("2006-01-02", endDate)
-	if err != nil {
-		return 0, errors.New("trip end date is invalid")
 	}
 	selected, err := time.Parse("2006-01-02", itineraryDate)
 	if err != nil {
 		return 0, errors.New("invalid date")
+	}
+	if trips.IsDraftTripForDateBounds(startDate, endDate) {
+		return trips.DraftItineraryDayNumberFromDate(selected), nil
+	}
+	start, err := time.Parse("2006-01-02", strings.TrimSpace(startDate))
+	if err != nil {
+		return 0, errors.New("trip start date is invalid")
+	}
+	end, err := time.Parse("2006-01-02", strings.TrimSpace(endDate))
+	if err != nil {
+		return 0, errors.New("trip end date is invalid")
 	}
 	if selected.Before(start) || selected.After(end) {
 		return 0, errors.New("date must be within the trip start and end dates")
@@ -6235,7 +6382,8 @@ func tripPageHeroFields(cover string) (extraClasses string, inlineStyle template
 func tripHeroMapInlineBackground(rawURL string) template.CSS {
 	u := strings.ReplaceAll(rawURL, `\`, `\\`)
 	u = strings.ReplaceAll(u, `"`, `\"`)
-	return template.CSS(fmt.Sprintf(`background-image: linear-gradient(130deg, rgba(0, 32, 70, 0.55), rgba(27, 54, 93, 0.55)), url("%s"); background-size: cover; background-position: center;`, u))
+	// User/URL covers: show the photo without the default-hero dark blue scrim (chip has its own glass styling).
+	return template.CSS(fmt.Sprintf(`background-image: url("%s"); background-size: cover; background-position: center;`, u))
 }
 
 func normalizeTripCoverImageRef(s string) string {

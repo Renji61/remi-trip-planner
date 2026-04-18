@@ -24,6 +24,12 @@ func TestTripDocumentsPageCopy(t *testing.T) {
 	}
 	trip := string(tripB)
 
+	fabB, err := os.ReadFile(filepath.Join(root, "web", "templates", "trip_mobile_fab_links.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fab := string(fabB)
+
 	jsB, err := os.ReadFile(filepath.Join(root, "web", "static", "app.js"))
 	if err != nil {
 		t.Fatal(err)
@@ -58,12 +64,15 @@ func TestTripDocumentsPageCopy(t *testing.T) {
 		}
 	}
 
-	// Trip details: link to documents (flyout / FAB) should remain.
-	if !strings.Contains(trip, `href="/trips/{{.Details.Trip.ID}}/documents"`) {
-		t.Error(`trip.html should link to /documents when UIShowDocuments`)
+	// Trip details FAB uses tripMobileFabLinks; documents shortcut lives there.
+	if !strings.Contains(trip, `template "tripMobileFabLinks"`) {
+		t.Error(`trip.html should embed tripMobileFabLinks for the FAB menu`)
 	}
-	if !strings.Contains(trip, "Trip Documents") {
-		t.Error("trip.html should contain Trip Documents nav label for documents link")
+	if !strings.Contains(fab, `href="/trips/{{$t.ID}}/documents"`) {
+		t.Error(`trip_mobile_fab_links.html should link to /documents when UIShowDocuments`)
+	}
+	if !strings.Contains(fab, "Trip Documents") {
+		t.Error("trip_mobile_fab_links.html should contain Trip Documents label for documents link")
 	}
 
 	// Trip documents upload: single-word submit label in JS (replaces Upload Document / Upload Documents).

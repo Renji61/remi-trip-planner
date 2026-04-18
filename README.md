@@ -57,8 +57,9 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 ### Itinerary & map
 
-- **Day-grouped** stops with titles, locations, notes, optional cost and times.
+- **Day-grouped** stops with titles, locations, notes, optional cost and times; draft trips without a valid start/end window can still plan by calendar date.
 - **Commute / travel legs** between two itinerary items on the **same day** (`item_kind=commute`): transport mode, ordering, sidebar + timeline + calendar, **ICS** feed entries, and optional **Google Maps directions** when both endpoints have coordinates (`POST /trips/{id}/itinerary/commute`).
+- **Day header map shortcut:** open all non-commute places for a day as a single Google Maps route/search in itinerary order.
 - **Per-day descriptions** (labels) editable inline on the trip page.
 - **Interactive map** (Leaflet + OpenStreetMap by default, or **Google Maps** when an API key is set) with markers, optional **day filters**, and travel hints between stops; editing a stop **updates stored coordinates** and map pins after save.
 - **Search** across itinerary text from the trip header.
@@ -72,6 +73,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - **Optimistic concurrency** on many trip-scoped edits: if someone else saved first, the UI can receive **409 Conflict** with a structured error instead of silently overwriting.
 - **Budget summary** on the trip page (budgeted vs spent), including **Total group expense** on mobile and in the desktop sidebar when group expenses are enabled; dedicated expenses subpage with transactions and export.
 - **Quick expense** entry from the trip sidebar (when the expenses section is enabled) via a **unified form** that can post a **personal** expense or, when group expenses are on and the roster allows it, a **group** split in one flow.
+- **Per-day totals** are shown directly in Expenses and Group expenses day headers for faster scanning.
 - Some expenses are **linked** to stay, vehicle, or flight bookings and edited from those flows.
 - **Departed participants** on group expenses keep historical splits and settlements consistent when collaborators leave; labels show **Left trip** where applicable.
 
@@ -90,6 +92,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 - **Categorized** reminder items; mark done/undo; add from the trip page (including multi-item draft list).
 - **Mobile:** **Add to Checklist** appears in the trip **FAB** menu when checklist + sidebar widget visibility allow it (same as trip settings); opens the checklist sheet on the main trip page or via `?open=checklist` from subpages.
+- **Trip FAB flyouts** are shared on trip subpages too (Notes, Expenses, Group expenses, Settings, Trip Documents, Stays, Vehicle Rental, Flights), so add flows no longer require navigating back to the main trip page.
 
 ### Trip page layout & personalization
 
@@ -221,7 +224,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.0` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.1` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 

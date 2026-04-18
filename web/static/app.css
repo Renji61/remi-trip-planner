@@ -216,7 +216,7 @@ html.theme-dark .trip-documents-items .trip-documents-item {
   -webkit-tap-highlight-color: transparent;
 }
 .trip-documents-item-icon-link:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .trip-documents-item-icon-link:hover .trip-documents-item-icon {
@@ -531,7 +531,7 @@ html.theme-dark .trip-documents-selected-files__remove:hover {
   appearance: none;
 }
 .trip-documents-rename-label input[type="text"]:focus {
-  outline: 2px solid color-mix(in srgb, var(--secondary, #2563eb) 55%, transparent);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 1px;
 }
 html.theme-dark .trip-documents-rename-label input[type="text"] {
@@ -998,6 +998,9 @@ html.theme-dark .trip-documents-tag--accent {
   --remi-scrollbar-thumb: rgba(0, 45, 84, 0.3);
   --remi-scrollbar-thumb-hover: rgba(0, 45, 84, 0.6);
   --remi-scrollbar-size: 8px;
+  /* Unified keyboard focus (matches inset ring on form controls). */
+  --remi-focus-ring-color: color-mix(in srgb, var(--primary) 48%, transparent);
+  --remi-focus-ring-inset: inset 0 0 0 2px var(--remi-focus-ring-color);
   color-scheme: light;
 }
 
@@ -1182,7 +1185,7 @@ a.brand:hover {
   background: rgba(122, 241, 252, 0.12);
 }
 a.brand:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 html.theme-dark a.brand:hover {
@@ -1621,7 +1624,7 @@ html.theme-dark .budget-topbar .trip-actions-links .budget-export-form button.se
 }
 a.icon-btn:focus-visible,
 button.icon-btn:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .icon-btn .material-symbols-outlined {
@@ -1714,7 +1717,7 @@ button.trip-desktop-header-profile:active {
 a.trip-desktop-header-btn--icon:focus-visible,
 button.trip-desktop-header-btn--icon:focus-visible,
 button.trip-desktop-header-profile:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .trip-desktop-header-profile-initial {
@@ -1953,20 +1956,14 @@ html.theme-dark .avatar {
     rgba(0, 70, 92, 0.5) 36px
   );
 }
-/* Custom upload / URL: keep photo visible; darken mostly behind left copy for contrast. */
+/* Custom upload / URL: show the photo at full strength (same idea as trip hero has-cover). */
 .dashboard-hero-adventure--custom-bg .dashboard-hero-adventure__backdrop {
   filter: blur(0) brightness(1) saturate(1.08);
   transform: none;
   inset: 0;
 }
 .dashboard-hero-adventure--custom-bg::after {
-  background: linear-gradient(
-    105deg,
-    rgba(0, 18, 42, 0.58) 0%,
-    rgba(0, 18, 42, 0.22) 36%,
-    rgba(0, 28, 52, 0.12) 55%,
-    rgba(0, 32, 56, 0.18) 100%
-  );
+  background: transparent;
 }
 .dashboard-hero-adventure--custom-bg .dashboard-hero-adventure__headline {
   text-shadow: 0 2px 24px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.35);
@@ -2179,6 +2176,9 @@ html.theme-dark .hero-adventure-form .hero-adventure-label input {
   .dashboard-hero-adventure__backdrop {
     filter: blur(12px) brightness(0.42) saturate(1.05);
   }
+  .dashboard-hero-adventure--custom-bg .dashboard-hero-adventure__backdrop {
+    filter: blur(0) brightness(1) saturate(1.08);
+  }
   .dashboard-hero-glass {
     padding: 18px 16px 20px;
   }
@@ -2198,6 +2198,10 @@ html.theme-dark .hero-adventure-form .hero-adventure-label input {
 .hero-map.has-cover {
   background-size: cover;
   background-position: center;
+}
+/* Custom cover: no extra glow/scrim on top of the photo (default hero keeps ::before). */
+.hero-map.has-cover::before {
+  opacity: 0;
 }
 /* Trip page hero: stock photo + muted patterns (same language as dashboard hero) */
 .hero-map.hero-map--default-photo {
@@ -2599,7 +2603,7 @@ html.theme-dark .trip-list-budget-bar-fill--draft {
     outline: none;
   }
   .trip-list-mobile-card-link:focus-visible {
-    outline: 2px solid var(--secondary);
+    outline: 2px solid var(--remi-focus-ring-color);
     outline-offset: 2px;
   }
   .trip-list-mobile-thumb {
@@ -4851,20 +4855,38 @@ input.remi-remove-tab-sync {
   color: var(--primary);
   list-style: none;
 }
-/* Shared row: chevron + left-aligned title (matches expense day headers). */
+/* Shared row: heading icon + title + (optional middle) + trail (map + chevron). Trail uses margin-left: auto to pin map + chevron to the far right. */
 .day-group summary.day-group-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
   justify-content: flex-start;
+  width: 100%;
+  box-sizing: border-box;
 }
-/* Let clicks on flex "gutter" pass through to <summary> so <details> toggles (span would otherwise steal hits). */
+/* Itinerary: middle column grows so trail stays at the row end. */
+.day-group summary.day-group-summary--itinerary .day-group-heading-icon {
+  flex-shrink: 0;
+}
+.day-group summary.day-group-summary--itinerary .day-group-summary-title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* Let clicks on flex "gutter" pass through to <summary> so <details> toggles. */
 .day-group summary.day-group-summary--itinerary .day-label-inline-controls {
   flex: 1 1 220px;
   min-width: 0;
   max-width: 100%;
   pointer-events: none;
+}
+.day-group summary.day-group-summary--itinerary .day-group-summary-note {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.day-group summary.day-group-summary--itinerary .day-group-summary-trail {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 .day-group summary.day-group-summary--itinerary .day-label-inline-controls .day-label-inline-input {
   pointer-events: auto;
@@ -4876,15 +4898,69 @@ input.remi-remove-tab-sync {
   letter-spacing: -0.02em;
   text-transform: capitalize;
 }
+/* Map link in itinerary day header (opens Google Maps with that day’s places). */
+.day-group-map-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 2px;
+  border-radius: 8px;
+  color: var(--primary);
+  text-decoration: none;
+  line-height: 1;
+  pointer-events: auto;
+}
+.day-group-map-link:hover {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+.day-group-map-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  outline-offset: 2px;
+}
+.day-group-map-link .material-symbols-outlined {
+  font-size: 22px;
+  line-height: 1;
+}
+/* Trailing: map (itinerary, when places exist) + expand chevron — right-aligned via grid column or flex + title flex. */
+.day-group-summary-trail {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.day-group-heading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-surface-variant);
+  opacity: 0.92;
+  pointer-events: none;
+}
+.day-group-heading-icon .material-symbols-outlined {
+  font-size: 20px;
+  line-height: 1;
+}
+.day-group summary.day-group-summary:not(.day-group-summary--itinerary) .day-group-heading-icon {
+  flex-shrink: 0;
+}
 .day-group summary.day-group-summary:not(.day-group-summary--itinerary) .day-group-summary-title {
   flex: 1 1 auto;
+  min-width: 0;
+}
+.day-group summary.day-group-summary:not(.day-group-summary--itinerary) .day-group-summary-trail {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .day-group-chevron {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-left: auto;
+  margin-left: 0;
   color: var(--on-surface-variant);
   transition: transform 200ms ease;
 }
@@ -4955,7 +5031,7 @@ input.remi-remove-tab-sync {
   text-underline-offset: 4px;
 }
 .trip-page-section-heading-link:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 3px;
   border-radius: 4px;
 }
@@ -5157,7 +5233,7 @@ html.theme-dark .trip-page-summary-item {
   cursor: pointer;
 }
 .trip-itinerary-week-head > div[data-itinerary-select-date]:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: -2px;
 }
 .trip-itinerary-week-head > div.is-selected {
@@ -6111,7 +6187,7 @@ html.theme-dark .add-stop-card .trip-itinerary-sidebar-card-head h3 {
 }
 
 .trip-map-day-legend-item:focus-visible {
-  outline: 2px solid var(--ring-focus, #2563eb);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 
@@ -6660,7 +6736,7 @@ html.theme-dark .trip-settings-switch-track {
   transform: translateX(20px);
 }
 .trip-settings-switch input:focus-visible + .trip-settings-switch-track {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 
@@ -7454,7 +7530,7 @@ html.theme-dark .budget-mobile-header-btn {
 }
 a.budget-mobile-header-btn:focus-visible,
 button.budget-mobile-header-btn:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .budget-mobile-header-btn .material-symbols-outlined {
@@ -8509,7 +8585,7 @@ html.theme-dark .remi-checklist-check-btn--done {
   cursor: pointer;
 }
 .remi-checklist-item-open-edit:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .remi-checklist-item-text {
@@ -9174,7 +9250,7 @@ html.theme-dark .page-trip-settings .settings-mobile-fab-dock .mobile-fab-btn {
 }
 .page-site-settings .settings-mobile-fab-dock .mobile-fab-btn:focus-visible,
 .page-trip-settings .settings-mobile-fab-dock .mobile-fab-btn:focus-visible {
-  outline: 2px solid var(--primary, #3b6cff);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 3px;
 }
 
@@ -9221,15 +9297,11 @@ html.theme-dark .bottom-nav {
     max-width: none;
     width: 100%;
   }
-  .day-group summary.day-group-summary--itinerary {
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
   .day-group summary.day-group-summary--itinerary .day-label-inline-controls {
-    margin-left: 0;
     flex: 1 1 100%;
     width: 100%;
     max-width: none;
+    margin-top: 6px;
   }
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }
@@ -10307,7 +10379,7 @@ html.theme-dark .auth-page {
   opacity: 0.88;
 }
 .auth-card .auth-inline-link:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 3px;
   border-radius: 4px;
   color: var(--primary);
@@ -10355,7 +10427,7 @@ html.theme-dark .auth-password-toggle:hover {
   color: #e2e8f0;
 }
 .auth-password-toggle:focus-visible {
-  outline: 2px solid var(--secondary, #006970);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .auth-password-toggle .material-symbols-outlined {
@@ -10895,7 +10967,7 @@ html.theme-dark .trip-invite-flash {
     outline: none;
   }
   .mobile-entry-carousel__hint:focus-visible {
-    outline: 2px solid var(--secondary);
+    outline: 2px solid var(--remi-focus-ring-color);
     outline-offset: 2px;
     opacity: 1;
   }
@@ -11001,7 +11073,7 @@ html.theme-dark .trip-mobile-profile-sheet__close.icon-btn {
   opacity: 1;
 }
 .trip-mobile-profile-sheet__close.icon-btn:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .trip-mobile-profile-sheet__nav {
@@ -11138,7 +11210,7 @@ html.theme-dark .trip-map-osm-embed {
   width: 100%;
 }
 .budget-mobile-tx-item.editing {
-  outline: 2px solid var(--primary, #0d9488);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
   border-radius: 12px;
 }
@@ -13892,8 +13964,8 @@ html.theme-dark .tab-percent-input {
   outline: none;
 }
 .tab-percent-input-shell:focus-within {
-  border-color: #0d9488;
-  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.18);
+  border-color: color-mix(in srgb, var(--primary) 55%, rgba(196, 198, 207, 0.28));
+  box-shadow: 0 0 0 2px var(--remi-focus-ring-color);
 }
 .tab-split-bd-amt {
   font-size: 15px;
@@ -13997,8 +14069,8 @@ html.theme-dark .tab-exact-input {
   outline: none;
 }
 .tab-exact-input-shell:focus-within {
-  border-color: #38bdf8;
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+  border-color: color-mix(in srgb, var(--primary) 55%, rgba(196, 198, 207, 0.28));
+  box-shadow: 0 0 0 2px var(--remi-focus-ring-color);
 }
 @media (max-width: 520px) {
   label.tab-split-breakdown-row,
@@ -14510,12 +14582,12 @@ html.theme-dark .tab-exp-filter-search .material-symbols-outlined {
   font-weight: 450;
 }
 .tab-exp-filter-search:focus-within {
-  border-color: var(--brand-navy, #1a2e4c);
-  box-shadow: 0 0 0 2px rgba(26, 46, 76, 0.12);
+  border-color: color-mix(in srgb, var(--primary) 55%, rgba(196, 198, 207, 0.28));
+  box-shadow: 0 0 0 2px var(--remi-focus-ring-color);
 }
 html.theme-dark .tab-exp-filter-search:focus-within {
-  border-color: #38bdf8;
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+  border-color: color-mix(in srgb, var(--primary) 65%, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 0 0 2px var(--remi-focus-ring-color);
 }
 .tab-exp-client-empty {
   margin: 0 0 12px;
@@ -15066,7 +15138,7 @@ html.theme-dark .trip-widget-card-head h3 {
 }
 .remi-date-calendar-btn:focus-visible,
 .remi-time-clock-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--primary) 48%, transparent);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .remi-date-calendar-btn:focus:not(:focus-visible),
@@ -15121,6 +15193,7 @@ html.theme-dark .remi-time-clock-btn:hover {
 }
 .remi-datetime-date-wrap .remi-date-calendar-btn {
   right: 6px;
+  z-index: 3;
 }
 .remi-datetime-time-wrap {
   display: flex;
@@ -15149,8 +15222,90 @@ html.theme-dark .remi-time-clock-btn:hover {
   min-width: 0;
   padding-right: 44px;
 }
+.remi-datetime-desktop-wrap--clearable .remi-datetime-combined-part {
+  padding-right: 88px;
+}
+.remi-datetime-date-wrap--clearable .remi-datetime-date-part {
+  padding-right: 88px;
+}
+.remi-datetime-clear-btn {
+  position: absolute;
+  right: 44px;
+  top: 50%;
+  bottom: auto;
+  margin: 0;
+  z-index: 3;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--trip-resource-input-radius, 9px);
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
+}
+.remi-datetime-desktop-wrap .remi-datetime-clear-btn,
+.remi-datetime-date-wrap .remi-datetime-clear-btn {
+  min-height: 32px;
+  height: 32px;
+}
+.remi-datetime-clear-btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--on-surface) 7%, transparent);
+  color: var(--on-surface);
+}
+.remi-datetime-clear-btn:focus-visible {
+  outline: 2px solid var(--remi-focus-ring-color);
+  outline-offset: 2px;
+}
+.remi-datetime-clear-btn:focus:not(:focus-visible) {
+  outline: none;
+}
+.remi-datetime-clear-btn:active:not(:disabled) {
+  transform: translateY(-50%) scale(0.97);
+}
+.remi-datetime-clear-btn:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.remi-datetime-clear-btn .material-symbols-outlined {
+  font-size: 18px;
+  line-height: 1;
+  display: block;
+}
+html.theme-dark .remi-datetime-clear-btn {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+}
+html.theme-dark .remi-datetime-clear-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+html.theme-dark .remi-datetime-clear-btn:disabled {
+  opacity: 0.28;
+}
 .remi-datetime-desktop-wrap .remi-date-calendar-btn {
   right: 6px;
+  z-index: 3;
+}
+/* Hidden native <input type="date"> used with showPicker() on desktop (not visible in layout). */
+.remi-datetime-native-date {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  opacity: 0;
 }
 .remi-datetime-mobile-parts {
   display: none;
@@ -15241,13 +15396,14 @@ html.theme-dark .remi-date-clear-btn:hover {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
 }
-.remi-date-field .remi-date-visible:focus-visible,
-.remi-time-field .remi-time-visible:focus-visible,
-.remi-datetime-field .remi-datetime-date-part:focus-visible,
-.remi-datetime-field .remi-datetime-time-part:focus-visible,
-.remi-datetime-field .remi-datetime-combined-part:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--primary) 48%, transparent);
-  outline-offset: 1px;
+/* Vehicle drop-off: inset ring on label (radios use outline; see site-wide focus rules at end of file). */
+.vehicle-dropoff-radio:focus-within {
+  outline: none;
+  box-shadow: var(--remi-focus-ring-inset);
+  border-radius: var(--trip-resource-input-radius, 9px);
+}
+.vehicle-dropoff-radio input[type="radio"]:focus-visible {
+  outline: none;
 }
 .remi-time-field {
   display: block;
@@ -17756,7 +17912,7 @@ html.theme-dark .notifications-bell {
   transform: scale(0.98);
 }
 .notifications-bell:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .notifications-bell .material-symbols-outlined {
@@ -18030,7 +18186,7 @@ html.theme-dark .notifications-bell--unread {
   color: var(--on-surface);
 }
 .trip-keep-search-clear-btn:focus-visible {
-  outline: 2px solid var(--secondary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .trip-keep-search-clear-btn .material-symbols-outlined {
@@ -18080,6 +18236,41 @@ html.theme-dark .trip-keep-search-input {
 }
 .trip-keep-notes-checklist-builder {
   min-width: 0;
+}
+/* Same label stack as Add Note (.trip-keep-form .trip-keep-label); beat .remi-trip-widget-form label { display: block } + avoid extra top margin on the date input. */
+.remi-trip-widget-form.trip-keep-notes-checklist-builder label.trip-keep-label.full {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 0;
+}
+.remi-trip-widget-form.trip-keep-notes-checklist-builder .remi-date-field .remi-date-visible.trip-keep-input {
+  margin-top: 0;
+}
+/* Match Add Note tab: same date row (sidebar .form-grid input rules); icon buttons use global .remi-date-field sizing like the note tab. */
+.trip-keep-notes-checklist-builder .remi-date-field .remi-date-visible.trip-keep-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  padding-left: 16px;
+  /* padding-right: set by .remi-date-field--clearable (must not use padding shorthand or it overrides clearable inset). */
+  border-radius: var(--trip-resource-input-radius);
+  border: 1px solid rgba(196, 198, 207, 0.28);
+  background: var(--trip-resource-input-bg);
+  font: inherit;
+  font-size: var(--ds-font-size-body);
+  font-weight: 500;
+  color: var(--on-surface);
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+}
+html.theme-dark .trip-keep-notes-checklist-builder .remi-date-field .remi-date-visible.trip-keep-input {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--trip-resource-input-bg);
+  color: #f1f5f9;
 }
 .trip-keep-composer-tab-panel .trip-keep-composer-hint {
   margin: 0 0 var(--ds-space-2);
@@ -18139,6 +18330,35 @@ html.theme-dark .trip-keep-search-input {
 }
 .trip-keep-form .remi-date-field--clearable .remi-date-visible.trip-keep-input {
   padding-right: 86px;
+}
+/* Tabbed composer: calendar right:8 (36px wide); clear abuts at right:44; 78px text inset. Overrides must follow padding shorthands above. */
+.trip-keep-composer-card--tabbed .remi-date-field {
+  direction: ltr;
+}
+.trip-keep-composer-card--tabbed .remi-date-field .remi-date-calendar-btn {
+  right: 8px;
+  left: auto;
+  z-index: 2;
+}
+.trip-keep-composer-card--tabbed .remi-date-field .remi-date-clear-btn {
+  right: 44px;
+  left: auto;
+  z-index: 3;
+  box-sizing: border-box;
+  width: 32px;
+  min-width: 32px;
+  max-width: 32px;
+  padding: 0;
+}
+/* Text/mobile: room for calendar (36px at right:8) + clear (32px) — 76px total strip, no extra slack. */
+.trip-keep-composer-card--tabbed .trip-keep-form .remi-date-field--clearable .remi-date-visible.trip-keep-input,
+.trip-keep-composer-card--tabbed .trip-keep-notes-checklist-builder .remi-date-field--clearable .remi-date-visible.trip-keep-input {
+  padding-right: 76px;
+}
+/* Desktop: JS uses native date; calendar button hidden — do not reserve twin-icon padding (fixes large gap right of clear). */
+.trip-keep-composer-card--tabbed .trip-keep-form .remi-date-field--clearable .remi-date-visible.trip-keep-input[type="date"],
+.trip-keep-composer-card--tabbed .trip-keep-notes-checklist-builder .remi-date-field--clearable .remi-date-visible.trip-keep-input[type="date"] {
+  padding-right: 12px;
 }
 .trip-keep-form textarea.trip-keep-textarea {
   resize: vertical;
@@ -18576,7 +18796,7 @@ html.theme-dark .trip-keep-card--color-pearl {
 }
 .trip-keep-color-swatch:focus-within .trip-keep-color-swatch-face {
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent),
+    0 0 0 2px var(--remi-focus-ring-color),
     inset 0 0 0 1px color-mix(in srgb, var(--on-surface) 10%, transparent);
 }
 .trip-keep-color-swatch:has(.trip-keep-color-swatch-input:checked):focus-within .trip-keep-color-swatch-face {
@@ -18719,7 +18939,7 @@ html.theme-dark .trip-keep-color-swatch--pearl .trip-keep-color-swatch-face {
   transform: scale(0.94);
 }
 .trip-keep-title-icon-btn:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .trip-keep-title-icon-btn .material-symbols-outlined {
@@ -19257,6 +19477,38 @@ html.theme-dark .first-trip-setup__sidebar-title {
 .first-trip-setup__dots span.is-active {
   background: var(--brand-navy, #1a2e4c);
 }
+html.theme-dark .first-trip-setup__eyebrow {
+  color: color-mix(in srgb, var(--secondary) 82%, #ecfeff 18%);
+}
+html.theme-dark .first-trip-setup__progress-meta {
+  color: var(--on-surface-variant);
+}
+html.theme-dark .first-trip-setup__progress-bar {
+  background: color-mix(in srgb, var(--on-surface) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--outline) 45%, transparent);
+}
+html.theme-dark .first-trip-setup__progress-bar span {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--primary) 92%, #fff 8%),
+    var(--primary)
+  );
+  box-shadow: 0 0 10px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+html.theme-dark .first-trip-setup__dots span {
+  background: color-mix(in srgb, var(--on-surface-variant) 55%, transparent);
+}
+html.theme-dark .first-trip-setup__dots span.is-active {
+  background: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+html.theme-dark .first-trip-setup__segbar span {
+  background: color-mix(in srgb, var(--on-surface-variant) 48%, transparent);
+}
+html.theme-dark .first-trip-setup__segbar span.is-on {
+  background: var(--primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--primary) 32%, transparent);
+}
 .first-trip-setup__main {
   padding: 20px 20px 0;
   min-height: 0;
@@ -19264,9 +19516,6 @@ html.theme-dark .first-trip-setup__sidebar-title {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-html.theme-dark .first-trip-setup__main {
-  background: var(--surface);
 }
 @media (min-width: 900px) {
   .first-trip-setup__main {
@@ -19340,10 +19589,16 @@ html.theme-dark .first-trip-setup__logo {
   overscroll-behavior: contain;
 }
 .first-trip-setup__step > .first-trip-setup__card {
-  background: transparent;
-  border: none;
+  margin-top: 4px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--outline, #94a3b8) 14%, transparent);
+  background: color-mix(in srgb, var(--surface-low, #f2f4f6) 38%, transparent);
   box-shadow: none;
-  padding: 0;
+}
+html.theme-dark .first-trip-setup__step > .first-trip-setup__card {
+  border-color: color-mix(in srgb, var(--outline) 22%, transparent);
+  background: color-mix(in srgb, var(--on-surface) 5.5%, transparent);
 }
 .first-trip-setup__step--hidden {
   display: none !important;
@@ -19376,8 +19631,11 @@ html.theme-dark .first-trip-setup__card {
   border-color: color-mix(in srgb, var(--outline) 45%, transparent);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
 }
-.first-trip-setup__card--compact {
+/* Formats block on “Choose your tools”: must beat `.first-trip-setup__step > .first-trip-setup__card`
+   (otherwise margin-top collapses to 4px and padding makes the gap feel huge vs Trip sections). */
+.first-trip-setup__step > .first-trip-setup__card.first-trip-setup__card--compact {
   margin-top: 16px;
+  padding-top: 14px;
 }
 .first-trip-setup__card-title {
   margin: 0 0 14px;
@@ -19413,15 +19671,26 @@ html.theme-dark .first-trip-setup__label {
   border: 1px solid rgba(148, 163, 184, 0.45);
   padding: 10px 12px;
   font: inherit;
-  background: #fff;
+  /* background-color only: `background` shorthand resets repeat/position and loses
+     specificity fights with `html.theme-dark form select` (chevron SVG tiles). */
+  background-color: #fff;
 }
 html.theme-dark .first-trip-setup__field input[type="text"],
 html.theme-dark .first-trip-setup__field input[type="date"],
 html.theme-dark .first-trip-setup__field textarea,
 html.theme-dark .first-trip-setup__field select {
-  background: var(--trip-resource-input-bg);
+  background-color: var(--trip-resource-input-bg);
   border-color: color-mix(in srgb, var(--outline) 55%, transparent);
   color: var(--on-surface);
+}
+/* Defeat `html.theme-dark form select` (0,3,3) overriding only background-image while another
+   rule’s `background` shorthand reset background-repeat to `repeat` (tiled chevrons). */
+.first-trip-setup form select:not([multiple]):not([size]),
+html.theme-dark .first-trip-setup form select:not([multiple]):not([size]) {
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 14px 14px;
+  padding-right: 44px;
 }
 .first-trip-setup__two {
   display: grid;
@@ -19496,6 +19765,9 @@ html.theme-dark .first-trip-setup__callout {
   font-size: 22px;
   color: var(--brand-navy, #1a2e4c);
 }
+html.theme-dark .first-trip-setup__callout-icon {
+  color: var(--primary);
+}
 .first-trip-setup__callout p {
   margin: 4px 0 0;
 }
@@ -19505,13 +19777,13 @@ html.theme-dark .first-trip-setup__callout {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #0d9488;
-  margin: 8px 0 10px;
+  margin: 0 0 12px;
 }
 .first-trip-setup__mode-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 .first-trip-setup__mode-card {
   position: relative;
@@ -19571,7 +19843,7 @@ html.theme-dark .first-trip-setup__mode-title {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 16px;
 }
 .first-trip-setup__sections-title {
   margin: 0;
@@ -19682,7 +19954,7 @@ html.theme-dark .first-trip-setup__toggle-title {
   transform: translateX(18px);
 }
 .first-trip-setup__switch input:focus-visible + .first-trip-setup__switch-ui {
-  outline: 2px solid #38bdf8;
+  outline: 2px solid var(--remi-focus-ring-color);
   outline-offset: 2px;
 }
 .first-trip-setup__footer {
@@ -19691,12 +19963,30 @@ html.theme-dark .first-trip-setup__toggle-title {
   gap: 10px;
   flex-shrink: 0;
   padding: 16px 20px 20px;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(248, 250, 252, 0.95);
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  /* Same shell as `__main` — avoids a second surface band vs the frame. */
+  background: transparent;
+}
+@media (min-width: 900px) {
+  .first-trip-setup__footer {
+    padding: 16px 32px 24px;
+  }
 }
 html.theme-dark .first-trip-setup__footer {
-  background: var(--surface-low);
-  border-top-color: color-mix(in srgb, var(--outline) 40%, transparent);
+  background: transparent;
+  border-top-color: color-mix(in srgb, var(--outline) 26%, transparent);
+}
+html.theme-dark .first-trip-setup__footer .secondary-btn {
+  background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+  border-color: color-mix(in srgb, var(--outline) 58%, transparent);
+  color: var(--on-surface);
+}
+html.theme-dark .first-trip-setup__footer .secondary-btn:hover {
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+  border-color: color-mix(in srgb, var(--outline) 78%, transparent);
+}
+html.theme-dark .first-trip-setup__footer .secondary-btn:active {
+  background: color-mix(in srgb, var(--on-surface) 6%, transparent);
 }
 .first-trip-setup__next-hint {
   margin: 0;
@@ -19735,7 +20025,16 @@ html.theme-dark .first-trip-setup__footer {
 }
 .first-trip-setup__skip {
   font-size: 0.9rem;
-  color: #64748b !important;
+  color: #64748b;
+}
+.first-trip-setup__skip:hover {
+  color: #334155;
+}
+html.theme-dark .first-trip-setup__skip {
+  color: var(--on-surface-variant);
+}
+html.theme-dark .first-trip-setup__skip:hover {
+  color: var(--on-surface);
 }
 
 body.first-trip-setup-lock {
@@ -19774,10 +20073,10 @@ body.first-trip-setup-lock {
   border: 1px solid rgba(148, 163, 184, 0.45);
   padding: 10px 12px;
   font: inherit;
-  background: #fff;
+  background-color: #fff;
 }
 html.theme-dark .first-trip-setup__currency-other-block .first-trip-setup__currency-custom-label input[type="text"] {
-  background: var(--trip-resource-input-bg);
+  background-color: var(--trip-resource-input-bg);
   border-color: color-mix(in srgb, var(--outline) 55%, transparent);
   color: var(--on-surface);
 }
@@ -19805,10 +20104,14 @@ html.theme-dark .first-trip-setup__cover-drop {
   background: color-mix(in srgb, var(--surface-high) 82%, var(--surface) 18%);
   border-color: color-mix(in srgb, var(--outline) 50%, transparent);
 }
-.first-trip-setup__cover-drop:hover,
-.first-trip-setup__cover-drop:focus-visible {
+.first-trip-setup__cover-drop:hover {
   border-color: #0d9488;
   outline: none;
+}
+.first-trip-setup__cover-drop:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--primary) 55%, rgba(148, 163, 184, 0.65));
+  box-shadow: var(--remi-focus-ring-inset);
 }
 .first-trip-setup__cover-drop.is-dragover {
   border-color: #0f766e;
@@ -19925,5 +20228,42 @@ html.theme-dark .first-trip-setup__cover-preset--noise {
 .first-trip-setup__cover-clear {
   align-self: center;
   margin-top: 4px;
+}
+
+/* =============================================================================
+   Site-wide :focus-visible — primary ring (--remi-focus-ring-* on :root).
+   Inset on text-like controls avoids clipping in overflow-x:hidden scrollers.
+   Component-specific rules above may override shape/offset; color stays aligned.
+   ============================================================================= */
+input:focus-visible:not([type="hidden"]):not([type="range"]):not([type="color"]):not([type="checkbox"]):not([type="radio"]),
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--remi-focus-ring-inset);
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 2px solid var(--remi-focus-ring-color);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+input[type="file"]:focus-visible::file-selector-button,
+input[type="file"]:focus-visible::-webkit-file-upload-button {
+  outline: none;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--remi-focus-ring-color);
+  outline-offset: 2px;
+}
+summary:focus-visible {
+  outline: 2px solid var(--remi-focus-ring-color);
+  outline-offset: 2px;
+}
+/* Custom switches: ring is on the faux track/UI (see adjacent + sibling rules). */
+.trip-settings-switch input:focus-visible,
+.first-trip-setup__switch input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }
 

@@ -1,23 +1,31 @@
 package httpapp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestItineraryNotesDisplay(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"", ""},
-		{"Hello", "Hello"},
-		{"Attachment: /static/uploads/bookings/x.png", ""},
-		{"  Attachment: /static/x.png  ", ""},
-		{"Notes here | Attachment: /static/uploads/a.pdf", "Notes here"},
-		{"Booking: ABC | Attachment: /static/x.png", "Booking: ABC"},
-		{"A | B | Attachment: /y.png", "A | B"},
-		{"Line1\nAttachment: /z.png", "Line1"},
+func TestGoogleMapsMultiPlaceURL(t *testing.T) {
+	t.Parallel()
+	if got := googleMapsMultiPlaceURL(nil); got != "" {
+		t.Fatalf("empty: got %q", got)
 	}
-	for _, tc := range tests {
-		if got := itineraryNotesDisplay(tc.in); got != tc.want {
-			t.Errorf("itineraryNotesDisplay(%q) = %q; want %q", tc.in, got, tc.want)
-		}
+	if got := googleMapsMultiPlaceURL([]string{"", "  "}); got != "" {
+		t.Fatalf("all blank: got %q", got)
+	}
+	one := googleMapsMultiPlaceURL([]string{"40.7128,-74.006"})
+	if !strings.Contains(one, "google.com/maps/search") || !strings.Contains(one, "40.7128") {
+		t.Fatalf("single coords: %q", one)
+	}
+	oneText := googleMapsMultiPlaceURL([]string{"Seattle, WA"})
+	if !strings.Contains(oneText, "google.com/maps/search") || !strings.Contains(oneText, "Seattle") {
+		t.Fatalf("single text: %q", oneText)
+	}
+	multi := googleMapsMultiPlaceURL([]string{"40.7,-74.0", "34.0,-118.2"})
+	if !strings.HasPrefix(multi, "https://www.google.com/maps/dir/") {
+		t.Fatalf("multi prefix: %q", multi)
+	}
+	if !strings.Contains(multi, "40.7%2C-74") && !strings.Contains(multi, "40.7,-74") {
+		t.Fatalf("multi should contain first waypoint: %q", multi)
 	}
 }
