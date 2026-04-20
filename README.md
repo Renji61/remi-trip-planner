@@ -37,7 +37,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 | Layer | Technology |
 |--------|------------|
 | Language & HTTP | Go 1.25, [chi](https://github.com/go-chi/chi) router |
-| UI | HTML templates, [HTMX](https://htmx.org/) for partial updates and forms |
+| UI | HTML templates, [HTMX](https://htmx.org/) for partial updates and forms (bundled min script under `web/static/vendor/`, not loaded from a public CDN) |
 | Data | SQLite ([modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)), WAL mode |
 | Maps | [Leaflet](https://leafletjs.com/) + OpenStreetMap / Nominatim (optional geocoding) |
 | Container | Multi-stage Dockerfile, Alpine runtime |
@@ -93,6 +93,11 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - **Categorized** reminder items; mark done/undo; add from the trip page (including multi-item draft list).
 - **Mobile:** **Add to Checklist** appears in the trip **FAB** menu when checklist + sidebar widget visibility allow it (same as trip settings); opens the checklist sheet on the main trip page or via `?open=checklist` from subpages.
 - **Trip FAB flyouts** are shared on trip subpages too (Notes, Expenses, Group expenses, Settings, Trip Documents, Stays, Vehicle Rental, Flights), so add flows no longer require navigating back to the main trip page.
+
+### Notes & Checklists (account library)
+
+- **Notes & Checklists** at **`/notes-checklists`**: account-wide **notes** and **checklist templates** with search, archive, and trash — reusable across trips.
+- **Import into a trip** from **Trip Notes** via **`/trips/{id}/notes/import`**: pick global notes and templates to copy into that trip; the server tracks what was already imported per trip.
 
 ### Trip page layout & personalization
 
@@ -224,7 +229,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.1` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.2` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 
@@ -272,7 +277,7 @@ CI: **[.github/workflows/docker-publish.yml](.github/workflows/docker-publish.ym
 ## Development
 
 - **Templates:** `web/templates/*.html` — parsed together; shared fragments live in `partials.html` where used.
-- **Front-end:** `web/static/app.css`, `app.js`; bump `?v=` on `app.css` in templates when you need cache busts.
+- **Front-end:** `web/static/app.css`, `app.js`, and vendored **`htmx-1.9.12.min.js`**; bump **`RemiStaticAssetVersion`** in **`internal/httpapp/static_asset_version.go`** so templates’ **`{{remiStaticAssetV}}`** query strings refresh browser caches.
 - **Migrations:** new installs run `migrations/001_init.sql`; existing DBs get additive `ALTER TABLE` statements in `internal/storage/sqlite/db.go`.
 - **CI:** copy [docs/github-actions-ci.yml](docs/github-actions-ci.yml) to `.github/workflows/ci.yml` and push (use a Git credential with the **`workflow`** scope if GitHub rejects OAuth pushes to workflow files).
 

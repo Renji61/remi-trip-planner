@@ -10,6 +10,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.50.2] - 2026-04-20
+
+### Added
+
+- **Notes & Checklists (account library):** dashboard page **`/notes-checklists`** for per-user **notes** (title, body, color) and **checklist templates** (category and lines), with **search**, **archive**, and **trash** views and small intent POSTs for edit, pin, archive, trash, and delete.
+- **Import into trip:** from Trip Notes, **`GET` / `POST` `/trips/{id}/notes/import`** lists global library items, copies selected notes and templates into the trip, and records **`trip_global_keep_imports`** so repeat imports are obvious.
+- **Dashboard navigation:** sidebar and mobile bottom bar link to **Notes & Checklists** alongside home, profile, and settings.
+- **First-trip setup:** when the checklist section is enabled, the wizard can reference the global library (create templates from the dashboard) with matching **app.js** step behavior.
+- **Vendored HTMX:** ship **htmx 1.9.12** at **`/static/vendor/htmx-1.9.12.min.js`** so pages that use HTMX do not load script from a third-party CDN.
+
+### Changed
+
+- **Unified static cache busting:** HTML templates use **`{{remiStaticAssetV}}`**, backed by **`RemiStaticAssetVersion`** in **`internal/httpapp/static_asset_version.go`**, instead of scattered hardcoded **`?v=`** query strings for **`app.css`**, **`app.js`**, and vendored scripts.
+- **Home dashboard shell:** the home page uses **`mergeDashboardShell`** so in-progress trip shortcuts, notification count, and nav match other dashboard pages.
+- **Geocoding and maps:** refinements to geocode fallbacks, optional location handling, maps URL construction, and API response caching; itinerary UI can show a one-line **venue hours** summary when a saved JSON snapshot includes it.
+- **Trip layout templates:** FAB flyouts extracted to **`trip_fab_flyouts.html`**, slimmer **`trip.html`**, shared **datetime** partials that respect draft vs dated trip bounds, and related **ICS** / **sync** touch-ups.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.50.2`** (and the **GHCR** image tag **`v1.50.2`** when CI builds) so **About** and **`GET /api/about/update-check`** report an update for installs on **1.50.1** or older.
+
 ## [1.50.1] - 2026-04-18
 
 ### Added
@@ -419,7 +440,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.1...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.2...HEAD
+[1.50.2]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.1...v1.50.2
 [1.50.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.0...v1.50.1
 [1.50.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.4...v1.50.0
 [1.49.4]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.3...v1.49.4

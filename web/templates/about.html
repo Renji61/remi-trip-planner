@@ -83,6 +83,9 @@
             <li>Record accommodations, vehicle rentals, and flights with details and attachments; saves that touch itinerary lines use <strong>atomic transactions</strong> so linked data does not end up half-updated.</li>
             <li>Open <strong>Trip Documents</strong> from the trip sidebar to upload files, search and filter every attachment in one place (including documents from stays, rentals, flights, and group expenses), with a configurable max file size in app settings and upload checks for safer file types.</li>
             <li>Use reminder checklists so nothing important is forgotten, with shared mobile quick-add flyouts available from trip pages and subpages (notes, flights, stays, rentals, documents, expenses, group expenses, and settings).</li>
+            <li>Maintain a personal <strong>Notes &amp; Checklists</strong> library on the dashboard (<code>/notes-checklists</code>): reusable notes and checklist templates with search, archive, and trash.</li>
+            <li><strong>Import</strong> selected library items into a trip from <strong>Trip Notes</strong> (<code>/trips/…/notes/import</code>); the app remembers what was already imported so you can add templates once and reuse them across trips.</li>
+            <li>Pages that use <strong>HTMX</strong> load a <strong>vendored</strong> script from this install (not a third-party CDN); shared <strong>app.css</strong> and <strong>app.js</strong> use one built-in version query so browsers pick up updates together.</li>
             <li>Customize each trip: which sections appear, labels, layout order, 12h/24h clock, and DD/MM/YYYY or MM/DD/YYYY date display.</li>
             <li>Add custom links in the trip sidebar for quick references.</li>
             <li>Stay in sync while a trip is open: the app can use a <strong>live event stream</strong> of changes so lists and panels refresh without reloading the whole page.</li>
