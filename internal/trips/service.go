@@ -115,12 +115,21 @@ type ItineraryItem struct {
 	EnforceOptimisticLock bool
 	// ItemKind is stop (default) or commute.
 	ItemKind string
-	// CommuteFromItemID / CommuteToItemID: neighbor itinerary rows (same day); may be empty if orphaned.
+	// CommuteFromItemID / CommuteToItemID: linked itinerary rows (To may be on a later trip day than From).
+	// The commute row's DayNumber is always the From item's day for list/calendar placement.
 	CommuteFromItemID string
 	CommuteToItemID   string
-	TransportMode     string
+	// CommuteEndDayOffset: for commute rows only — calendar days after the itinerary row's resolved start date when end_time occurs (0 = same calendar day as start).
+	CommuteEndDayOffset int
+	TransportMode       string
 	// SortOrder defines list/calendar order within a day (larger gaps allow inserts without rebalance).
 	SortOrder int
+	// GooglePlaceID is set when the stop location was chosen from Google Places (empty for OSM-only / manual).
+	GooglePlaceID string
+	// VenueHoursJSON stores a snapshot of venue hours for the stop date (JSON) for offline itinerary display.
+	VenueHoursJSON string
+	// TimeNeeded is optional free text (e.g. "2 hours") for how long the stop takes.
+	TimeNeeded string
 }
 
 type Expense struct {
@@ -562,6 +571,24 @@ type Repository interface {
 	GetCalendarFeedTokenHash(ctx context.Context, tripID string) (hash string, ok bool, err error)
 	UpsertCalendarFeedToken(ctx context.Context, tripID, tokenHash, createdByUserID string) error
 	DeleteCalendarFeedToken(ctx context.Context, tripID string) error
+
+	ListGlobalKeepNotesByUser(ctx context.Context, userID string) ([]GlobalKeepNote, error)
+	ListGlobalKeepNotesForKeepView(ctx context.Context, userID, view string) ([]GlobalKeepNote, error)
+	AddGlobalKeepNote(ctx context.Context, n GlobalKeepNote) error
+	UpdateGlobalKeepNote(ctx context.Context, n GlobalKeepNote) error
+	DeleteGlobalKeepNote(ctx context.Context, userID, noteID string) error
+	GetGlobalKeepNote(ctx context.Context, userID, noteID string) (GlobalKeepNote, error)
+
+	ListGlobalChecklistTemplatesByUser(ctx context.Context, userID string) ([]GlobalChecklistTemplate, error)
+	ListGlobalChecklistTemplatesForKeepView(ctx context.Context, userID, view string) ([]GlobalChecklistTemplate, error)
+	AddGlobalChecklistTemplate(ctx context.Context, t GlobalChecklistTemplate, lines []string) error
+	UpdateGlobalChecklistTemplate(ctx context.Context, t GlobalChecklistTemplate) error
+	DeleteGlobalChecklistTemplate(ctx context.Context, userID, templateID string) error
+	GetGlobalChecklistTemplate(ctx context.Context, userID, templateID string) (GlobalChecklistTemplate, error)
+
+	IsGlobalKeepImported(ctx context.Context, tripID string, kind GlobalKeepImportKind, globalID string) (bool, error)
+	RecordGlobalKeepImport(ctx context.Context, tripID string, kind GlobalKeepImportKind, globalID string) error
+	ListGlobalKeepImportedIDs(ctx context.Context, tripID string, kind GlobalKeepImportKind) ([]string, error)
 }
 
 type Service struct {
@@ -965,14 +992,14 @@ func (s *Service) AddItineraryItem(ctx context.Context, item ItineraryItem) erro
 	return s.repo.AddItineraryItem(ctx, item)
 }
 
-// AddItineraryCommute inserts a first-class commute row between two same-day itinerary items (any kind).
+// AddItineraryCommute inserts a first-class commute row between two itinerary items (any kind).
 //
 // Validation rules (also enforced on commute updates where applicable):
-//   - fromID and toID must exist on the trip and share the same day_number as each other.
+//   - fromID and toID must exist on the trip; To may be on a different trip day than From (overnight / multi-day travel).
 //   - No second commute row with the same (fromID, toID) pair on the trip.
 //   - Title may be empty: default "{from title} → {to title}", optionally prefixed with transport_mode + ": ".
 //   - Lat/lng/location/image are cleared for commute rows (no extra map pin).
-//   - sort_order is placed strictly between the two neighbors; rebalance the day if integer gaps are exhausted.
+//   - DayNumber is always From's day; sort_order is between From and To on that day when same-day, else immediately after From on From's day.
 func (s *Service) AddItineraryCommute(ctx context.Context, fromID, toID string, item ItineraryItem) error {
 	fromID, toID = strings.TrimSpace(fromID), strings.TrimSpace(toID)
 	if item.TripID == "" {
@@ -1008,9 +1035,6 @@ func (s *Service) AddItineraryCommute(ctx context.Context, fromID, toID string, 
 	if !ok1 || !ok2 {
 		return errors.New("one or both linked items are missing from this trip")
 	}
-	if fromIt.DayNumber != toIt.DayNumber {
-		return errors.New("commute must stay on the same day as both linked items")
-	}
 	item.Title = strings.TrimSpace(item.Title)
 	if item.Title == "" {
 		t1, t2 := strings.TrimSpace(fromIt.Title), strings.TrimSpace(toIt.Title)
@@ -1040,7 +1064,12 @@ func (s *Service) AddItineraryCommute(ctx context.Context, fromID, toID string, 
 	item.Latitude, item.Longitude = 0, 0
 	item.Location = ""
 	item.ImagePath = ""
-	sortOrder, err := s.computeSortOrderBetween(ctx, item.TripID, item.DayNumber, fromID, toID)
+	var sortOrder int
+	if fromIt.DayNumber == toIt.DayNumber {
+		sortOrder, err = s.computeSortOrderBetween(ctx, item.TripID, item.DayNumber, fromID, toID)
+	} else {
+		sortOrder, err = s.computeSortOrderAfterFromOnDay(ctx, item.TripID, item.DayNumber, fromID, "")
+	}
 	if err != nil {
 		return err
 	}
@@ -1090,6 +1119,61 @@ func (s *Service) computeSortOrderBetween(ctx context.Context, tripID string, da
 	return 0, errors.New("unable to place commute between those items; try reordering the day")
 }
 
+// computeSortOrderAfterFromOnDay picks a sort_order on trip day `day` immediately after itinerary item fromID.
+// excludeItemID skips that row when scanning (used when relocating an existing commute on update).
+func (s *Service) computeSortOrderAfterFromOnDay(ctx context.Context, tripID string, day int, fromID, excludeItemID string) (int, error) {
+	for attempt := 0; attempt < 4; attempt++ {
+		items, err := s.repo.ListItineraryItems(ctx, tripID)
+		if err != nil {
+			return 0, err
+		}
+		var fromSo int
+		var haveFrom bool
+		var minAfter *int
+		for _, it := range items {
+			if it.DayNumber != day {
+				continue
+			}
+			if it.ID == fromID {
+				fromSo = it.SortOrder
+				haveFrom = true
+				continue
+			}
+			if excludeItemID != "" && it.ID == excludeItemID {
+				continue
+			}
+			if it.SortOrder > fromSo {
+				if minAfter == nil || it.SortOrder < *minAfter {
+					v := it.SortOrder
+					minAfter = &v
+				}
+			}
+		}
+		if !haveFrom {
+			return 0, errors.New("linked from item not found for this day")
+		}
+		if minAfter == nil {
+			next, err := s.repo.NextItinerarySortOrder(ctx, tripID, day)
+			if err != nil {
+				return 0, err
+			}
+			if next > fromSo {
+				return next, nil
+			}
+			return fromSo + 100000, nil
+		}
+		mid := (fromSo + *minAfter) / 2
+		if mid <= fromSo || mid >= *minAfter {
+			if err := s.repo.RebalanceItineraryDaySortOrders(ctx, tripID, day); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		return mid, nil
+	}
+	return 0, errors.New("unable to place commute after from item; try reordering the day")
+}
+
 // SyncLodgingItinerary keeps itinerary check-in/out rows in sync with a lodging entry: it removes
 // stray duplicate hotel lines, recreates the pair when IDs are missing or stale, and returns
 // lodging with CheckInItineraryID / CheckOutItineraryID set for persistence.
@@ -1106,6 +1190,10 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 	items, err := s.repo.ListItineraryItems(ctx, lodging.TripID)
 	if err != nil {
 		return lodging, err
+	}
+	priorItemByID := make(map[string]ItineraryItem, len(items))
+	for _, it := range items {
+		priorItemByID[it.ID] = it
 	}
 	exists := make(map[string]struct{}, len(items))
 	for _, it := range items {
@@ -1179,6 +1267,11 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 		StartTime: checkInTime,
 		EndTime:   checkInTime,
 	}
+	if ciID != "" {
+		if p, ok := priorItemByID[ciID]; ok {
+			checkInItem.TimeNeeded = p.TimeNeeded
+		}
+	}
 	SetItineraryEstCostCents(&checkInItem, lodging.CostCents)
 	checkOutItem := ItineraryItem{
 		ID:        coID,
@@ -1191,6 +1284,11 @@ func (s *Service) SyncLodgingItinerary(ctx context.Context, trip Trip, lodging L
 		Notes:     checkOutNotes,
 		StartTime: checkOutTime,
 		EndTime:   checkOutTime,
+	}
+	if coID != "" {
+		if p, ok := priorItemByID[coID]; ok {
+			checkOutItem.TimeNeeded = p.TimeNeeded
+		}
 	}
 	SetItineraryEstCostCents(&checkOutItem, lodging.CostCents)
 
@@ -1383,6 +1481,7 @@ func (s *Service) UpdateItineraryItem(ctx context.Context, item ItineraryItem) e
 		item.ItemKind = ItineraryItemKindStop
 		item.CommuteFromItemID = ""
 		item.CommuteToItemID = ""
+		item.CommuteEndDayOffset = 0
 		item.TransportMode = ""
 		item.SortOrder = prior.SortOrder
 		if prior.DayNumber != item.DayNumber {
@@ -1420,6 +1519,15 @@ func (s *Service) UpdateItineraryItem(ctx context.Context, item ItineraryItem) e
 func (s *Service) applyCommuteItineraryUpdate(ctx context.Context, items []ItineraryItem, prior ItineraryItem, item *ItineraryItem) error {
 	fromID := strings.TrimSpace(item.CommuteFromItemID)
 	toID := strings.TrimSpace(item.CommuteToItemID)
+	byID := make(map[string]ItineraryItem, len(items))
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+	if fromID != "" {
+		if f, ok := byID[fromID]; ok {
+			item.DayNumber = f.DayNumber
+		}
+	}
 	if fromID != "" && toID != "" {
 		if fromID == toID {
 			return errors.New("commute needs two different itinerary items")
@@ -1440,16 +1548,30 @@ func (s *Service) applyCommuteItineraryUpdate(ctx context.Context, items []Itine
 	item.Latitude, item.Longitude = 0, 0
 	item.Location = ""
 	item.ImagePath = ""
+	item.TimeNeeded = prior.TimeNeeded
 	item.SortOrder = prior.SortOrder
-	if prior.DayNumber != item.DayNumber {
-		so, err := s.repo.NextItinerarySortOrder(ctx, item.TripID, item.DayNumber)
+	if item.CommuteEndDayOffset < 0 {
+		return errors.New("invalid commute end date")
+	}
+	if fromID != "" && toID != "" && (fromID != prior.CommuteFromItemID || toID != prior.CommuteToItemID || prior.DayNumber != item.DayNumber) {
+		fromIt, ok1 := byID[fromID]
+		toIt, ok2 := byID[toID]
+		if !ok1 || !ok2 {
+			return errors.New("linked itinerary item not found")
+		}
+		var so int
+		var err error
+		if fromIt.DayNumber == toIt.DayNumber {
+			so, err = s.computeSortOrderBetween(ctx, item.TripID, item.DayNumber, fromID, toID)
+		} else {
+			so, err = s.computeSortOrderAfterFromOnDay(ctx, item.TripID, item.DayNumber, fromID, prior.ID)
+		}
 		if err != nil {
 			return err
 		}
 		item.SortOrder = so
-	}
-	if fromID != "" && toID != "" && (fromID != prior.CommuteFromItemID || toID != prior.CommuteToItemID || prior.DayNumber != item.DayNumber) {
-		so, err := s.computeSortOrderBetween(ctx, item.TripID, item.DayNumber, fromID, toID)
+	} else if prior.DayNumber != item.DayNumber {
+		so, err := s.repo.NextItinerarySortOrder(ctx, item.TripID, item.DayNumber)
 		if err != nil {
 			return err
 		}
@@ -1471,8 +1593,8 @@ func (s *Service) validateCommuteEndpoints(items []ItineraryItem, fromID, toID, 
 	if f.TripID != tripID || t.TripID != tripID {
 		return errors.New("linked items must belong to this trip")
 	}
-	if f.DayNumber != day || t.DayNumber != day {
-		return errors.New("commute must use items on the same day as this commute row")
+	if f.DayNumber != day {
+		return errors.New("commute must be listed on the same trip day as its From item")
 	}
 	return nil
 }

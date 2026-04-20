@@ -246,9 +246,9 @@ func (r *Repository) AddItineraryItem(ctx context.Context, item trips.ItineraryI
 	now := time.Now().UTC()
 	_, err := r.execContext(ctx, `
 		INSERT INTO itinerary_items
-		(id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost, est_cost_cents, start_time, end_time, item_kind, commute_from_item_id, commute_to_item_id, transport_mode, sort_order, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.TripID, item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.TransportMode, item.SortOrder, now, now,
+		(id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost, est_cost_cents, start_time, end_time, item_kind, commute_from_item_id, commute_to_item_id, commute_end_day_offset, transport_mode, sort_order, google_place_id, venue_hours_json, time_needed, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.TripID, item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.CommuteEndDayOffset, item.TransportMode, item.SortOrder, item.GooglePlaceID, item.VenueHoursJSON, item.TimeNeeded, now, now,
 	)
 	if err == nil {
 		item.CreatedAt = now
@@ -277,17 +277,17 @@ func (r *Repository) UpdateItineraryItem(ctx context.Context, item trips.Itinera
 	if item.EnforceOptimisticLock {
 		res, err = r.execContext(ctx, `
 			UPDATE itinerary_items
-			SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, est_cost_cents = ?, start_time = ?, end_time = ?, item_kind = ?, commute_from_item_id = ?, commute_to_item_id = ?, transport_mode = ?, sort_order = ?, updated_at = ?
+			SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, est_cost_cents = ?, start_time = ?, end_time = ?, item_kind = ?, commute_from_item_id = ?, commute_to_item_id = ?, commute_end_day_offset = ?, transport_mode = ?, sort_order = ?, google_place_id = ?, venue_hours_json = ?, time_needed = ?, updated_at = ?
 			WHERE id = ? AND trip_id = ? AND updated_at = ?`,
-			item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.TransportMode, item.SortOrder, now,
+			item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.CommuteEndDayOffset, item.TransportMode, item.SortOrder, item.GooglePlaceID, item.VenueHoursJSON, item.TimeNeeded, now,
 			item.ID, item.TripID, item.ExpectedUpdatedAt,
 		)
 	} else {
 		res, err = r.execContext(ctx, `
 			UPDATE itinerary_items
-			SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, est_cost_cents = ?, start_time = ?, end_time = ?, item_kind = ?, commute_from_item_id = ?, commute_to_item_id = ?, transport_mode = ?, sort_order = ?, updated_at = ?
+			SET day_number = ?, title = ?, notes = ?, location = ?, image_path = ?, latitude = ?, longitude = ?, est_cost = ?, est_cost_cents = ?, start_time = ?, end_time = ?, item_kind = ?, commute_from_item_id = ?, commute_to_item_id = ?, commute_end_day_offset = ?, transport_mode = ?, sort_order = ?, google_place_id = ?, venue_hours_json = ?, time_needed = ?, updated_at = ?
 			WHERE id = ? AND trip_id = ?`,
-			item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.TransportMode, item.SortOrder, now,
+			item.DayNumber, item.Title, item.Notes, item.Location, item.ImagePath, item.Latitude, item.Longitude, item.EstCost, item.EstCostCents, item.StartTime, item.EndTime, kind, item.CommuteFromItemID, item.CommuteToItemID, item.CommuteEndDayOffset, item.TransportMode, item.SortOrder, item.GooglePlaceID, item.VenueHoursJSON, item.TimeNeeded, now,
 			item.ID, item.TripID,
 		)
 	}
@@ -317,7 +317,7 @@ func (r *Repository) DeleteItineraryItem(ctx context.Context, tripID, itemID str
 
 func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]trips.ItineraryItem, error) {
 	rows, err := r.queryContext(ctx, `
-		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost_cents, start_time, end_time, created_at, updated_at, item_kind, commute_from_item_id, commute_to_item_id, transport_mode, sort_order
+		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost_cents, start_time, end_time, created_at, updated_at, item_kind, commute_from_item_id, commute_to_item_id, commute_end_day_offset, transport_mode, sort_order, google_place_id, venue_hours_json, time_needed
 		FROM itinerary_items WHERE trip_id = ?
 		ORDER BY day_number ASC, sort_order ASC, created_at ASC, id ASC`, tripID)
 	if err != nil {
@@ -327,7 +327,7 @@ func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]t
 	out := []trips.ItineraryItem{}
 	for rows.Next() {
 		var i trips.ItineraryItem
-		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCostCents, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt, &i.ItemKind, &i.CommuteFromItemID, &i.CommuteToItemID, &i.TransportMode, &i.SortOrder); err != nil {
+		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCostCents, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt, &i.ItemKind, &i.CommuteFromItemID, &i.CommuteToItemID, &i.CommuteEndDayOffset, &i.TransportMode, &i.SortOrder, &i.GooglePlaceID, &i.VenueHoursJSON, &i.TimeNeeded); err != nil {
 			return nil, err
 		}
 		trips.SetItineraryEstCostCents(&i, i.EstCostCents)
@@ -338,7 +338,7 @@ func (r *Repository) ListItineraryItems(ctx context.Context, tripID string) ([]t
 
 func (r *Repository) ListAllItineraryItems(ctx context.Context) ([]trips.ItineraryItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost_cents, start_time, end_time, created_at, updated_at, item_kind, commute_from_item_id, commute_to_item_id, transport_mode, sort_order
+		SELECT id, trip_id, day_number, title, notes, location, image_path, latitude, longitude, est_cost_cents, start_time, end_time, created_at, updated_at, item_kind, commute_from_item_id, commute_to_item_id, commute_end_day_offset, transport_mode, sort_order, google_place_id, venue_hours_json, time_needed
 		FROM itinerary_items
 		ORDER BY trip_id, day_number ASC, sort_order ASC, created_at ASC, id ASC`)
 	if err != nil {
@@ -348,7 +348,7 @@ func (r *Repository) ListAllItineraryItems(ctx context.Context) ([]trips.Itinera
 	out := []trips.ItineraryItem{}
 	for rows.Next() {
 		var i trips.ItineraryItem
-		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCostCents, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt, &i.ItemKind, &i.CommuteFromItemID, &i.CommuteToItemID, &i.TransportMode, &i.SortOrder); err != nil {
+		if err := rows.Scan(&i.ID, &i.TripID, &i.DayNumber, &i.Title, &i.Notes, &i.Location, &i.ImagePath, &i.Latitude, &i.Longitude, &i.EstCostCents, &i.StartTime, &i.EndTime, &i.CreatedAt, &i.UpdatedAt, &i.ItemKind, &i.CommuteFromItemID, &i.CommuteToItemID, &i.CommuteEndDayOffset, &i.TransportMode, &i.SortOrder, &i.GooglePlaceID, &i.VenueHoursJSON, &i.TimeNeeded); err != nil {
 			return nil, err
 		}
 		trips.SetItineraryEstCostCents(&i, i.EstCostCents)

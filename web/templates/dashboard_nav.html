@@ -19,6 +19,7 @@
           </ul>
         </li>
         {{end}}
+        <li class="nav-item{{if eq .SidebarNavActive "notes-checklists"}} active{{end}}"><a href="/notes-checklists"{{if eq .SidebarNavActive "notes-checklists"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">checklist</span>Notes &amp; Checklists</a></li>
         <li class="nav-item{{if eq .SidebarNavActive "settings"}} active{{end}}"><a href="/settings{{if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}"{{if eq .SidebarNavActive "settings"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">settings</span>Settings</a></li>
         {{if .CurrentUser.IsAdmin}}
         <li class="nav-item{{if eq .SidebarNavActive "admin-users"}} active{{end}}"><a href="/admin/users"{{if eq .SidebarNavActive "admin-users"}} aria-current="page"{{end}}><span class="material-symbols-outlined" aria-hidden="true">group</span>Users</a></li>
@@ -47,6 +48,7 @@
     {{range .SidebarInProgressTrips}}
     <a href="/trips/{{.ID}}"><span class="material-symbols-outlined" aria-hidden="true">luggage</span><span>{{.Name}}</span></a>
     {{end}}
+    <a class="{{if eq .SidebarNavActive "notes-checklists"}}active {{end}}" href="/notes-checklists"><span class="material-symbols-outlined" aria-hidden="true">checklist</span><span>Notes</span></a>
     <a class="{{if eq .SidebarNavActive "settings"}}active {{end}}" href="/settings{{if .SidebarTripID}}?trip_id={{.SidebarTripID}}{{end}}"><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>Settings</span></a>
     <a class="{{if eq .SidebarNavActive "profile"}}active {{end}}" href="/profile"><span class="material-symbols-outlined" aria-hidden="true">person</span><span>Profile</span></a>
   </nav>

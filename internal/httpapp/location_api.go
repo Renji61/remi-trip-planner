@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (a *app) geocodeForApp(ctx context.Context, query string) (lat, lng float64) {
@@ -106,4 +107,28 @@ func (a *app) apiLocationGeocode(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"lat": lat, "lng": lng, "displayName": q,
 	})
+}
+
+// apiLocationPlaceDetails returns coordinates, formatted address, name, and opening_hours for a Google place_id.
+func (a *app) apiLocationPlaceDetails(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	placeID := strings.TrimSpace(r.URL.Query().Get("place_id"))
+	if placeID == "" {
+		http.Error(w, "place_id required", http.StatusBadRequest)
+		return
+	}
+	app, err := a.tripService.GetAppSettings(r.Context())
+	if err != nil || !app.EnableLocationLookup || strings.TrimSpace(app.GoogleMapsAPIKey) == "" {
+		http.Error(w, "location lookup unavailable", http.StatusBadRequest)
+		return
+	}
+	lang := locationLangFromRequest(r)
+	client := &http.Client{Timeout: 12 * time.Second}
+	d := fetchGooglePlaceDetails(r.Context(), placeID, strings.TrimSpace(app.GoogleMapsAPIKey), client, lang)
+	if d.FormattedAddress == "" && d.Lat == 0 && d.Lng == 0 {
+		http.Error(w, "place not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=600")
+	_ = json.NewEncoder(w).Encode(d)
 }

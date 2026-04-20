@@ -50,6 +50,8 @@ func TestTripNotesPageCopy(t *testing.T) {
 
 	notesWant := []string{
 		"Capture notes and checklists for your trip in one place.",
+		"Import Notes &amp; Checklists",
+		"/notes/import",
 		"Notes and checklist items with a due date will follow your notification settings.",
 		"Archived items are hidden until restored.",
 		"Deleted items are permanently removed when purged.",

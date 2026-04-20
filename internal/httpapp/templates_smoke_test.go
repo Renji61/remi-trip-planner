@@ -77,13 +77,14 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 				"googleMapsSearchURL": func(lat, lng float64, hint string) string {
 					return ""
 				},
-				"googleMapsDirectionsURL":    func(fromLat, fromLng, toLat, toLng float64, mode string) string { return "" },
-				"itineraryDayGoogleMapsURL":  func([]itineraryItemView) string { return "" },
-				"joinItineraryLocalDateTime": stubJoinItineraryLocalDateTime,
-				"locationLineBeforeComma":    func(s string) string { return s },
-				"itineraryNotesDisplay":      func(s string) string { return s },
-				"isImageWebPath":             func(string) bool { return true },
-				"itineraryGeocodeQuery":      func(any) string { return "" },
+				"googleMapsDirectionsURL":                 func(fromLat, fromLng, toLat, toLng float64, mode string) string { return "" },
+				"itineraryDayGoogleMapsURL":               func([]itineraryItemView) string { return "" },
+				"joinItineraryLocalDateTime":              stubJoinItineraryLocalDateTime,
+				"joinItineraryLocalDateTimeWithDayOffset": joinItineraryLocalDateTimeWithDayOffset,
+				"locationLineBeforeComma":                 func(s string) string { return s },
+				"itineraryNotesDisplay":                   func(s string) string { return s },
+				"isImageWebPath":                          func(string) bool { return true },
+				"itineraryGeocodeQuery":                   func(any) string { return "" },
 				"profileInitial": func(u trips.User) string {
 					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
 					return p.InitialForAvatar()
@@ -171,7 +172,8 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 					}
 					return "?" + s
 				},
-				"urlQueryEscape": func(s string) string { return url.QueryEscape(s) },
+				"urlQueryEscape":   func(s string) string { return url.QueryEscape(s) },
+				"remiStaticAssetV": RemiStaticAssetV,
 			}).
 			ParseGlob(filepath.Join(root, "web", "templates", "*.html")),
 	)
@@ -414,18 +416,19 @@ func htmlTemplateSmokeFuncs() ht.FuncMap {
 		"effectiveDistanceUnit": func(trip trips.Trip, settings trips.AppSettings) string {
 			return trips.EffectiveDistanceUnit(&trip, settings)
 		},
-		"tripMainSectionLabel":            func(s string) string { return s },
-		"tripSidebarWidgetLabel":          func(s string) string { return s },
-		"tripMainSectionVisibilityIcon":   trips.MainSectionVisibilityIcon,
-		"tripSidebarWidgetVisibilityIcon": trips.SidebarWidgetVisibilityIcon,
-		"googleMapsSearchURL":             func(lat, lng float64, hint string) string { return "" },
-		"googleMapsDirectionsURL":         func(fromLat, fromLng, toLat, toLng float64, mode string) string { return "" },
-		"itineraryDayGoogleMapsURL":       func([]itineraryItemView) string { return "" },
-		"joinItineraryLocalDateTime":      stubJoinItineraryLocalDateTime,
-		"locationLineBeforeComma":         func(s string) string { return s },
-		"itineraryNotesDisplay":           func(s string) string { return s },
-		"isImageWebPath":                  func(string) bool { return true },
-		"itineraryGeocodeQuery":           func(any) string { return "" },
+		"tripMainSectionLabel":                    func(s string) string { return s },
+		"tripSidebarWidgetLabel":                  func(s string) string { return s },
+		"tripMainSectionVisibilityIcon":           trips.MainSectionVisibilityIcon,
+		"tripSidebarWidgetVisibilityIcon":         trips.SidebarWidgetVisibilityIcon,
+		"googleMapsSearchURL":                     func(lat, lng float64, hint string) string { return "" },
+		"googleMapsDirectionsURL":                 func(fromLat, fromLng, toLat, toLng float64, mode string) string { return "" },
+		"itineraryDayGoogleMapsURL":               func([]itineraryItemView) string { return "" },
+		"joinItineraryLocalDateTime":              stubJoinItineraryLocalDateTime,
+		"joinItineraryLocalDateTimeWithDayOffset": joinItineraryLocalDateTimeWithDayOffset,
+		"locationLineBeforeComma":                 func(s string) string { return s },
+		"itineraryNotesDisplay":                   func(s string) string { return s },
+		"isImageWebPath":                          func(string) bool { return true },
+		"itineraryGeocodeQuery":                   func(any) string { return "" },
 		"profileInitial": func(u trips.User) string {
 			p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
 			return p.InitialForAvatar()
@@ -513,7 +516,8 @@ func htmlTemplateSmokeFuncs() ht.FuncMap {
 			}
 			return "?" + s
 		},
-		"urlQueryEscape": func(s string) string { return url.QueryEscape(s) },
+		"urlQueryEscape":   func(s string) string { return url.QueryEscape(s) },
+		"remiStaticAssetV": RemiStaticAssetV,
 	}
 }
 
@@ -784,6 +788,84 @@ func TestTripKeepDetailsPreviewInnerTemplateRenders(t *testing.T) {
 	}
 	if !strings.Contains(out, "Tent") || !strings.Contains(out, `name="csrf_token"`) {
 		t.Fatalf("expected checklist row with csrf on toggle form, snippet=%q", truncate(out, 700))
+	}
+}
+
+func TestGlobalNotesChecklistsTemplateRenders(t *testing.T) {
+	root := findModuleRoot(t)
+	tmpl := ht.Must(
+		ht.New("").
+			Funcs(htmlTemplateSmokeFuncs()).
+			ParseGlob(filepath.Join(root, "web", "templates", "*.html")),
+	)
+	data := map[string]any{
+		"Settings":                 trips.AppSettings{AppTitle: "App", ThemePreference: "light", DefaultUIDateFormat: "dmy"},
+		"CSRFToken":                "csrf-g",
+		"CurrentUser":              trips.User{ID: "u1", Username: "a", Email: "a@a.com"},
+		"NotificationUnreadCount":  0,
+		"SidebarNavActive":         "notes-checklists",
+		"SidebarInProgressTrips":   []sidebarInProgressTrip(nil),
+		"GlobalKeepNotes":          []trips.GlobalKeepNote{{ID: "n1", Title: "T", Body: "hello"}},
+		"GlobalChecklistTemplates": []trips.GlobalChecklistTemplate{{ID: "c1", Category: "Pack", Lines: []string{"x"}}},
+		"KeepNoteColors":           keepNotePickerColors,
+		"ReminderCategories":       trips.ReminderChecklistCategories,
+		"KeepView":                 trips.KeepViewNotes,
+		"KeepQuery":                "",
+		"GlobalDistanceUnit":       "km",
+		"ReturnTo":                 "/notes-checklists",
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "global_notes_checklists.html", data); err != nil {
+		t.Fatalf("execute global_notes_checklists.html: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `class="page-trip-notes page-global-notes"`) || !strings.Contains(out, `class="trip-keep-page"`) {
+		t.Fatalf("expected global notes page to mirror trip keep layout, snippet=%q", truncate(out, 700))
+	}
+	if !strings.Contains(out, "/notes-checklists/note") || !strings.Contains(out, "data-trip-keep-search-form") {
+		t.Fatalf("expected global composer/search endpoints, snippet=%q", truncate(out, 700))
+	}
+	if !strings.Contains(out, "/notes-checklists/note/n1/intent") || !strings.Contains(out, "/notes-checklists/checklist/c1/intent") {
+		t.Fatalf("expected global keep title intent forms, snippet=%q", truncate(out, 700))
+	}
+	if strings.Contains(out, "view=reminders") || strings.Contains(out, ">Reminders<") {
+		t.Fatalf("global library page should not expose Reminders view, snippet=%q", truncate(out, 500))
+	}
+}
+
+func TestTripNotesImportTemplateRenders(t *testing.T) {
+	root := findModuleRoot(t)
+	tmpl := ht.Must(
+		ht.New("").
+			Funcs(htmlTemplateSmokeFuncs()).
+			ParseGlob(filepath.Join(root, "web", "templates", "*.html")),
+	)
+	trip := trips.Trip{ID: "t-import", Name: "Paris", OwnerUserID: "u1", UIShowChecklist: true}
+	data := map[string]any{
+		"Details":                 trips.TripDetails{Trip: trip},
+		"Settings":                trips.AppSettings{AppTitle: "App"},
+		"CSRFToken":               "csrf-i",
+		"GlobalKeepImportRows":    []globalKeepImportRow{{Kind: "note", ID: "g1", Label: "N", Sub: "Note", AlreadyImported: false}},
+		"GlobalKeepImportEmpty":   false,
+		"ReturnTo":                "/trips/t-import/notes",
+		"CurrentUser":             trips.User{ID: "u1", Username: "a", Email: "a@a.com"},
+		"CurrentUserID":           "u1",
+		"NotificationUnreadCount": 0,
+		"SidebarNavActive":        "notes",
+		"TripAccess":              trips.TripAccess{IsOwner: true},
+		"Party":                   []trips.UserProfile{},
+		"PendingInvites":          []trips.TripInvitePending(nil),
+		"TripGuests":              []trips.TripGuest(nil),
+		"CustomSidebarLinks":      []trips.CustomSidebarLink(nil),
+		"TabDepartedParticipants": []trips.DepartedTabParticipant(nil),
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "trip_notes_import.html", data); err != nil {
+		t.Fatalf("execute trip_notes_import.html: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `name="import_note"`) || !strings.Contains(out, "Import selected") {
+		t.Fatalf("expected import form, snippet=%q", truncate(out, 600))
 	}
 }
 

@@ -1531,8 +1531,8 @@ if ("serviceWorker" in navigator) {
     if (!(wrap instanceof HTMLElement) || wrap.dataset.remiDateWired === "1") return;
     wrap.dataset.remiDateWired = "1";
     const mdy = wrap.getAttribute("data-mdy") === "1";
-    const min = wrap.getAttribute("data-min") || "";
-    const max = wrap.getAttribute("data-max") || "";
+    const getMin = () => wrap.getAttribute("data-min") || "";
+    const getMax = () => wrap.getAttribute("data-max") || "";
     const clearable = wrap.getAttribute("data-clearable") === "1";
     const hidden = wrap.querySelector(".remi-date-iso");
     const vis = wrap.querySelector(".remi-date-visible");
@@ -1545,9 +1545,13 @@ if ("serviceWorker" in navigator) {
       vis.type = "date";
       vis.readOnly = false;
       vis.removeAttribute("placeholder");
-      if (min) vis.min = min;
-      if (max) vis.max = max;
       const syncNative = () => {
+        const min = getMin();
+        const max = getMax();
+        if (min) vis.min = min;
+        else vis.removeAttribute("min");
+        if (max) vis.max = max;
+        else vis.removeAttribute("max");
         const v = clampIso((hidden.value || "").trim(), min, max);
         hidden.value = v;
         vis.value = v || "";
@@ -1570,6 +1574,8 @@ if ("serviceWorker" in navigator) {
       hidden.addEventListener("change", () => syncNative());
       const pushNative = () => {
         const raw = (vis.value || "").trim();
+        const min = getMin();
+        const max = getMax();
         hidden.value = raw ? clampIso(raw, min, max) : "";
         hidden.dispatchEvent(new Event("change", { bubbles: true }));
         syncNative();
@@ -1638,12 +1644,12 @@ if ("serviceWorker" in navigator) {
     const openCal = () => {
       openDatePicker(vis, {
         value: hidden.value || "",
-        min,
-        max,
+        min: getMin(),
+        max: getMax(),
         mdy,
         clearable,
         onConfirm: (iso) => {
-          hidden.value = clampIso(iso, min, max);
+          hidden.value = clampIso(iso, getMin(), getMax());
           sync();
           hidden.dispatchEvent(new Event("change", { bubbles: true }));
         }
@@ -1657,14 +1663,14 @@ if ("serviceWorker" in navigator) {
     vis.addEventListener("input", () => {
       const iso = parseDisplayToIso(vis.value.trim(), mdy);
       if (iso) {
-        hidden.value = clampIso(iso, min, max);
+        hidden.value = clampIso(iso, getMin(), getMax());
         hidden.dispatchEvent(new Event("change", { bubbles: true }));
       }
       if (typeof activeDatePickerSync === "function") activeDatePickerSync(vis.value);
     });
     vis.addEventListener("blur", () => {
       const iso = parseDisplayToIso(vis.value.trim(), mdy);
-      if (iso) hidden.value = clampIso(iso, min, max);
+      if (iso) hidden.value = clampIso(iso, getMin(), getMax());
       else if (!(vis.value || "").trim()) hidden.value = "";
       sync();
     });
@@ -3147,6 +3153,8 @@ window.addEventListener("load", () => {
     return (u && u.trim()) || "/api/location/suggest";
   };
   const remiGeocodeURL = () => "/api/location/geocode";
+  const remiPlaceDetailsURL = () => "/api/location/place-details";
+  const remiPlaceDetailsClientCache = new Map();
   /** BCP 47 language for geocoder labels: matches <html lang> (en UI → English place names). */
   const remiPreferredLocationLang = () => {
     const fromDoc =
@@ -3158,6 +3166,105 @@ window.addEventListener("load", () => {
   };
   const remiLocationLangQuery = () =>
     `&lang=${encodeURIComponent(remiPreferredLocationLang())}`;
+
+  const fetchPlaceDetailsForItinerary = async (placeId) => {
+    const id = String(placeId || "").trim();
+    if (!id) return null;
+    if (remiPlaceDetailsClientCache.has(id)) return remiPlaceDetailsClientCache.get(id);
+    try {
+      const res = await fetch(
+        `${remiPlaceDetailsURL()}?place_id=${encodeURIComponent(id)}${remiLocationLangQuery()}`,
+        { credentials: "same-origin", headers: { Accept: "application/json" } }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      remiPlaceDetailsClientCache.set(id, data);
+      return data;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const remiGooglePlacesTimeToMinutes = (t) => {
+    const raw = String(t || "").replace(/\D/g, "");
+    if (raw.length < 3) return null;
+    const pad = raw.length <= 2 ? raw.padStart(4, "0") : raw.slice(-4).padStart(4, "0");
+    const h = parseInt(pad.slice(0, 2), 10);
+    const m = parseInt(pad.slice(2), 10);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    return h * 60 + m;
+  };
+
+  const remiCollectSameDayIntervals = (periods, weekday) => {
+    const out = [];
+    if (!Array.isArray(periods)) return out;
+    for (const p of periods) {
+      if (!p || !p.open || !p.close) continue;
+      if (p.open.day === weekday && p.close.day === weekday) {
+        const a = remiGooglePlacesTimeToMinutes(p.open.time);
+        const b = remiGooglePlacesTimeToMinutes(p.close.time);
+        if (a != null && b != null && b > a) out.push([a, b]);
+      }
+    }
+    return out;
+  };
+
+  const remiWeekDayFromYMD = (ymd) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ""));
+    if (!m) return new Date().getDay();
+    const y = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10) - 1;
+    const d = parseInt(m[3], 10);
+    return new Date(y, mo, d).getDay();
+  };
+
+  const remiFormatMinutesClock = (mins) => {
+    if (mins == null || !Number.isFinite(mins)) return "";
+    const h = Math.floor(mins / 60) % 24;
+    const mm = Math.round(mins % 60);
+    const dt = new Date();
+    dt.setHours(h, mm, 0, 0);
+    return dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  };
+
+  const remiSummarizeHoursFromPlaceDetail = (detail, ymd) => {
+    const day = remiWeekDayFromYMD(ymd);
+    const oh = detail && detail.openingHours;
+    if (!oh) return { summary: "🔴 No hours listed for this place." };
+    const wt = oh.weekday_text;
+    if (Array.isArray(wt) && wt[day]) {
+      const line = String(wt[day]);
+      if (/closed/i.test(line)) return { summary: "🔴 Closed on this day." };
+      const rest = line.replace(/^[^:：]+[:：]\s*/, "").trim();
+      return { summary: `🟢 Open: ${rest || line}` };
+    }
+    const ivs = remiCollectSameDayIntervals(oh.periods, day);
+    if (!ivs.length) return { summary: "🔴 Closed on this day." };
+    const [a, b] = ivs[0];
+    return { summary: `🟢 Open: ${remiFormatMinutesClock(a)} – ${remiFormatMinutesClock(b)}` };
+  };
+
+  const remiIsoLocalMinutes = (iso) => {
+    const s = String(iso || "").trim();
+    if (!s) return null;
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.getHours() * 60 + d.getMinutes();
+  };
+
+  const remiScheduleOutsideVenue = (detail, ymd, startIso, endIso) => {
+    const oh = detail && detail.openingHours;
+    if (!oh || !Array.isArray(oh.periods)) return false;
+    const day = remiWeekDayFromYMD(ymd);
+    const ivs = remiCollectSameDayIntervals(oh.periods, day);
+    if (!ivs.length) return Boolean(String(startIso || "").trim());
+    const sMin = remiIsoLocalMinutes(startIso);
+    const eMin = remiIsoLocalMinutes(endIso);
+    if (sMin == null) return false;
+    if (eMin == null || eMin <= sMin) return !ivs.some(([a, b]) => sMin >= a && sMin <= b);
+    return !ivs.some(([a, b]) => sMin >= a && eMin <= b);
+  };
+
   const remiReadDistanceUnit = () => {
     const shell = document.querySelector("main.app-shell");
     const u = shell && shell.getAttribute("data-distance-unit");
@@ -3547,47 +3654,6 @@ window.addEventListener("load", () => {
   };
   renderItineraryConnectors(document);
 
-  document.addEventListener("click", (e) => {
-    const btn = e.target?.closest?.("[data-commute-dur-min]");
-    if (!btn) return;
-    const form = btn.closest("form");
-    if (!form) return;
-    const mins = parseInt(btn.getAttribute("data-commute-dur-min") || "0", 10);
-    if (!Number.isFinite(mins) || mins <= 0) return;
-    const startHid = form.querySelector("input.remi-datetime-iso[name='start_at']");
-    const endHid = form.querySelector("input.remi-datetime-iso[name='end_at']");
-    if (startHid instanceof HTMLInputElement && endHid instanceof HTMLInputElement) {
-      const ISO_DT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/;
-      const rawStart = String(startHid.value || "").trim();
-      const m = rawStart.match(ISO_DT);
-      if (!m) return;
-      const day = m[1];
-      let sm = parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
-      if (!Number.isFinite(sm)) sm = 9 * 60;
-      const em = Math.min(24 * 60 - 1, sm + mins);
-      const eH = String(Math.floor(em / 60)).padStart(2, "0");
-      const eM = String(em % 60).padStart(2, "0");
-      endHid.value = `${day}T${eH}:${eM}`;
-      endHid.dispatchEvent(new Event("change", { bubbles: true }));
-      return;
-    }
-    const startEl = form.querySelector("input[name='start_time']");
-    const endEl = form.querySelector("input[name='end_time']");
-    if (!startEl || !endEl) return;
-    const parseMin = (raw) => {
-      const p = String(raw || "").trim().split(":");
-      const h = parseInt(p[0] || "0", 10);
-      const m = parseInt(p[1] || "0", 10);
-      if (Number.isNaN(h) || Number.isNaN(m)) return null;
-      return h * 60 + m;
-    };
-    const fmt = (n) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
-    let sm = parseMin(startEl.value);
-    if (sm == null) sm = 9 * 60;
-    endEl.value = fmt(Math.min(24 * 60 - 1, sm + mins));
-    endEl.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-
   const itinerarySearchInput = document.querySelector("[data-itinerary-search]");
   const itinerarySearchRoot = document.querySelector("[data-itinerary-search-root]");
   if (itinerarySearchInput && itinerarySearchRoot) {
@@ -3652,24 +3718,24 @@ window.addEventListener("load", () => {
     );
   };
 
-  const tripCalendarRoot = document.querySelector("[data-itinerary-calendar-root]");
+  let tripCalendarRoot = document.querySelector("[data-itinerary-calendar-root]");
   if (tripCalendarRoot) {
-    const listPanel = tripCalendarRoot.querySelector("[data-itinerary-list-panel]");
-    const calendarPanels = tripCalendarRoot.querySelector("[data-itinerary-calendar-panels]");
-    const dayView = tripCalendarRoot.querySelector("[data-itinerary-day-view]");
-    const weekView = tripCalendarRoot.querySelector("[data-itinerary-week-view]");
-    const toolbar = tripCalendarRoot.querySelector("[data-itinerary-calendar-toolbar]");
-    const rangeLabel = tripCalendarRoot.querySelector("[data-itinerary-range-label]");
-    const tripID = (tripCalendarRoot.getAttribute("data-trip-id") || "").trim();
-    const tripStartRaw = (tripCalendarRoot.getAttribute("data-trip-start") || "").trim();
-    const tripEndRaw = (tripCalendarRoot.getAttribute("data-trip-end") || "").trim();
-    const quickEditModal = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-modal]");
-    const quickEditBody = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-body]");
-    const quickEditPreview = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-preview]");
-    const quickEditFormWrap = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-form-wrap]");
-    const quickEditPanel = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-panel]");
-    const quickEditTitle = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-title]");
-    const quickEditModeLabel = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-mode-label]");
+    let listPanel = tripCalendarRoot.querySelector("[data-itinerary-list-panel]");
+    let calendarPanels = tripCalendarRoot.querySelector("[data-itinerary-calendar-panels]");
+    let dayView = tripCalendarRoot.querySelector("[data-itinerary-day-view]");
+    let weekView = tripCalendarRoot.querySelector("[data-itinerary-week-view]");
+    let toolbar = tripCalendarRoot.querySelector("[data-itinerary-calendar-toolbar]");
+    let rangeLabel = tripCalendarRoot.querySelector("[data-itinerary-range-label]");
+    let tripID = (tripCalendarRoot.getAttribute("data-trip-id") || "").trim();
+    let tripStartRaw = (tripCalendarRoot.getAttribute("data-trip-start") || "").trim();
+    let tripEndRaw = (tripCalendarRoot.getAttribute("data-trip-end") || "").trim();
+    let quickEditModal = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-modal]");
+    let quickEditBody = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-body]");
+    let quickEditPreview = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-preview]");
+    let quickEditFormWrap = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-form-wrap]");
+    let quickEditPanel = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-panel]");
+    let quickEditTitle = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-title]");
+    let quickEditModeLabel = tripCalendarRoot.querySelector("[data-itinerary-quick-edit-mode-label]");
     const desktopCalFlyout = document.querySelector("[data-desktop-calendar-flyout]");
     const desktopCalFlyoutLabel = desktopCalFlyout?.querySelector("[data-desktop-calendar-flyout-label]");
     const quickAddState = { date: "", startMin: 8 * 60, lastClientX: null, lastClientY: null };
@@ -3695,6 +3761,42 @@ window.addEventListener("load", () => {
         const p = new Date(`${iso}T00:00:00`);
         return Number.isNaN(p.getTime()) ? null : p;
       };
+      let startDate = null;
+      let endDate = null;
+      let totalTripDays = 1;
+      const reanchorTripCalendarDates = () => {
+        startDate = toDate(tripStartRaw);
+        endDate = toDate(tripEndRaw);
+        totalTripDays =
+          startDate && endDate && startDate <= endDate
+            ? Math.floor((endDate - startDate) / 86400000) + 1
+            : 1;
+      };
+      reanchorTripCalendarDates();
+      const reshellItineraryCalendarDom = () => {
+        const r = document.querySelector("[data-itinerary-calendar-root]");
+        if (!r) return false;
+        tripCalendarRoot = r;
+        listPanel = r.querySelector("[data-itinerary-list-panel]");
+        calendarPanels = r.querySelector("[data-itinerary-calendar-panels]");
+        dayView = r.querySelector("[data-itinerary-day-view]");
+        weekView = r.querySelector("[data-itinerary-week-view]");
+        toolbar = r.querySelector("[data-itinerary-calendar-toolbar]");
+        rangeLabel = r.querySelector("[data-itinerary-range-label]");
+        tripID = (r.getAttribute("data-trip-id") || "").trim();
+        tripStartRaw = (r.getAttribute("data-trip-start") || "").trim();
+        tripEndRaw = (r.getAttribute("data-trip-end") || "").trim();
+        quickEditModal = r.querySelector("[data-itinerary-quick-edit-modal]");
+        quickEditBody = r.querySelector("[data-itinerary-quick-edit-body]");
+        quickEditPreview = r.querySelector("[data-itinerary-quick-edit-preview]");
+        quickEditFormWrap = r.querySelector("[data-itinerary-quick-edit-form-wrap]");
+        quickEditPanel = r.querySelector("[data-itinerary-quick-edit-panel]");
+        quickEditTitle = r.querySelector("[data-itinerary-quick-edit-title]");
+        quickEditModeLabel = r.querySelector("[data-itinerary-quick-edit-mode-label]");
+        reanchorTripCalendarDates();
+        return Boolean(listPanel && calendarPanels && dayView && weekView && toolbar && rangeLabel && tripStartRaw && tripEndRaw);
+      };
+      window.remiReshellItineraryCalendarDom = reshellItineraryCalendarDom;
       const pad2 = (v) => String(v).padStart(2, "0");
       /** YYYY-MM-DD for the user's local calendar day (not UTC — toISOString would shift columns vs headers). */
       const fmtDate = (d) => {
@@ -3746,11 +3848,6 @@ window.addEventListener("load", () => {
         const dayOffset = Math.max(0, Math.min(totalTripDays - 1, toDayOffset(state.selectedDate)));
         state.weekOffset = Math.floor(dayOffset / 7) * 7;
       };
-      const startDate = toDate(tripStartRaw);
-      const endDate = toDate(tripEndRaw);
-      const totalTripDays = startDate && endDate && startDate <= endDate
-        ? Math.floor((endDate - startDate) / 86400000) + 1
-        : 1;
       if (!startDate || !endDate || startDate > endDate) {
         // Skip calendar render only; keep the rest of app.js behavior alive.
       } else {
@@ -3831,18 +3928,31 @@ window.addEventListener("load", () => {
           }
           let startMin = 8 * 60;
           let endMin = 9 * 60;
+          let usedAbsoluteDaySpan = false;
           if (form && (category === "stop" || category === "commute")) {
             const ISO_DT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/;
             const startH = form.querySelector("input.remi-datetime-iso[name='start_at']");
             const endH = form.querySelector("input.remi-datetime-iso[name='end_at']");
             const ms = startH instanceof HTMLInputElement ? String(startH.value || "").match(ISO_DT) : null;
             const me = endH instanceof HTMLInputElement ? String(endH.value || "").match(ISO_DT) : null;
-            if (ms) {
+            if (ms && me) {
+              const startDT = new Date(`${ms[1]}T${ms[2]}:${ms[3]}:00`);
+              const endDT = new Date(`${me[1]}T${me[2]}:${me[3]}:00`);
+              if (!Number.isNaN(startDT.getTime()) && !Number.isNaN(endDT.getTime()) && endDT > startDT) {
+                const rowMidnight = new Date(`${date}T00:00:00`);
+                if (!Number.isNaN(rowMidnight.getTime())) {
+                  startMin = Math.round((startDT - rowMidnight) / 60000);
+                  endMin = Math.round((endDT - rowMidnight) / 60000);
+                  usedAbsoluteDaySpan = true;
+                }
+              }
+            }
+            if (!usedAbsoluteDaySpan && ms) {
               startMin = parseInt(ms[2], 10) * 60 + parseInt(ms[3], 10);
               endMin = me
                 ? parseInt(me[2], 10) * 60 + parseInt(me[3], 10)
                 : startMin + 60;
-            } else {
+            } else if (!usedAbsoluteDaySpan) {
               const s = parseTime(form.querySelector("input[name='start_time']")?.value || "");
               const e = parseTime(form.querySelector("input[name='end_time']")?.value || "");
               if (s !== null) startMin = s;
@@ -3856,7 +3966,7 @@ window.addEventListener("load", () => {
             if (first !== null) startMin = first;
             endMin = second !== null ? second : startMin + 60;
           }
-          if (endMin <= startMin) endMin = Math.min(DAY_MINUTES, startMin + 60);
+          if (!usedAbsoluteDaySpan && endMin <= startMin) endMin = Math.min(DAY_MINUTES, startMin + 60);
           const role = inferRole(row, title);
           const bookingWindow = parseBookingWindow(form, category);
           if (bookingWindow && role === bookingWindow.secondaryRole) {
@@ -4228,6 +4338,7 @@ window.addEventListener("load", () => {
         }
       };
       const syncWeekHeaderAlignment = () => {
+        if (!reshellItineraryCalendarDom()) return;
         const head = weekView.querySelector(".trip-itinerary-week-head");
         const body = weekView.querySelector(".trip-itinerary-week-body");
         if (!head || !body) return;
@@ -4235,6 +4346,7 @@ window.addEventListener("load", () => {
         head.style.paddingRight = `${gutter}px`;
       };
       const renderCalendar = () => {
+        if (!reshellItineraryCalendarDom()) return;
         const prevWeekSurface = weekView.querySelector("[data-itinerary-scroll-surface]");
         const prevDaySurface = dayView.querySelector("[data-itinerary-scroll-surface]");
         if (prevWeekSurface) state.weekScrollTop = prevWeekSurface.scrollTop;
@@ -4342,6 +4454,7 @@ window.addEventListener("load", () => {
         syncWeekHeaderAlignment();
       };
       const toggleView = (view) => {
+        if (!reshellItineraryCalendarDom()) return;
         state.view = view;
         tripCalendarRoot.querySelectorAll("[data-itinerary-view-toggle]").forEach((btn) => {
           const on = btn.getAttribute("data-itinerary-view-toggle") === view;
@@ -4464,12 +4577,21 @@ window.addEventListener("load", () => {
           }
           state.dragHintMinute = snapped;
         };
-        tripCalendarRoot.querySelectorAll("[data-itinerary-view-toggle]").forEach((btn) => {
-          btn.addEventListener("click", () => toggleView(btn.getAttribute("data-itinerary-view-toggle") || "list"));
-        });
-        tripCalendarRoot.querySelectorAll("[data-itinerary-week-nav]").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const mode = btn.getAttribute("data-itinerary-week-nav") || "";
+        if (!window.__remiItineraryCalViewNavDelegation) {
+          window.__remiItineraryCalViewNavDelegation = true;
+          document.addEventListener("click", (e) => {
+            const root = e.target?.closest?.("[data-itinerary-calendar-root]");
+            if (!root) return;
+            const viewBtn = e.target?.closest?.("[data-itinerary-view-toggle]");
+            if (viewBtn && root.contains(viewBtn)) {
+              if (!reshellItineraryCalendarDom()) return;
+              toggleView(viewBtn.getAttribute("data-itinerary-view-toggle") || "list");
+              return;
+            }
+            const weekNavBtn = e.target?.closest?.("[data-itinerary-week-nav]");
+            if (!weekNavBtn || !root.contains(weekNavBtn)) return;
+            if (!reshellItineraryCalendarDom()) return;
+            const mode = weekNavBtn.getAttribute("data-itinerary-week-nav") || "";
             if (mode === "today") {
               const t = fmtDate(new Date());
               state.selectedDate = clampISO(t);
@@ -4491,7 +4613,10 @@ window.addEventListener("load", () => {
             }
             renderCalendar();
           });
-        });
+        }
+        const attachTripCalendarRootListeners = () => {
+          if (!tripCalendarRoot || tripCalendarRoot.dataset.remiItineraryCalRootBound === "1") return;
+          tripCalendarRoot.dataset.remiItineraryCalRootBound = "1";
         tripCalendarRoot.addEventListener("click", (e) => {
           const dayBtn = e.target?.closest?.("[data-itinerary-select-date]");
           if (!dayBtn) return;
@@ -4965,6 +5090,12 @@ window.addEventListener("load", () => {
           }
           attachItineraryQuickEditEscape(closeModal);
         });
+        };
+        attachTripCalendarRootListeners();
+        window.remiRewireTripItineraryCalendarAfterLiveRefresh = () => {
+          if (!reshellItineraryCalendarDom()) return;
+          attachTripCalendarRootListeners();
+        };
       };
       const startChangePolling = () => {
         if (window.remiRealtimeTripSyncEnabled) return;
@@ -5072,12 +5203,27 @@ window.addEventListener("load", () => {
                       (displayName ? displayName.split(",")[0].trim() : "") ||
                       item.name ||
                       displayName;
-                    return { lat, lng, displayName, shortName };
+                    const placeId = String(item.placeId || item.place_id || "").trim();
+                    const placeName = String(item.placeName || item.place_name || shortName || "").trim();
+                    const formattedAddress = String(
+                      item.formattedAddress || item.formatted_address || displayName || ""
+                    ).trim();
+                    return {
+                      lat,
+                      lng,
+                      displayName,
+                      shortName,
+                      placeId,
+                      placeName,
+                      formattedAddress
+                    };
                   })
-                  .filter(
-                    (item) =>
-                      (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng)
-                  );
+                  .filter((item) => {
+                    const label = item.displayName || item.shortName || item.placeName;
+                    if (!label) return false;
+                    if (item.placeId) return true;
+                    return !Number.isNaN(item.lat) && !Number.isNaN(item.lng) && (item.lat !== 0 || item.lng !== 0);
+                  });
               }
             }
           } catch (e) {
@@ -5108,7 +5254,15 @@ window.addEventListener("load", () => {
               const name = item.name && String(item.name).trim() ? String(item.name).trim() : "";
               const shortName =
                 (displayName ? displayName.split(",")[0].trim() : "") || name || displayName;
-              return { lat, lng, displayName, shortName };
+              return {
+                lat,
+                lng,
+                displayName,
+                shortName,
+                placeId: "",
+                placeName: shortName,
+                formattedAddress: displayName
+              };
             })
             .filter(
               (item) => (item.displayName || item.shortName) && !Number.isNaN(item.lat) && !Number.isNaN(item.lng)
@@ -5138,6 +5292,60 @@ window.addEventListener("load", () => {
       e.preventDefault();
     });
   };
+
+  /** Home dashboard "Start a New Adventure": end date snaps to start when start changes; end cannot be before start. */
+  const remiWireDashboardHeroTripDates = (form) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    const startH = form.querySelector('input.remi-date-iso[name="start_date"]');
+    const endH = form.querySelector('input.remi-date-iso[name="end_date"]');
+    const endWrap = endH?.closest?.("[data-remi-date]");
+    if (!(startH instanceof HTMLInputElement) || !(endH instanceof HTMLInputElement) || !(endWrap instanceof HTMLElement)) {
+      return;
+    }
+    const ISO_D = /^\d{4}-\d{2}-\d{2}$/;
+    const syncNativeEndMin = () => {
+      const s = String(startH.value || "").trim();
+      const endVis = endWrap.querySelector(".remi-date-visible");
+      if (endVis instanceof HTMLInputElement && endVis.type === "date") {
+        if (ISO_D.test(s)) endVis.min = s;
+        else endVis.removeAttribute("min");
+      }
+    };
+    const applyStartAsMinOnEnd = () => {
+      const s = String(startH.value || "").trim();
+      if (ISO_D.test(s)) {
+        endWrap.setAttribute("data-min", s);
+      } else {
+        endWrap.removeAttribute("data-min");
+      }
+      syncNativeEndMin();
+    };
+    const snapEndToStart = () => {
+      const s = String(startH.value || "").trim();
+      if (!ISO_D.test(s)) return;
+      endH.value = s;
+      endH.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    startH.addEventListener("change", () => {
+      applyStartAsMinOnEnd();
+      snapEndToStart();
+    });
+    applyStartAsMinOnEnd();
+    if (ISO_D.test(String(startH.value || "").trim())) {
+      snapEndToStart();
+    }
+  };
+
+  const scheduleDashboardHeroTripDates = () => {
+    document.querySelectorAll("form[data-dashboard-trip-place]").forEach((form) => {
+      if (form instanceof HTMLFormElement) remiWireDashboardHeroTripDates(form);
+    });
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", scheduleDashboardHeroTripDates, { once: true });
+  } else {
+    scheduleDashboardHeroTripDates();
+  }
 
   document.querySelectorAll("form[data-dashboard-trip-place]").forEach((heroForm) => {
     const shell = document.querySelector("main.app-shell");
@@ -5958,6 +6166,9 @@ window.addEventListener("load", () => {
   initAddStopTabs();
 
   const initItineraryForm = (itineraryForm) => {
+    if (!(itineraryForm instanceof HTMLElement)) return;
+    if (itineraryForm.dataset.remiItineraryFormBound === "1") return;
+    itineraryForm.dataset.remiItineraryFormBound = "1";
     const locationInput = itineraryForm.querySelector("[data-location-input]");
     const latitudeInput = itineraryForm.querySelector("[data-latitude-input]");
     const longitudeInput = itineraryForm.querySelector("[data-longitude-input]");
@@ -6002,6 +6213,136 @@ window.addEventListener("load", () => {
     let geocodeSubmitInProgress = false;
     let allowResolvedSubmit = false;
 
+    const titleInput = itineraryForm.querySelector("input[name='title']");
+    const googlePlaceIdInput = itineraryForm.querySelector("[data-google-place-id-input]");
+    const venueHoursJsonInput = itineraryForm.querySelector("[data-venue-hours-json-input]");
+    const chipWrap = itineraryForm.querySelector("[data-place-hours-wrap]");
+    const chip = itineraryForm.querySelector("[data-place-hours-chip]");
+    const timeWarningEl = itineraryForm.querySelector("[data-venue-hours-time-warning]");
+    const locationInputWrap = itineraryForm.querySelector("[data-itinerary-location-wrap]");
+    const locationClearBtn = itineraryForm.querySelector("[data-itinerary-location-clear]");
+    let latestPlaceDetails = null;
+    let latestGooglePlaceId = "";
+
+    const syncLocationClearBtn = () => {
+      if (!(locationClearBtn instanceof HTMLButtonElement) || !locationInputWrap) return;
+      const hasText = locationInput instanceof HTMLInputElement && (locationInput.value || "").trim() !== "";
+      const hasPlace =
+        googlePlaceIdInput instanceof HTMLInputElement && (googlePlaceIdInput.value || "").trim() !== "";
+      const chipTxt = chip ? (chip.textContent || "").trim() : "";
+      const chipVisible = Boolean(chipTxt && chipWrap && !chipWrap.hasAttribute("hidden"));
+      const show = hasText || hasPlace || chipVisible;
+      locationClearBtn.hidden = !show;
+      locationInputWrap.classList.toggle("itinerary-location-input-wrap--clearable", show);
+    };
+
+    const clearTimeWarnings = () => {
+      itineraryForm.querySelectorAll(".remi-datetime-field--venue-hours-warn").forEach((el) => {
+        el.classList.remove("remi-datetime-field--venue-hours-warn");
+      });
+      if (timeWarningEl) {
+        timeWarningEl.textContent = "";
+        timeWarningEl.classList.add("hidden");
+      }
+    };
+
+    const applyTimeWarnings = (on) => {
+      const sw = startAtIso?.closest?.("[data-remi-datetime]");
+      const ew = endAtIso?.closest?.("[data-remi-datetime]");
+      if (sw instanceof HTMLElement) sw.classList.toggle("remi-datetime-field--venue-hours-warn", Boolean(on));
+      if (ew instanceof HTMLElement) ew.classList.toggle("remi-datetime-field--venue-hours-warn", Boolean(on));
+      if (timeWarningEl) {
+        if (on) {
+          timeWarningEl.textContent =
+            "Warning: Scheduled time is outside venue operating hours.";
+          timeWarningEl.classList.remove("hidden");
+        } else {
+          timeWarningEl.textContent = "";
+          timeWarningEl.classList.add("hidden");
+        }
+      }
+    };
+
+    const venueYmd = () => {
+      const raw = startAtIso instanceof HTMLInputElement ? startAtIso.value : "";
+      const s = String(raw || "").trim();
+      if (s.length >= 10) return s.slice(0, 10);
+      return todayLocal;
+    };
+
+    const syncVenueHoursHiddenField = () => {
+      if (!(venueHoursJsonInput instanceof HTMLInputElement)) return;
+      if (!latestGooglePlaceId || !latestPlaceDetails) {
+        venueHoursJsonInput.value = "";
+        return;
+      }
+      const ymd = venueYmd();
+      const { summary } = remiSummarizeHoursFromPlaceDetail(latestPlaceDetails, ymd);
+      venueHoursJsonInput.value = JSON.stringify({
+        date: ymd,
+        summary,
+        google_place_id: latestGooglePlaceId
+      });
+    };
+
+    const validateTimesAgainstVenue = () => {
+      if (!latestGooglePlaceId || !latestPlaceDetails) {
+        clearTimeWarnings();
+        return;
+      }
+      const ymd = venueYmd();
+      const startV = startAtIso instanceof HTMLInputElement ? startAtIso.value : "";
+      const endV = endAtIso instanceof HTMLInputElement ? endAtIso.value : "";
+      const bad = remiScheduleOutsideVenue(latestPlaceDetails, ymd, startV, endV);
+      applyTimeWarnings(bad);
+    };
+
+    const refreshPlaceChip = () => {
+      if (!chip) return;
+      if (!latestGooglePlaceId || !latestPlaceDetails) return;
+      const { summary } = remiSummarizeHoursFromPlaceDetail(latestPlaceDetails, venueYmd());
+      chip.textContent = summary;
+      chipWrap?.removeAttribute("hidden");
+      syncVenueHoursHiddenField();
+      validateTimesAgainstVenue();
+    };
+
+    const setChipLoading = (on) => {
+      chip?.classList.toggle("place-hours-chip--loading", Boolean(on));
+      if (on) chipWrap?.removeAttribute("hidden");
+    };
+
+    const resetVenueAssistantState = () => {
+      latestPlaceDetails = null;
+      latestGooglePlaceId = "";
+      if (googlePlaceIdInput instanceof HTMLInputElement) googlePlaceIdInput.value = "";
+      if (venueHoursJsonInput instanceof HTMLInputElement) venueHoursJsonInput.value = "";
+      if (titleInput instanceof HTMLInputElement) titleInput.value = "";
+      if (chip) chip.textContent = "";
+      chipWrap?.setAttribute("hidden", "");
+      chip?.classList.remove("place-hours-chip--loading");
+      clearTimeWarnings();
+      syncLocationClearBtn();
+    };
+
+    itineraryForm.addEventListener(
+      "remi-itinerary-form-reset-save-another",
+      () => {
+        resetVenueAssistantState();
+        cachedLocation = "";
+        cachedCoords = null;
+        fillCoordinates(null);
+        hideSuggestions();
+        setLocationStatus("Type a location and coordinates will be fetched automatically.", "");
+        const tabsHost = itineraryForm.querySelector("[data-add-stop-tabs]");
+        if (tabsHost) {
+          const detailsTab = tabsHost.querySelector("[data-add-stop-tab='details']");
+          if (detailsTab instanceof HTMLElement) detailsTab.click();
+        }
+      },
+      false
+    );
+
     const setLocationStatus = (message, state) => {
       if (!locationStatus) return;
       locationStatus.textContent = message;
@@ -6045,19 +6386,27 @@ window.addEventListener("load", () => {
           setDateStatus("Please select start date and time before saving.", "error");
           return false;
         }
-        if (!d1) {
-          setDateStatus("Please select end date and time before saving.", "error");
-          return false;
-        }
-        if (d0 < tripStart || d0 > tripEnd || d1 < tripStart || d1 > tripEnd) {
+        if (d0 < tripStart || d0 > tripEnd) {
           setDateStatus(`Dates must be between ${tripStartLabel} and ${tripEndLabel}.`, "error");
           return false;
         }
-        if (d0 !== d1) {
-          setDateStatus("Start and end must be on the same calendar day.", "error");
-          return false;
+        if (d1) {
+          if (d1 < tripStart || d1 > tripEnd) {
+            setDateStatus(`Dates must be between ${tripStartLabel} and ${tripEndLabel}.`, "error");
+            return false;
+          }
+          if (d0 !== d1) {
+            setDateStatus("Start and end must be on the same calendar day.", "error");
+            return false;
+          }
+          const fs = String(startAtIso.value || "").trim();
+          const fe = String(endAtIso.value || "").trim();
+          if (fe && fs && fe < fs) {
+            setDateStatus("End time must be on or after start time.", "error");
+            return false;
+          }
         }
-        setDateStatus(`This date is within your trip (${tripStartLabel} – ${tripEndLabel}).`, "success");
+        setDateStatus("", "");
         return true;
       }
       if (!(itineraryDateIso instanceof HTMLInputElement)) return true;
@@ -6070,7 +6419,7 @@ window.addEventListener("load", () => {
         setDateStatus(`Date must be between ${tripStartLabel} and ${tripEndLabel}.`, "error");
         return false;
       }
-      setDateStatus(`This date is within your trip (${tripStartLabel} – ${tripEndLabel}).`, "success");
+      setDateStatus("", "");
       return true;
     };
 
@@ -6080,15 +6429,70 @@ window.addEventListener("load", () => {
       suggestionBox.innerHTML = "";
     };
 
-    const selectSuggestion = (suggestion) => {
+    const clearItineraryLocationChoice = () => {
+      if (locationInput instanceof HTMLInputElement) locationInput.value = "";
+      hideSuggestions();
+      cachedLocation = "";
+      cachedCoords = null;
+      fillCoordinates(null);
+      resetVenueAssistantState();
+      setLocationStatus("Type a location and coordinates will be fetched automatically.", "");
+    };
+
+    const selectSuggestion = async (suggestion) => {
       if (!locationInput) return;
+      hideSuggestions();
+      const pid = String(suggestion.placeId || "").trim();
+      if (pid && locationLookupEnabled) {
+        setChipLoading(true);
+        setLocationStatus("Loading place details…");
+        const detail = await fetchPlaceDetailsForItinerary(pid);
+        setChipLoading(false);
+        if (!detail || (detail.lat === 0 && detail.lng === 0 && !detail.formattedAddress)) {
+          setLocationStatus("Could not load details for that place. Try another result.", "error");
+          return;
+        }
+        latestPlaceDetails = detail;
+        latestGooglePlaceId = pid;
+        if (googlePlaceIdInput instanceof HTMLInputElement) googlePlaceIdInput.value = pid;
+        const addr =
+          String(detail.formattedAddress || "").trim() ||
+          String(suggestion.formattedAddress || "").trim() ||
+          String(suggestion.displayName || "").trim();
+        locationInput.value = addr;
+        const t =
+          String(detail.placeName || "").trim() ||
+          String(suggestion.placeName || "").trim() ||
+          String(suggestion.shortName || "").trim();
+        if (titleInput instanceof HTMLInputElement && t) titleInput.value = t;
+        fillCoordinates({ lat: detail.lat, lng: detail.lng });
+        cachedLocation = normalize(addr);
+        cachedCoords = { lat: detail.lat, lng: detail.lng, displayName: addr };
+        setLocationStatus("", "");
+        refreshPlaceChip();
+        syncLocationClearBtn();
+        return;
+      }
+      resetVenueAssistantState();
       const cleanName = suggestion.displayName || locationInput.value.trim();
       locationInput.value = cleanName;
+      const t0 =
+        String(suggestion.placeName || "").trim() ||
+        String(suggestion.shortName || "").trim() ||
+        (cleanName ? cleanName.split(",")[0].trim() : "");
+      if (titleInput instanceof HTMLInputElement && t0) titleInput.value = t0;
       cachedLocation = normalize(cleanName);
       cachedCoords = { lat: suggestion.lat, lng: suggestion.lng, displayName: cleanName };
       fillCoordinates(cachedCoords);
-      setLocationStatus("Location selected and ready to plot on the map.", "success");
-      hideSuggestions();
+      setLocationStatus("", "");
+      if (chip) {
+        chip.textContent =
+          "🔴 Hours unavailable for this result — pick a Google Places suggestion when Maps is enabled.";
+      }
+      chipWrap?.removeAttribute("hidden");
+      syncVenueHoursHiddenField();
+      validateTimesAgainstVenue();
+      syncLocationClearBtn();
     };
 
     const renderSuggestions = (suggestions) => {
@@ -6102,10 +6506,17 @@ window.addEventListener("load", () => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "location-suggestion-btn";
-        btn.textContent = suggestion.displayName;
+        const line1 = document.createElement("span");
+        line1.className = "location-suggestion-btn__primary";
+        line1.textContent = suggestion.placeName || suggestion.shortName || suggestion.displayName;
+        const line2 = document.createElement("span");
+        line2.className = "location-suggestion-btn__secondary muted small";
+        line2.textContent = suggestion.formattedAddress || suggestion.displayName || "";
+        btn.appendChild(line1);
+        btn.appendChild(line2);
         remiPreventLocationSuggestBlur(btn);
         btn.addEventListener("click", () => {
-          selectSuggestion(suggestion);
+          void selectSuggestion(suggestion);
         });
         suggestionBox.appendChild(btn);
       });
@@ -6130,6 +6541,7 @@ window.addEventListener("load", () => {
           fillCoordinates(null);
           cachedLocation = "";
           cachedCoords = null;
+          resetVenueAssistantState();
         }
         return;
       }
@@ -6159,6 +6571,7 @@ window.addEventListener("load", () => {
         cachedCoords = null;
         fillCoordinates(null);
         hideSuggestions();
+        resetVenueAssistantState();
         setLocationStatus("Type a location and coordinates will be fetched automatically.");
         return true;
       }
@@ -6184,8 +6597,9 @@ window.addEventListener("load", () => {
       cachedLocation = normalizedQuery;
       cachedCoords = coords;
       fillCoordinates(coords);
-      setLocationStatus("Location found and ready to plot on the map.", "success");
+      setLocationStatus("", "");
       hideSuggestions();
+      syncLocationClearBtn();
       return true;
     };
 
@@ -6194,7 +6608,11 @@ window.addEventListener("load", () => {
         cachedLocation = "";
         cachedCoords = null;
         fillCoordinates(null);
+        if (!(locationInput.value || "").trim()) {
+          resetVenueAssistantState();
+        }
         queueSuggestions(locationInput.value);
+        syncLocationClearBtn();
       });
       locationInput.addEventListener("blur", () => {
         window.setTimeout(() => {
@@ -6203,15 +6621,59 @@ window.addEventListener("load", () => {
         void resolveLocation(locationInput.value);
       });
     }
-    if (itineraryDateInput) {
-      itineraryDateInput.addEventListener("change", () => {
-        validateDateInTripRange();
+    if (locationClearBtn instanceof HTMLButtonElement) {
+      remiPreventLocationSuggestBlur(locationClearBtn);
+      locationClearBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        clearItineraryLocationChoice();
       });
+    }
+    const onStopScheduleChange = () => {
+      validateDateInTripRange();
+      if (latestGooglePlaceId) {
+        refreshPlaceChip();
+      }
+    };
+    if (itineraryDateInput) {
+      itineraryDateInput.addEventListener("change", onStopScheduleChange);
       validateDateInTripRange();
     }
-    if (endAtIso instanceof HTMLInputElement && endAtIso !== itineraryDateInput) {
-      endAtIso.addEventListener("change", () => validateDateInTripRange());
+    if (startAtIso instanceof HTMLInputElement && startAtIso !== itineraryDateInput) {
+      startAtIso.addEventListener("change", onStopScheduleChange);
+      startAtIso.addEventListener("input", onStopScheduleChange);
     }
+    if (endAtIso instanceof HTMLInputElement && endAtIso !== itineraryDateInput) {
+      endAtIso.addEventListener("change", onStopScheduleChange);
+      endAtIso.addEventListener("input", onStopScheduleChange);
+    }
+
+    void (async () => {
+      const pid =
+        googlePlaceIdInput instanceof HTMLInputElement
+          ? String(googlePlaceIdInput.value || "").trim()
+          : "";
+      if (pid) {
+        setChipLoading(true);
+        const d = await fetchPlaceDetailsForItinerary(pid);
+        setChipLoading(false);
+        if (d) {
+          latestPlaceDetails = d;
+          latestGooglePlaceId = pid;
+          refreshPlaceChip();
+        }
+      } else if (venueHoursJsonInput instanceof HTMLInputElement && (venueHoursJsonInput.value || "").trim()) {
+        try {
+          const j = JSON.parse(venueHoursJsonInput.value);
+          if (chip && j.summary) {
+            chip.textContent = j.summary;
+            chipWrap?.removeAttribute("hidden");
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      syncLocationClearBtn();
+    })();
 
     // Submit must stay synchronous for preventDefault + default action; async listeners and
     // requestSubmit() without the original submitter caused first-click no-ops in some cases.
@@ -6231,6 +6693,7 @@ window.addEventListener("load", () => {
         else itineraryDateInput?.focus?.();
         return;
       }
+      syncVenueHoursHiddenField();
       if (!locationInput) return;
       const query = (locationInput.value || "").trim();
       if (!query) return;
@@ -6339,11 +6802,29 @@ window.addEventListener("load", () => {
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "location-suggestion-btn";
-          btn.textContent = suggestion.displayName;
+          const line1 = document.createElement("span");
+          line1.className = "location-suggestion-btn__primary";
+          line1.textContent = suggestion.placeName || suggestion.shortName || suggestion.displayName;
+          const line2 = document.createElement("span");
+          line2.className = "location-suggestion-btn__secondary";
+          line2.textContent = suggestion.formattedAddress || suggestion.displayName || "";
+          btn.appendChild(line1);
+          btn.appendChild(line2);
           remiPreventLocationSuggestBlur(btn);
           btn.addEventListener("click", () => {
-            input.value = suggestion.displayName;
-            hide();
+            void (async () => {
+              const pid = String(suggestion.placeId || "").trim();
+              if (pid) {
+                const detail = await fetchPlaceDetailsForItinerary(pid);
+                input.value =
+                  (detail && String(detail.formattedAddress || "").trim()) ||
+                  String(suggestion.formattedAddress || "").trim() ||
+                  suggestion.displayName;
+              } else {
+                input.value = suggestion.displayName;
+              }
+              hide();
+            })();
           });
           host.appendChild(btn);
         });
@@ -7250,6 +7731,13 @@ window.addEventListener("load", () => {
     });
   };
 
+  /** Trip page HTML fetches must bypass the SW cache-first rule (sw.js) or stale DOM fragments replace live UI. */
+  const tripPageHtmlFetchURL = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("_remi_cb", String(Date.now()));
+    return url.toString();
+  };
+
   const refreshInlineViewFromServer = async (form) => {
     const formId = form.id || "";
     if (!formId) return;
@@ -7259,7 +7747,7 @@ window.addEventListener("load", () => {
     const currentView = document.getElementById(viewId);
     if (!currentView) return;
     try {
-      const response = await fetchNoStore(window.location.href, {
+      const response = await fetchNoStore(tripPageHtmlFetchURL(), {
         headers: {
           "X-Requested-With": "XMLHttpRequest",
           Accept: "text/html"
@@ -7287,7 +7775,7 @@ window.addEventListener("load", () => {
 
   // Shared helper: fetch fresh page HTML once, reuse across calls
   const fetchFreshDoc = async () => {
-    const r = await fetchNoStore(window.location.href, {
+    const r = await fetchNoStore(tripPageHtmlFetchURL(), {
       headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" }
     });
     if (!r.ok) return null;
@@ -7316,6 +7804,15 @@ window.addEventListener("load", () => {
     window.remiRefreshTripDocumentsListFilter?.();
     window.remiFitBudgetDonutCenterValues?.(scope);
     window.remiWireMobileSheetFormDirtyIn?.(scope);
+    scope.querySelectorAll("[data-itinerary-form]").forEach((f) => {
+      if (f instanceof HTMLFormElement && !f.dataset.remiItineraryFormBound) {
+        initItineraryForm(f);
+      }
+    });
+    /* New <details.trip-inline-actions-dropdown> from server HTML default to closed; without `open`,
+     * the UA hides .trip-inline-actions-buttons (Edit/Delete) until reload — same as after inline edit. */
+    window.remiApplyExpenseActionsDropdownOpen?.();
+    window.remiRewireTripItineraryCalendarAfterLiveRefresh?.();
   };
 
   const replaceSelectorFromFreshDoc = (selector, freshDoc) => {
@@ -7353,13 +7850,17 @@ window.addEventListener("load", () => {
     if (!freshDoc) return false;
     let changed = false;
     [
+      ".trip-itinerary-shell",
       ".trip-page-stays-section",
       ".trip-page-vehicles-section",
       ".trip-page-flights-section",
       ".trip-members-mobile-shell",
       ".sidebar-trip-members-wrap",
       ".trip-mobile-header",
-      ".trip-desktop-header-tools"
+      ".trip-desktop-header-tools",
+      ".trip-sidebar-itinerary-composer",
+      "#mobile-sheet-stop .trip-mobile-fab-itinerary-refresh",
+      "#mobile-sheet-commute .trip-mobile-fab-itinerary-refresh"
     ].forEach((selector) => {
       changed = replaceSelectorFromFreshDoc(selector, freshDoc) || changed;
     });
@@ -7639,8 +8140,7 @@ window.addEventListener("load", () => {
     const tiles = document.querySelectorAll(".trip-details-page .budget-tile");
     if (!tiles.length) return;
     try {
-      const response = await fetch(window.location.href, {
-        cache: "no-store",
+      const response = await fetchNoStore(tripPageHtmlFetchURL(), {
         credentials: "same-origin",
         headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/html" }
       });
@@ -7817,6 +8317,63 @@ window.addEventListener("load", () => {
     };
   }
 
+  const expandAndFocusNewItineraryAfterAddStop = async (opts) => {
+    const focusRow = !(opts && opts.skipRowFocus);
+    const dateIso = opts && opts.dateIso ? String(opts.dateIso).trim() : "";
+    const titleHint = opts && opts.titleHint ? String(opts.titleHint).trim() : "";
+    const dayNumberRaw = opts && opts.dayNumber != null ? opts.dayNumber : null;
+    const dayNumber =
+      typeof dayNumberRaw === "number" && Number.isFinite(dayNumberRaw) && dayNumberRaw >= 1
+        ? dayNumberRaw
+        : null;
+    const shell =
+      document.getElementById("trip-page-itinerary") || document.querySelector(".trip-itinerary-shell");
+    if (!(shell instanceof HTMLElement)) return;
+    const listBtn = shell.querySelector('[data-itinerary-view-toggle="list"]');
+    if (listBtn instanceof HTMLElement && !listBtn.classList.contains("is-active")) listBtn.click();
+    let dayGroup = null;
+    if (dateIso) {
+      dayGroup = shell.querySelector(`details.day-group[data-date="${dateIso}"]`);
+    }
+    if (!dayGroup && dayNumber != null) {
+      const hit = shell.querySelector(`ul.day-items li.timeline-item[data-map-day="${dayNumber}"]`);
+      if (hit instanceof HTMLElement) dayGroup = hit.closest("details.day-group");
+    }
+    if (!(dayGroup instanceof HTMLDetailsElement)) return;
+    dayGroup.open = true;
+    const ul = dayGroup.querySelector(":scope > ul.day-items");
+    if (!(ul instanceof HTMLElement)) return;
+    const rows = Array.from(ul.querySelectorAll(":scope > li.timeline-item[data-itinerary-item-id]"));
+    if (!rows.length) return;
+    let target = null;
+    if (titleHint) {
+      const tNorm = titleHint.toLowerCase();
+      const byTitle = rows.filter(
+        (li) =>
+          (li.getAttribute("data-marker-kind") || "") === "stop" &&
+          (li.getAttribute("data-title") || "").trim().toLowerCase() === tNorm
+      );
+      if (byTitle.length) target = byTitle[byTitle.length - 1];
+    }
+    if (!target) {
+      const stops = rows.filter((li) => (li.getAttribute("data-marker-kind") || "") === "stop");
+      target = stops.length ? stops[stops.length - 1] : rows[rows.length - 1];
+    }
+    await renderItineraryConnectors(document);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        if (!focusRow) return;
+        if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        try {
+          target.focus({ preventScroll: true });
+        } catch (e) {
+          /* ignore */
+        }
+      });
+    });
+  };
+
   const handleAjaxFormSubmit = (event) => {
     const form = event.currentTarget;
     if (!(form instanceof HTMLFormElement)) return;
@@ -7906,6 +8463,92 @@ window.addEventListener("load", () => {
               return;
             }
           }
+        }
+        if (form.getAttribute("data-remi-trip-fab-flight-add") === "1") {
+          const saveAnother =
+            submitterEl instanceof HTMLElement &&
+            submitterEl.getAttribute("data-remi-flight-save-another") === "1";
+          await refreshTripDetailsSupportSectionsFromServer();
+          showToast(inferToastMessage(form));
+          window.remiNotifyMobileSheetFormSaved?.(form);
+          if (saveAnother) {
+            window.remiResetTripFabFlightForm?.(form);
+            const airlineIn = form.querySelector('input[name="flight_name"]');
+            if (airlineIn instanceof HTMLElement) airlineIn.focus();
+          } else {
+            requestDismissMobileBottomSheet();
+          }
+          return;
+        }
+        if (form.getAttribute("data-remi-trip-fab-add-stop") === "1") {
+          const saveAnother =
+            submitterEl instanceof HTMLElement &&
+            submitterEl.getAttribute("data-remi-itinerary-save-another") === "1";
+          const inMobile = Boolean(form.closest("#mobile-sheet-stop"));
+          const startH = form.querySelector("input.remi-datetime-iso[name='start_at']");
+          const startVal = startH instanceof HTMLInputElement ? startH.value.trim() : "";
+          const dateIso = startVal.length >= 10 ? startVal.slice(0, 10) : "";
+          const titleInp = form.querySelector('input[name="title"]');
+          const titleHint = titleInp instanceof HTMLInputElement ? titleInp.value.trim() : "";
+          let dayNumber = null;
+          const ts = (form.getAttribute("data-trip-start") || "").trim();
+          if (dateIso && ts) {
+            const a = new Date(`${ts}T12:00:00`);
+            const b = new Date(`${dateIso}T12:00:00`);
+            if (!Number.isNaN(a.getTime()) && !Number.isNaN(b.getTime())) {
+              const dn = Math.floor((b.getTime() - a.getTime()) / 864e5) + 1;
+              if (Number.isFinite(dn) && dn >= 1) dayNumber = dn;
+            }
+          }
+          await refreshTripDetailsSupportSectionsFromServer();
+          showToast(inferToastMessage(form));
+          await expandAndFocusNewItineraryAfterAddStop({
+            dateIso,
+            titleHint,
+            dayNumber,
+            skipRowFocus: saveAnother
+          });
+          if (saveAnother) {
+            const freshForm = inMobile
+              ? document.querySelector("#mobile-sheet-stop form[data-remi-trip-fab-add-stop]")
+              : document.querySelector(
+                  ".trip-sidebar-itinerary-section--stop form[data-remi-trip-fab-add-stop]"
+                );
+            if (freshForm instanceof HTMLFormElement) {
+              window.remiNotifyMobileSheetFormSaved?.(freshForm);
+              window.remiResetTripFabAddStopForm?.(freshForm, { preserveStartAt: startVal });
+              const loc = freshForm.querySelector("[data-location-input]");
+              if (loc instanceof HTMLElement) loc.focus();
+            }
+          } else {
+            window.remiNotifyMobileSheetFormSaved?.(form);
+            requestDismissMobileBottomSheet();
+          }
+          return;
+        }
+        if (
+          form.classList.contains("remi-add-commute-form") &&
+          (form.action || "").includes("/itinerary/commute")
+        ) {
+          const saveAnother =
+            submitterEl instanceof HTMLElement &&
+            submitterEl.getAttribute("data-remi-commute-save-another") === "1";
+          const prevId = form.id || "";
+          await refreshTripDetailsSupportSectionsFromServer();
+          showToast(inferToastMessage(form));
+          if (saveAnother) {
+            const freshForm = prevId ? document.getElementById(prevId) : null;
+            if (freshForm instanceof HTMLFormElement) {
+              window.remiNotifyMobileSheetFormSaved?.(freshForm);
+              window.remiResetTripFabCommuteForm?.(freshForm);
+              const titleInp = freshForm.querySelector('input[name="title"]');
+              if (titleInp instanceof HTMLElement) titleInp.focus();
+            }
+          } else {
+            window.remiNotifyMobileSheetFormSaved?.(form);
+            requestDismissMobileBottomSheet();
+          }
+          return;
         }
         if (form.matches("[data-remi-unified-expense-add-form]")) {
           const saveAnother =
@@ -8691,6 +9334,49 @@ window.addEventListener("load", () => {
     form.dispatchEvent(new CustomEvent("remi-mobile-sheet-saved", { bubbles: false }));
   };
   window.remiWireMobileSheetFormDirtyIn = wireMobileSheetFormsIn;
+
+  const remiResetTripFabFlightForm = (form) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    form.reset();
+    form.querySelectorAll("[data-remi-datetime]").forEach((w) => {
+      if (w instanceof HTMLElement) delete w.dataset.remiDatetimeWired;
+    });
+    window.remiWireDateTimeFieldsIn?.(form);
+    window.remiWireMobileSheetFormDirtyIn?.(form);
+  };
+  window.remiResetTripFabFlightForm = remiResetTripFabFlightForm;
+
+  const remiResetTripFabAddStopForm = (form, opts) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    const preserveStart =
+      opts && typeof opts.preserveStartAt === "string" ? opts.preserveStartAt.trim() : "";
+    form.reset();
+    form.querySelectorAll("[data-remi-datetime]").forEach((w) => {
+      if (w instanceof HTMLElement) delete w.dataset.remiDatetimeWired;
+    });
+    form.dispatchEvent(new CustomEvent("remi-itinerary-form-reset-save-another", { bubbles: false }));
+    window.remiWireDateTimeFieldsIn?.(form);
+    if (preserveStart) {
+      const startIso = form.querySelector("input.remi-datetime-iso[name='start_at']");
+      if (startIso instanceof HTMLInputElement) {
+        startIso.value = preserveStart;
+        startIso.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+    window.remiWireMobileSheetFormDirtyIn?.(form);
+  };
+  window.remiResetTripFabAddStopForm = remiResetTripFabAddStopForm;
+
+  const remiResetTripFabCommuteForm = (form) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    form.reset();
+    form.querySelectorAll("[data-remi-datetime]").forEach((w) => {
+      if (w instanceof HTMLElement) delete w.dataset.remiDatetimeWired;
+    });
+    window.remiWireDateTimeFieldsIn?.(form);
+    window.remiWireMobileSheetFormDirtyIn?.(form);
+  };
+  window.remiResetTripFabCommuteForm = remiResetTripFabCommuteForm;
 
   const sheetHasDirtyForm = (sheet) => {
     if (!(sheet instanceof HTMLElement)) return false;
@@ -13291,6 +13977,13 @@ function initTabOverTimeChart() {
       k: "04",
       sidebarTitle: "Personalization",
       sidebarDesc: "Choose solo or group travel and turn trip sections on or off.",
+      nextHint: "Next: Saved notes & checklists",
+    },
+    {
+      step: "STEP 05 — NOTES",
+      k: "05",
+      sidebarTitle: "Saved notes & checklists",
+      sidebarDesc: "Optionally copy global notes and checklist templates into this trip.",
       nextHint: "",
     },
   ];
@@ -13468,6 +14161,25 @@ function initTabOverTimeChart() {
     }
   }
 
+  function syncFtsDisplayPreferences(root) {
+    const pairs = [
+      { key: "itinerary", checkboxId: "fts-itin" },
+      { key: "spends", checkboxId: "fts-spends" },
+      { key: "the_tab", checkboxId: "fts-tab" }
+    ];
+    pairs.forEach(({ key, checkboxId }) => {
+      const cb = root.querySelector(`#${checkboxId}`);
+      const sel = root.querySelector(`[data-fts-display-select="${key}"]`);
+      const lab = root.querySelector(`[data-fts-display-for="${key}"]`);
+      if (!(sel instanceof HTMLSelectElement)) return;
+      const enabled = cb instanceof HTMLInputElement && cb.checked && !cb.disabled;
+      sel.disabled = !enabled;
+      if (lab instanceof HTMLElement) {
+        lab.classList.toggle("first-trip-setup__field--display-disabled", !enabled);
+      }
+    });
+  }
+
   function applyTravelMode(root, solo) {
     const pill = root.querySelector("[data-fts-group-pill]");
     const groupCells = root.querySelectorAll("[data-fts-group-only]");
@@ -13488,6 +14200,7 @@ function initTabOverTimeChart() {
         if (cb instanceof HTMLInputElement) cb.disabled = false;
       }
     });
+    syncFtsDisplayPreferences(root);
   }
 
   function boot() {
@@ -13525,14 +14238,9 @@ function initTabOverTimeChart() {
     );
     const segbar = root.querySelector("[data-fts-segbar]");
     const dots = root.querySelector("[data-fts-dots]");
-    if (segbar) {
-      segbar.replaceChildren();
-      for (let i = 0; i < steps.length; i++) segbar.appendChild(document.createElement("span"));
-    }
-    if (dots) {
-      dots.replaceChildren();
-      for (let i = 0; i < steps.length; i++) dots.appendChild(document.createElement("span"));
-    }
+    // Must be declared before the first rebuildProgressChrome() — that path reads this via maxStepIndex().
+    const checklistToggle = root.querySelector("#fts-checklist");
+    rebuildProgressChrome();
 
     wireCoverUI(root);
 
@@ -13549,8 +14257,33 @@ function initTabOverTimeChart() {
     const progressPct = root.querySelector("[data-fts-progress-pct]");
     const progressFill = root.querySelector("[data-fts-progress-fill]");
 
+    function checklistSectionOn() {
+      return checklistToggle instanceof HTMLInputElement && checklistToggle.checked;
+    }
+
+    /** Last step index: 4 when Notes & Checklists is on, else 3 (skips global-import step). */
+    function maxStepIndex() {
+      return checklistSectionOn() ? steps.length - 1 : steps.length - 2;
+    }
+
+    function stepCount() {
+      return maxStepIndex() + 1;
+    }
+
+    function rebuildProgressChrome() {
+      const n = stepCount();
+      if (segbar) {
+        segbar.replaceChildren();
+        for (let i = 0; i < n; i++) segbar.appendChild(document.createElement("span"));
+      }
+      if (dots) {
+        dots.replaceChildren();
+        for (let i = 0; i < n; i++) dots.appendChild(document.createElement("span"));
+      }
+    }
+
     function renderProgress() {
-      const n = steps.length;
+      const n = stepCount();
       const pct = Math.round(((idx + 1) / n) * 100);
       if (progressPct) progressPct.textContent = `${pct}% Complete`;
       if (progressFill instanceof HTMLElement) progressFill.style.width = `${pct}%`;
@@ -13567,9 +14300,9 @@ function initTabOverTimeChart() {
       if (sidebarTitle) sidebarTitle.textContent = m.sidebarTitle;
       if (sidebarDesc) sidebarDesc.textContent = m.sidebarDesc;
       if (mobileStep) mobileStep.textContent = m.step;
-      if (nextHint) nextHint.textContent = idx < n - 1 ? m.nextHint : "";
+      if (nextHint) nextHint.textContent = idx < maxStepIndex() ? m.nextHint : "";
       if (btnCont instanceof HTMLElement && btnSave instanceof HTMLElement) {
-        const last = idx >= n - 1;
+        const last = idx >= maxStepIndex();
         btnCont.hidden = last;
         btnSave.hidden = !last;
       }
@@ -13577,6 +14310,9 @@ function initTabOverTimeChart() {
     }
 
     function showStep(i) {
+      const cap = maxStepIndex();
+      if (i > cap) i = cap;
+      if (i < 0) i = 0;
       idx = i;
       steps.forEach((fs, j) => {
         const on = j === i;
@@ -13609,6 +14345,25 @@ function initTabOverTimeChart() {
     });
     applyTravelMode(root, travelSolo());
 
+    form.addEventListener("change", (e) => {
+      const t = e.target;
+      if (
+        t instanceof HTMLInputElement &&
+        t.type === "checkbox" &&
+        (t.name || "").startsWith("section_")
+      ) {
+        syncFtsDisplayPreferences(root);
+      }
+      if (t instanceof HTMLInputElement && t.id === "fts-checklist") {
+        rebuildProgressChrome();
+        if (!checklistSectionOn() && idx >= steps.length - 1) {
+          showStep(steps.length - 2);
+        } else {
+          renderProgress();
+        }
+      }
+    });
+
     showStep(0);
 
     function onEscapeDismiss(e) {
@@ -13634,7 +14389,7 @@ function initTabOverTimeChart() {
           return;
         }
       }
-      if (idx < steps.length - 1) showStep(idx + 1);
+      if (idx < maxStepIndex()) showStep(idx + 1);
     });
     btnBack?.addEventListener("click", () => {
       if (idx > 0) showStep(idx - 1);

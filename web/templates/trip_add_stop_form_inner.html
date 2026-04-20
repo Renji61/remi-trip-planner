@@ -6,16 +6,31 @@
     <button type="button" class="add-stop-tabs__tab" role="tab" aria-selected="false" tabindex="-1" id="add-stop-tab-reminders-{{.TabNamespace}}" data-add-stop-tab="reminders">Custom reminders</button>
   </div>
   <div class="add-stop-tabs__panel form-grid" role="tabpanel" id="add-stop-panel-details-{{.TabNamespace}}" data-add-stop-panel="details" aria-labelledby="add-stop-tab-details-{{.TabNamespace}}">
-    <label class="full itinerary-location-label">Location Name<input type="text" name="location" placeholder="e.g. Coron Island" data-location-input autocomplete="off" required><div class="location-suggestions hidden" data-location-suggestions></div></label>
+    <label class="full itinerary-location-label">Location Name
+      <span class="itinerary-location-input-wrap" data-itinerary-location-wrap>
+        <input type="text" name="location" placeholder="e.g. Coron Island" data-location-input autocomplete="off" required>
+        <button type="button" class="itinerary-location-clear-btn" data-itinerary-location-clear aria-label="Clear location" hidden>
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+        <div class="location-suggestions hidden" data-location-suggestions></div>
+      </span>
+    </label>
+    <div class="full place-hours-chip-wrap" data-place-hours-wrap hidden>
+      <div class="place-hours-chip" data-place-hours-chip role="status" aria-live="polite"></div>
+    </div>
     <p class="full location-hint" data-location-status>Type a location and coordinates will be fetched automatically.</p>
     <label class="full">Title<input type="text" name="title" placeholder="Kayaking Big Lagoon" required></label>
     {{if not (and .Trip.StartDate .Trip.EndDate)}}<p class="full muted small">No trip start/end dates yet — pick any date and time. You can set fixed trip dates later in trip settings.</p>{{end}}
     <label class="full">Start date &amp; time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Trip "Settings" .Settings "name" "start_at" "value" (joinItineraryLocalDateTime .Trip.StartDate "09:00") "required" true)}}</label>
-    <label class="full">End date &amp; time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Trip "Settings" .Settings "name" "end_at" "value" (joinItineraryLocalDateTime .Trip.StartDate "10:00") "required" true)}}</label>
+    <label class="full">End date &amp; time (optional){{template "remiDateTimeFieldTripBound" (dict "Trip" .Trip "Settings" .Settings "name" "end_at" "value" "" "required" false)}}</label>
     <label class="full">Cost<input type="number" step="0.01" min="0" name="est_cost" placeholder="0.00"></label>
-    <input type="hidden" name="latitude" data-latitude-input>
-    <input type="hidden" name="longitude" data-longitude-input>
+    <label class="full">Time Needed<input type="text" name="time_needed" maxlength="120" placeholder="e.g. 2 hours, 30 min"></label>
+    <input type="hidden" name="latitude" data-latitude-input value="">
+    <input type="hidden" name="longitude" data-longitude-input value="">
+    <input type="hidden" name="google_place_id" data-google-place-id-input value="">
+    <input type="hidden" name="venue_hours_json" data-venue-hours-json-input value="">
     <p class="full location-hint" data-date-status></p>
+    <p class="full location-hint venue-hours-time-warning hidden" data-venue-hours-time-warning></p>
     <label class="full">Notes<input type="text" name="notes" placeholder="Optional details"></label>
   </div>
   <div class="add-stop-tabs__panel form-grid add-stop-tabs__panel--reminders hidden" role="tabpanel" id="add-stop-panel-reminders-{{.TabNamespace}}" data-add-stop-panel="reminders" aria-labelledby="add-stop-tab-reminders-{{.TabNamespace}}" hidden>

@@ -130,7 +130,12 @@ func (s *Service) BuildTripICSBytes(ctx context.Context, tripID string) ([]byte,
 			continue
 		}
 		en := st.Add(time.Hour)
-		if et, ok2 := parseLocalTimeOnSameDay(st, it.EndTime); ok2 && !et.Before(st) {
+		if NormalizeItineraryItemKind(it.ItemKind) == ItineraryItemKindCommute && it.CommuteEndDayOffset > 0 {
+			day := st.AddDate(0, 0, it.CommuteEndDayOffset)
+			if et, ok2 := parseLocalTimeOnSameDay(day, it.EndTime); ok2 && et.After(st) {
+				en = et
+			}
+		} else if et, ok2 := parseLocalTimeOnSameDay(st, it.EndTime); ok2 && !et.Before(st) {
 			en = et
 		}
 		addEvent("remi-itin-"+it.ID, it.Title, it.Location, st, en)

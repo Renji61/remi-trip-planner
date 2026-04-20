@@ -138,11 +138,13 @@ type itineraryItemView struct {
 	CommuteFromLng   float64
 	CommuteToLat     float64
 	CommuteToLng     float64
+	// CommuteToTripDay: when the linked To itinerary row is on a different trip day than this commute row (From's day), set To's day_number for UI hints.
+	CommuteToTripDay int
 }
 
 type itineraryDayGroup struct {
-	DayNumber      int
-	DateLabel      string
+	DayNumber int
+	DateLabel string
 	// DraftDay is true when DayNumber stores a YYYY-MM-DD calendar encoding (draft trips with no trip start/end).
 	DraftDay       bool
 	DayDescription string
@@ -353,6 +355,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				"trimSpace":             strings.TrimSpace,
 				"keepNoteBodyPreview":   keepNoteBodyPreview,
 				"keepNoteColorInPicker": keepNoteColorInPicker,
+				"remiStaticAssetV":      RemiStaticAssetV,
 				"urlQueryEscape":        func(s string) string { return url.QueryEscape(s) },
 				"mainSectionVisible": func(key string, trip trips.Trip) bool {
 					return trips.MainSectionVisible(key, trip)
@@ -423,10 +426,11 @@ func NewRouter(deps Dependencies) http.Handler {
 					}
 					return "/" + s
 				},
-				"joinItineraryLocalDateTime": joinItineraryLocalDateTime,
-				"sub":                        func(a, b int) int { return a - b },
-				"add":                        func(a, b int) int { return a + b },
-				"addF":                       func(a, b float64) float64 { return a + b },
+				"joinItineraryLocalDateTime":              joinItineraryLocalDateTime,
+				"joinItineraryLocalDateTimeWithDayOffset": joinItineraryLocalDateTimeWithDayOffset,
+				"sub":  func(a, b int) int { return a - b },
+				"add":  func(a, b int) int { return a + b },
+				"addF": func(a, b float64) float64 { return a + b },
 				"dict": func(values ...any) (map[string]any, error) {
 					if len(values)%2 != 0 {
 						return nil, fmt.Errorf("dict: expected even number of arguments")
@@ -548,6 +552,11 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Use(a.verifyCSRF)
 		r.Post("/invites/accept", a.inviteAcceptSubmit)
 		r.Get("/", a.homePage)
+		r.Get("/notes-checklists", a.globalNotesChecklistsPage)
+		r.Post("/notes-checklists/note", a.globalKeepNoteCreate)
+		r.Post("/notes-checklists/checklist", a.globalKeepChecklistCreate)
+		r.Post("/notes-checklists/note/{noteID}/intent", a.globalKeepNoteIntent)
+		r.Post("/notes-checklists/checklist/{templateID}/intent", a.globalKeepChecklistIntent)
 		r.Get("/notifications", a.notificationsPage)
 		r.Post("/notifications/read-all", a.notificationsMarkAllRead)
 		r.Post("/notifications/{notificationID}/read", a.notificationsMarkOneRead)
@@ -569,6 +578,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/settings/theme", a.saveThemeQuick)
 		r.Get("/api/location/suggest", a.apiLocationSuggest)
 		r.Get("/api/location/geocode", a.apiLocationGeocode)
+		r.Get("/api/location/place-details", a.apiLocationPlaceDetails)
 		r.Post("/trips", a.createTrip)
 
 		r.Route("/trips/{tripID}", func(r chi.Router) {
@@ -601,6 +611,8 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Get("/vehicle-rental", a.vehicleRentalPage)
 			r.Get("/flights", a.flightsPage)
 			r.Get("/documents", a.tripDocumentsPage)
+			r.Get("/notes/import", a.tripNotesImportPage)
+			r.Post("/notes/import", a.tripNotesImportSubmit)
 			r.Get("/notes", a.tripNotesPage)
 			r.Post("/notes/note", a.tripNoteCreate)
 			r.Post("/notes/checklist", a.tripKeepChecklistCreate)
@@ -798,34 +810,27 @@ func (a *app) homePage(w http.ResponseWriter, r *http.Request) {
 	travelDistanceDisplay := trips.FormatDistanceStat(travelStats.KmLogged, settings.DefaultDistanceUnit)
 	homeDistanceUnit := trips.EffectiveDistanceUnit(nil, settings)
 
-	inProg := filterDashboardSidebarTrips(list, time.Now(), 2)
 	homeData := map[string]any{
-		"ActiveTripCards":        activeO,
-		"SharedTripCards":        activeS,
-		"DraftTripCards":         draftMerged,
-		"CompletedTripCards":     completedMerged,
-		"ArchivedTripCards":      archMerged,
-		"Settings":               settings,
-		"TravelStats":            travelStats,
-		"TravelDistanceDisplay":  travelDistanceDisplay,
-		"HomeDistanceUnit":       homeDistanceUnit,
-		"CSRFToken":              CSRFToken(r.Context()),
-		"CurrentUser":            CurrentUser(r.Context()),
-		"Saved":                  r.URL.Query().Get("saved") == "1",
-		"HasError":               false,
-		"ErrorText":              "",
-		"DashboardListLayout":    settings.DashboardTripLayout == "list",
-		"HeroPatternClass":       heroPatternClass,
-		"HeroImageURL":           heroImageURL,
-		"SidebarNavActive":       "home",
-		"SidebarInProgressTrips": inProg,
-		"SidebarTripID":          "",
-		"TripID":                 "",
+		"ActiveTripCards":       activeO,
+		"SharedTripCards":       activeS,
+		"DraftTripCards":        draftMerged,
+		"CompletedTripCards":    completedMerged,
+		"ArchivedTripCards":     archMerged,
+		"Settings":              settings,
+		"TravelStats":           travelStats,
+		"TravelDistanceDisplay": travelDistanceDisplay,
+		"HomeDistanceUnit":      homeDistanceUnit,
+		"CSRFToken":             CSRFToken(r.Context()),
+		"Saved":                 r.URL.Query().Get("saved") == "1",
+		"HasError":              false,
+		"ErrorText":             "",
+		"DashboardListLayout":   settings.DashboardTripLayout == "list",
+		"HeroPatternClass":      heroPatternClass,
+		"HeroImageURL":          heroImageURL,
 	}
-	if n, err := a.tripService.CountUnreadNotifications(r.Context(), uid); err == nil {
-		homeData["NotificationUnreadCount"] = n
-	} else {
-		homeData["NotificationUnreadCount"] = 0
+	if err := a.mergeDashboardShell(r.Context(), uid, "home", "", homeData); err != nil {
+		writeInternalServerError(w, r, err)
+		return
 	}
 	_ = a.templates.ExecuteTemplate(w, "home.html", homeData)
 }
@@ -1526,6 +1531,21 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		pageData["NotificationUnreadCount"] = n
 	} else {
 		pageData["NotificationUnreadCount"] = 0
+	}
+	if !details.Trip.SetupComplete && acc.IsOwner && !details.Trip.IsArchived {
+		gNotes, err := a.tripService.ListGlobalKeepNotesByUser(r.Context(), uid)
+		if err != nil {
+			writeInternalServerError(w, r, err)
+			return
+		}
+		gCh, err := a.tripService.ListGlobalChecklistTemplatesByUser(r.Context(), uid)
+		if err != nil {
+			writeInternalServerError(w, r, err)
+			return
+		}
+		pageData["FirstTripSetupGlobalNotes"] = gNotes
+		pageData["FirstTripSetupGlobalChecklists"] = gCh
+		pageData["FirstTripSetupHasGlobalLibrary"] = len(gNotes) > 0 || len(gCh) > 0
 	}
 	var buf bytes.Buffer
 	if err := a.templates.ExecuteTemplate(&buf, "trip.html", pageData); err != nil {
@@ -2720,6 +2740,9 @@ func enrichItineraryCommuteLabels(allItems []trips.ItineraryItem, groups []itine
 			if t, ok := byID[v.Item.CommuteToItemID]; ok {
 				v.CommuteToLat = t.Latitude
 				v.CommuteToLng = t.Longitude
+				if t.DayNumber != v.Item.DayNumber {
+					v.CommuteToTripDay = t.DayNumber
+				}
 			}
 		}
 	}
@@ -3180,10 +3203,50 @@ func (a *app) saveFirstTripSetup(w http.ResponseWriter, r *http.Request) {
 	if !existing.UIShowSpends {
 		existing.UIShowTheTab = false
 	}
+	if existing.UIShowItinerary {
+		itExp := strings.ToLower(strings.TrimSpace(r.FormValue("ui_itinerary_expand")))
+		if itExp != "all" && itExp != "none" {
+			itExp = "first"
+		}
+		existing.UIItineraryExpand = itExp
+	}
+	if existing.UIShowSpends {
+		spExp := strings.ToLower(strings.TrimSpace(r.FormValue("ui_spends_expand")))
+		if spExp != "all" && spExp != "none" {
+			spExp = "first"
+		}
+		existing.UISpendsExpand = spExp
+	}
+	if existing.UIShowTheTab {
+		tabExp := strings.ToLower(strings.TrimSpace(r.FormValue("ui_group_expenses_expand")))
+		if tabExp != "all" && tabExp != "none" {
+			tabExp = "first"
+		}
+		existing.UITabExpand = tabExp
+	}
 	existing.SetupComplete = true
 	if err := a.tripService.UpdateTrip(r.Context(), existing); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if existing.UIShowChecklist {
+		uid := CurrentUserID(r.Context())
+		var noteIDs []string
+		for _, v := range r.Form["fts_import_note"] {
+			if id := strings.TrimSpace(v); id != "" {
+				noteIDs = append(noteIDs, id)
+			}
+		}
+		var chIDs []string
+		for _, v := range r.Form["fts_import_checklist"] {
+			if id := strings.TrimSpace(v); id != "" {
+				chIDs = append(chIDs, id)
+			}
+		}
+		if _, err := a.tripService.ImportGlobalKeepIntoTrip(r.Context(), uid, tripID, noteIDs, chIDs); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	http.Redirect(w, r, "/trips/"+tripID, http.StatusSeeOther)
 }
@@ -3327,18 +3390,21 @@ func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 	}
 	itemID := uuid.NewString()
 	err = a.tripService.AddItineraryItem(r.Context(), trips.ItineraryItem{
-		ID:           itemID,
-		TripID:       tripID,
-		DayNumber:    day,
-		Title:        r.FormValue("title"),
-		Notes:        r.FormValue("notes"),
-		Location:     location,
-		ImagePath:    imagePath,
-		Latitude:     lat,
-		Longitude:    lng,
-		EstCostCents: estCostCents,
-		StartTime:    startHM,
-		EndTime:      endHM,
+		ID:             itemID,
+		TripID:         tripID,
+		DayNumber:      day,
+		Title:          r.FormValue("title"),
+		Notes:          r.FormValue("notes"),
+		Location:       location,
+		ImagePath:      imagePath,
+		Latitude:       lat,
+		Longitude:      lng,
+		GooglePlaceID:  strings.TrimSpace(r.FormValue("google_place_id")),
+		VenueHoursJSON: strings.TrimSpace(r.FormValue("venue_hours_json")),
+		TimeNeeded:     strings.TrimSpace(r.FormValue("time_needed")),
+		EstCostCents:   estCostCents,
+		StartTime:      startHM,
+		EndTime:        endHM,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -3373,7 +3439,7 @@ func (a *app) addItineraryCommute(w http.ResponseWriter, r *http.Request) {
 	if a.redirectIfTripSectionDisabled(w, r, trip, "itinerary") {
 		return
 	}
-	day, startHM, endHM, err := parseItineraryDayAndTimesFromForm(r, trip)
+	startHM, endHM, endDayOff, err := parseCommuteLegTimesFromForm(r, trip)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -3387,14 +3453,14 @@ func (a *app) addItineraryCommute(w http.ResponseWriter, r *http.Request) {
 	toID := strings.TrimSpace(r.FormValue("commute_to_item_id"))
 	title := strings.TrimSpace(r.FormValue("title"))
 	err = a.tripService.AddItineraryCommute(r.Context(), fromID, toID, trips.ItineraryItem{
-		TripID:        tripID,
-		DayNumber:     day,
-		Title:         title,
-		Notes:         r.FormValue("notes"),
-		StartTime:     startHM,
-		EndTime:       endHM,
-		EstCostCents:  estCostCents,
-		TransportMode: strings.TrimSpace(r.FormValue("transport_mode")),
+		TripID:              tripID,
+		Title:               title,
+		Notes:               r.FormValue("notes"),
+		StartTime:           startHM,
+		EndTime:             endHM,
+		CommuteEndDayOffset: endDayOff,
+		EstCostCents:        estCostCents,
+		TransportMode:       strings.TrimSpace(r.FormValue("transport_mode")),
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -3570,7 +3636,7 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if trips.NormalizeItineraryItemKind(cur.ItemKind) == trips.ItineraryItemKindCommute {
-		day, startHM, endHM, err := parseItineraryDayAndTimesFromForm(r, trip)
+		startHM, endHM, endDayOff, err := parseCommuteLegTimesFromForm(r, trip)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -3592,12 +3658,12 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		err = a.tripService.UpdateItineraryItem(r.Context(), trips.ItineraryItem{
 			ID:                    itemID,
 			TripID:                tripID,
-			DayNumber:             day,
 			Title:                 r.FormValue("title"),
 			Notes:                 r.FormValue("notes"),
 			EstCostCents:          estCostCents,
 			StartTime:             startHM,
 			EndTime:               endHM,
+			CommuteEndDayOffset:   endDayOff,
 			ItemKind:              r.FormValue("item_kind"),
 			CommuteFromItemID:     strings.TrimSpace(r.FormValue("commute_from_item_id")),
 			CommuteToItemID:       strings.TrimSpace(r.FormValue("commute_to_item_id")),
@@ -3635,7 +3701,11 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	location := strings.TrimSpace(r.FormValue("location"))
-	lat, lng := a.geocodeForApp(r.Context(), location)
+	lat, _ := strconv.ParseFloat(r.FormValue("latitude"), 64)
+	lng, _ := strconv.ParseFloat(r.FormValue("longitude"), 64)
+	if lat == 0 && lng == 0 {
+		lat, lng = a.geocodeForApp(r.Context(), location)
+	}
 	if current, ok := findItineraryItemByID(details.Itinerary, itemID); ok {
 		lat, lng = fallbackItineraryCoordsOnGeocodeMiss(lat, lng, current)
 	}
@@ -3671,7 +3741,10 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		ImagePath:             imagePath,
 		Latitude:              lat,
 		Longitude:             lng,
+		GooglePlaceID:         strings.TrimSpace(r.FormValue("google_place_id")),
+		VenueHoursJSON:        strings.TrimSpace(r.FormValue("venue_hours_json")),
 		Notes:                 r.FormValue("notes"),
+		TimeNeeded:            strings.TrimSpace(r.FormValue("time_needed")),
 		EstCostCents:          estCostCents,
 		StartTime:             startHM,
 		EndTime:               endHM,
@@ -5831,6 +5904,25 @@ func isSafeReturnForTrip(raw string, tripID string) bool {
 	return raw == base || strings.HasPrefix(raw, base+"/") || strings.HasPrefix(raw, base+"?")
 }
 
+// isSafeReturnForGlobalKeep allows only /notes-checklists paths with optional query (no open redirects).
+func isSafeReturnForGlobalKeep(raw string) bool {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return false
+	}
+	if !strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") {
+		return false
+	}
+	if strings.ContainsAny(s, "@\\\x00") {
+		return false
+	}
+	if !strings.HasPrefix(s, "/notes-checklists") {
+		return false
+	}
+	rest := strings.TrimPrefix(s, "/notes-checklists")
+	return rest == "" || strings.HasPrefix(rest, "?") || strings.HasPrefix(rest, "#")
+}
+
 // isSafeSiteSettingsReturn allows same-origin relative redirects from site settings forms
 // (rejects protocol-relative //host, backslashes, NUL, and @ which can confuse URL handling).
 func isSafeSiteSettingsReturn(raw string) bool {
@@ -6238,30 +6330,47 @@ func trimItineraryLocalDateTimeMinute(s string) string {
 	return s
 }
 
-// parseItineraryDayAndTimesFromForm reads start_at/end_at (YYYY-MM-DDTHH:MM) when both are present,
-// otherwise legacy itinerary_date + start_time + end_time.
+// parseItineraryDayAndTimesFromForm reads start_at/end_at (YYYY-MM-DDTHH:MM). When start_at is set,
+// end_at is optional (stops may have only a start time). When both are set they must be the same
+// calendar day and end must not be before start. When start_at is empty, falls back to legacy
+// itinerary_date + start_time + end_time.
 func parseItineraryDayAndTimesFromForm(r *http.Request, trip trips.Trip) (day int, startHM, endHM string, err error) {
 	startAt := strings.TrimSpace(r.FormValue("start_at"))
 	endAt := strings.TrimSpace(r.FormValue("end_at"))
-	if startAt != "" && endAt != "" {
-		const layout = "2006-01-02T15:04"
+	const layout = "2006-01-02T15:04"
+	if startAt != "" {
 		s1 := trimItineraryLocalDateTimeMinute(startAt)
-		s2 := trimItineraryLocalDateTimeMinute(endAt)
 		ts, e1 := time.ParseInLocation(layout, s1, time.Local)
-		te, e2 := time.ParseInLocation(layout, s2, time.Local)
-		if e1 != nil || e2 != nil {
-			return 0, "", "", errors.New("invalid start or end date and time")
+		if e1 != nil {
+			return 0, "", "", errors.New("invalid start date and time")
 		}
 		d1 := ts.Format("2006-01-02")
-		d2 := te.Format("2006-01-02")
-		if d1 != d2 {
-			return 0, "", "", errors.New("start and end must be on the same calendar day")
-		}
 		day, err = dayNumberFromDate(trip.StartDate, trip.EndDate, d1)
 		if err != nil {
 			return 0, "", "", err
 		}
-		return day, ts.Format("15:04"), te.Format("15:04"), nil
+		startHM = ts.Format("15:04")
+		if endAt != "" {
+			s2 := trimItineraryLocalDateTimeMinute(endAt)
+			te, e2 := time.ParseInLocation(layout, s2, time.Local)
+			if e2 != nil {
+				return 0, "", "", errors.New("invalid end date and time")
+			}
+			d2 := te.Format("2006-01-02")
+			if d1 != d2 {
+				return 0, "", "", errors.New("start and end must be on the same calendar day")
+			}
+			endHM = te.Format("15:04")
+			if endHM < startHM {
+				return 0, "", "", errors.New("end time must be on or after start time")
+			}
+		} else {
+			endHM = ""
+		}
+		return day, startHM, endHM, nil
+	}
+	if endAt != "" {
+		return 0, "", "", errors.New("start date and time is required")
 	}
 	day, err = dayNumberFromDate(trip.StartDate, trip.EndDate, strings.TrimSpace(r.FormValue("itinerary_date")))
 	if err != nil {
@@ -6270,6 +6379,54 @@ func parseItineraryDayAndTimesFromForm(r *http.Request, trip trips.Trip) (day in
 	startHM = strings.TrimSpace(r.FormValue("start_time"))
 	endHM = strings.TrimSpace(r.FormValue("end_time"))
 	return day, startHM, endHM, nil
+}
+
+// parseCommuteLegTimesFromForm reads start_at/end_at for commute legs. End may fall on a later
+// calendar day than start (overnight within trip dates). Returns wall-clock times and
+// CommuteEndDayOffset (0 = same calendar day as start).
+func parseCommuteLegTimesFromForm(r *http.Request, trip trips.Trip) (startHM, endHM string, endDayOffset int, err error) {
+	startAt := strings.TrimSpace(r.FormValue("start_at"))
+	endAt := strings.TrimSpace(r.FormValue("end_at"))
+	const layout = "2006-01-02T15:04"
+	if startAt == "" {
+		return "", "", 0, errors.New("start date and time is required")
+	}
+	if endAt == "" {
+		return "", "", 0, errors.New("end date and time is required")
+	}
+	s1 := trimItineraryLocalDateTimeMinute(startAt)
+	ts, e1 := time.ParseInLocation(layout, s1, time.Local)
+	if e1 != nil {
+		return "", "", 0, errors.New("invalid start date and time")
+	}
+	s2 := trimItineraryLocalDateTimeMinute(endAt)
+	te, e2 := time.ParseInLocation(layout, s2, time.Local)
+	if e2 != nil {
+		return "", "", 0, errors.New("invalid end date and time")
+	}
+	d1 := ts.Format("2006-01-02")
+	d2 := te.Format("2006-01-02")
+	if _, err = dayNumberFromDate(trip.StartDate, trip.EndDate, d1); err != nil {
+		return "", "", 0, err
+	}
+	if _, err = dayNumberFromDate(trip.StartDate, trip.EndDate, d2); err != nil {
+		return "", "", 0, err
+	}
+	if !te.After(ts) {
+		return "", "", 0, errors.New("end must be after start")
+	}
+	dayStart, err1 := time.ParseInLocation("2006-01-02", d1, time.Local)
+	dayEnd, err2 := time.ParseInLocation("2006-01-02", d2, time.Local)
+	if err1 != nil || err2 != nil {
+		return "", "", 0, errors.New("invalid commute dates")
+	}
+	endDayOffset = int(dayEnd.Sub(dayStart).Hours() / 24)
+	if endDayOffset < 0 {
+		return "", "", 0, errors.New("end date is before start date")
+	}
+	startHM = ts.Format("15:04")
+	endHM = te.Format("15:04")
+	return startHM, endHM, endDayOffset, nil
 }
 
 func joinItineraryLocalDateTime(dateISO, timeHM string) string {
@@ -6285,6 +6442,24 @@ func joinItineraryLocalDateTime(dateISO, timeHM string) string {
 		timeHM = timeHM[:5]
 	}
 	return dateISO + "T" + timeHM
+}
+
+// joinItineraryLocalDateTimeWithDayOffset builds YYYY-MM-DDTHH:MM for end_at fields when the end
+// wall clock is on a calendar day `dayOffset` days after `dateISO` (commute overnight legs).
+func joinItineraryLocalDateTimeWithDayOffset(dateISO, timeHM string, dayOffset int) string {
+	if dayOffset <= 0 {
+		return joinItineraryLocalDateTime(dateISO, timeHM)
+	}
+	dateISO = strings.TrimSpace(dateISO)
+	if dateISO == "" {
+		return joinItineraryLocalDateTime(dateISO, timeHM)
+	}
+	day, err := time.ParseInLocation("2006-01-02", dateISO, time.Local)
+	if err != nil {
+		return joinItineraryLocalDateTime(dateISO, timeHM)
+	}
+	endDate := day.AddDate(0, 0, dayOffset).Format("2006-01-02")
+	return joinItineraryLocalDateTime(endDate, timeHM)
 }
 
 // absoluteURLForPublicStatic turns a root-relative /static/... path into an absolute URL for CSS url()

@@ -14,16 +14,19 @@
       </button>
     </div>
     <div class="trip-itinerary-drawer-scroll">
-      <div class="trip-itinerary-drawer-section trip-itinerary-drawer-section--stop">
+      <div class="trip-itinerary-drawer-section trip-itinerary-drawer-section--stop trip-mobile-fab-itinerary-refresh">
         <h4 class="trip-itinerary-drawer-section-title">
           <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
           Stop details
         </h4>
         <p class="trip-itinerary-drawer-section-intro muted small">Add a map pin and day-list row. <strong>Custom reminders</strong> live on the second tab below.</p>
-        <form method="post" action="/trips/{{.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-location-lookup-enabled="{{.Settings.EnableLocationLookup}}" data-trip-start="{{.Details.Trip.StartDate}}" data-trip-end="{{.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.EndDate}}">
+        <form method="post" action="/trips/{{.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-ajax-submit data-toast-message="Stop added." data-remi-trip-fab-add-stop="1" data-location-lookup-enabled="{{.Settings.EnableLocationLookup}}" data-trip-start="{{.Details.Trip.StartDate}}" data-trip-end="{{.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate .Details.Trip .Settings .Details.Trip.EndDate}}">
           {{template "tripAddStopFormInner" (dict "Trip" .Details.Trip "Settings" .Settings "TabNamespace" "mobile")}}
           <label class="full remi-widget-file-label">Attach Image<input type="file" name="stop_image" accept="image/*"></label>
-          <button class="full trip-itinerary-drawer-stop-submit" type="submit">Add to Itinerary</button>
+          <div class="full remi-trip-fab-dual-submit">
+            <button class="full trip-itinerary-drawer-stop-submit" type="submit">Add to Itinerary</button>
+            <button class="full secondary-btn" type="submit" data-remi-itinerary-save-another="1">Save &amp; Add Another</button>
+          </div>
         </form>
       </div>
     </div>
@@ -145,7 +148,7 @@
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/flights" class="form-grid remi-trip-widget-form flight-form-grid" enctype="multipart/form-data">
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/flights" class="form-grid remi-trip-widget-form flight-form-grid" enctype="multipart/form-data" data-ajax-submit data-toast-message="{{.Details.Trip.FlightsSectionTitle}} booking saved." data-remi-trip-fab-flight-add="1">
       <label class="full">Airline<input type="text" name="flight_name" placeholder="e.g. Philippine Airlines" required></label>
       <label class="full">Flight Number<input type="text" name="flight_number" placeholder="e.g. PR 2781"></label>
       <label class="full">Departure Airport<input type="text" name="depart_airport" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
@@ -157,7 +160,10 @@
       <label class="full">Boarding Pass / Ticket<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
       <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
       <label class="full">Notes<input type="text" name="notes" placeholder="Add any additional details"></label>
-      <button class="full" type="submit">Add {{.Details.Trip.FlightsSectionTitle}}</button>
+      <div class="full flight-edit-actions">
+        <button class="full" type="submit">Add {{.Details.Trip.FlightsSectionTitle}}</button>
+        <button class="full secondary-btn" type="submit" data-remi-flight-save-another="1">Save &amp; Add Another</button>
+      </div>
     </form>
   </section>
   {{end}}

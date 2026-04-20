@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=299">
+  <link rel="stylesheet" href="/static/app.css?v={{remiStaticAssetV}}">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="/static/app.js?v=283"></script>
+  <script defer src="/static/vendor/htmx-1.9.12.min.js?v={{remiStaticAssetV}}"></script>
+  <script defer src="/static/app.js?v={{remiStaticAssetV}}"></script>
 </head>
 <body class="trip-details-body">
   <main class="app-shell trip-details-page trip-fab-flyout-root" data-long-press-sheet-root data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
@@ -190,7 +190,7 @@
                   {{range $group.Items}}
                   {{if eq .Item.ItemKind "commute"}}
                   {{$commute := .}}
-                  <li class="timeline-item timeline-item--commute" data-itinerary-item data-itinerary-item-id="{{.Item.ID}}" data-map-day="{{$group.DayNumber}}" data-item-kind="commute" data-marker-kind="commute" data-commute-from="{{.Item.CommuteFromItemID}}" data-commute-to="{{.Item.CommuteToItemID}}" data-search-text="{{.Item.Title}} {{.Item.Notes}} {{.Item.TransportMode}} {{.CommuteFromTitle}} {{.CommuteToTitle}}" aria-label="Commute: {{.Item.Title}}">
+                  <li class="timeline-item timeline-item--commute" data-itinerary-item data-itinerary-item-id="{{.Item.ID}}" data-map-day="{{$group.DayNumber}}" data-item-kind="commute" data-marker-kind="commute" data-commute-from="{{.Item.CommuteFromItemID}}" data-commute-to="{{.Item.CommuteToItemID}}" data-search-text="{{.Item.Title}} {{.Item.Notes}} {{.Item.TransportMode}} {{.CommuteFromTitle}} {{.CommuteToTitle}}{{if ne .CommuteToTripDay 0}} Day {{.CommuteToTripDay}}{{end}}" aria-label="Commute: {{.Item.Title}}">
                     {{if not $.Details.Trip.IsArchived}}
                     <details class="item-actions trip-inline-actions-dropdown">
                       <summary class="trip-inline-actions-summary">
@@ -210,11 +210,11 @@
                       <div class="itinerary-vehicle-main">
                         <span class="itinerary-commute-badge" aria-hidden="true"><span class="material-symbols-outlined">{{if eq .Item.TransportMode "transit"}}directions_transit{{else if eq .Item.TransportMode "walk"}}directions_walk{{else if eq .Item.TransportMode "drive"}}directions_car{{else}}route{{end}}</span><span>Commute</span></span>
                         <strong>{{.Item.Title}}</strong>
-                        <div class="meta">{{if .Item.StartTime}}{{formatTripClock $.Details.Trip .Item.StartTime}}{{else}}--:--{{end}}{{if trimSpace .Item.EndTime}} – {{formatTripClock $.Details.Trip .Item.EndTime}}{{end}}</div>
+                        <div class="meta">{{if .Item.StartTime}}{{formatTripClock $.Details.Trip .Item.StartTime}}{{else}}--:--{{end}}{{if trimSpace .Item.EndTime}} – {{formatTripClock $.Details.Trip .Item.EndTime}}{{if gt .Item.CommuteEndDayOffset 0}} <span class="muted">(+{{.Item.CommuteEndDayOffset}} day{{if gt .Item.CommuteEndDayOffset 1}}s{{end}})</span>{{end}}{{end}}</div>
                         {{if or (trimSpace .Item.TransportMode) (and .CommuteFromTitle .CommuteToTitle)}}
                         <div class="itinerary-field">
                           <span class="itinerary-label">Details</span>
-                          <span class="itinerary-value">{{if trimSpace .Item.TransportMode}}{{.Item.TransportMode}}{{if and .CommuteFromTitle .CommuteToTitle}} · {{end}}{{end}}{{if and .CommuteFromTitle .CommuteToTitle}}{{.CommuteFromTitle}} → {{.CommuteToTitle}}{{else if and (ne .Item.CommuteFromItemID "") (eq .CommuteFromTitle "")}}<span class="muted">From link missing — edit to re-link</span>{{else if and (ne .Item.CommuteToItemID "") (eq .CommuteToTitle "")}}<span class="muted">To link missing — edit to re-link</span>{{end}}</span>
+                          <span class="itinerary-value">{{if trimSpace .Item.TransportMode}}{{.Item.TransportMode}}{{if and .CommuteFromTitle .CommuteToTitle}} · {{end}}{{end}}{{if and .CommuteFromTitle .CommuteToTitle}}{{.CommuteFromTitle}} → {{if ne .CommuteToTripDay 0}}<span class="muted">(Day {{.CommuteToTripDay}})</span> {{end}}{{.CommuteToTitle}}{{else if and (ne .Item.CommuteFromItemID "") (eq .CommuteFromTitle "")}}<span class="muted">From link missing — edit to re-link</span>{{else if and (ne .Item.CommuteToItemID "") (eq .CommuteToTitle "")}}<span class="muted">To link missing — edit to re-link</span>{{end}}</span>
                         </div>
                         {{end}}
                         {{with googleMapsDirectionsURL .CommuteFromLat .CommuteFromLng .CommuteToLat .CommuteToLng .Item.TransportMode}}
@@ -241,40 +241,33 @@
                     <form id="commute-itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/update" class="form-grid item-edit hidden commute-itinerary-form" data-ajax-submit data-toast-message="Commute updated.">
                       <input type="hidden" name="item_kind" value="commute">
                       <input type="hidden" name="expected_updated_at" value="{{.Item.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
-                      <p class="full muted small">A commute leg blocks travel time between two itinerary items on the same day. It appears on your day list and calendar like a stop, without adding an extra map pin.</p>
+                      <p class="full muted small">Blocks travel time between two itinerary items. The leg is listed on the <strong>From</strong> item’s trip day (even when <strong>To</strong> is another day). End may be on a later calendar day than start (overnight). No extra map pin.</p>
                       <label class="full">Title<input type="text" name="title" value="{{.Item.Title}}" required></label>
                       <label class="full">Start date &amp; time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "start_at" "value" (joinItineraryLocalDateTime $group.DateLabel .Item.StartTime) "required" true)}}</label>
-                      <label class="full">End date &amp; time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "end_at" "value" (joinItineraryLocalDateTime $group.DateLabel .Item.EndTime) "required" true)}}</label>
+                      <label class="full">End date &amp; time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "end_at" "value" (joinItineraryLocalDateTimeWithDayOffset $group.DateLabel .Item.EndTime .Item.CommuteEndDayOffset) "required" true)}}</label>
                       <label class="full">Est. cost<input type="number" step="0.01" min="0" name="est_cost" value="{{printf "%.2f" .Item.EstCost}}" placeholder="0.00"></label>
-                      <p class="full muted small">Quick duration (sets end from start)</p>
-                      <div class="full commute-duration-presets" data-commute-duration-presets>
-                        <button type="button" class="secondary-btn" data-commute-dur-min="15">15 min</button>
-                        <button type="button" class="secondary-btn" data-commute-dur-min="30">30 min</button>
-                        <button type="button" class="secondary-btn" data-commute-dur-min="45">45 min</button>
-                        <button type="button" class="secondary-btn" data-commute-dur-min="60">60 min</button>
-                      </div>
                       <label class="full">From (itinerary item)<select name="commute_from_item_id" required data-commute-endpoint-select>
                         <option value="">Select…</option>
-                        {{range $.DayGroups}}
-                        {{if eq .DayNumber $group.DayNumber}}
-                        {{range .Items}}
-                        {{if ne .Item.ID $commute.Item.ID}}
+                        {{range $dg := $.DayGroups}}
+                        <optgroup label="Day {{$dg.DayNumber}}{{if $dg.DateLabel}} — {{formatTripUIDate $.Details.Trip $.Settings $dg.DateLabel}}{{end}}">
+                        {{range $dg.Items}}
+                        {{if ne .Item.ItemKind "commute"}}
                         <option value="{{.Item.ID}}" {{if eq $commute.Item.CommuteFromItemID .Item.ID}}selected{{end}}>{{.Item.Title}}</option>
                         {{end}}
                         {{end}}
-                        {{end}}
+                        </optgroup>
                         {{end}}
                       </select></label>
                       <label class="full">To (itinerary item)<select name="commute_to_item_id" required data-commute-endpoint-select>
                         <option value="">Select…</option>
-                        {{range $.DayGroups}}
-                        {{if eq .DayNumber $group.DayNumber}}
-                        {{range .Items}}
-                        {{if ne .Item.ID $commute.Item.ID}}
+                        {{range $dg := $.DayGroups}}
+                        <optgroup label="Day {{$dg.DayNumber}}{{if $dg.DateLabel}} — {{formatTripUIDate $.Details.Trip $.Settings $dg.DateLabel}}{{end}}">
+                        {{range $dg.Items}}
+                        {{if ne .Item.ItemKind "commute"}}
                         <option value="{{.Item.ID}}" {{if eq $commute.Item.CommuteToItemID .Item.ID}}selected{{end}}>{{.Item.Title}}</option>
                         {{end}}
                         {{end}}
-                        {{end}}
+                        </optgroup>
                         {{end}}
                       </select></label>
                       <label class="full">Transport mode
@@ -293,7 +286,7 @@
                     {{end}}
                   </li>
                   {{else}}
-                  <li class="timeline-item" data-itinerary-item data-map-itinerary-point data-itinerary-item-id="{{.Item.ID}}" data-map-day="{{$group.DayNumber}}" data-marker-kind="{{if ne .Lodging.ID ""}}stay{{else if ne .Vehicle.ID ""}}vehicle{{else if ne .Flight.ID ""}}flight{{else}}stop{{end}}"{{if ne .Flight.ID ""}} data-itinerary-booking-id="{{.Flight.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Flight.DepartItineraryID}}depart{{else}}arrive{{end}}"{{end}}{{if ne .Lodging.ID ""}} data-itinerary-booking-id="{{.Lodging.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Lodging.CheckInItineraryID}}checkin{{else}}checkout{{end}}"{{end}}{{if ne .Vehicle.ID ""}} data-itinerary-booking-id="{{.Vehicle.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Vehicle.PickUpItineraryID}}pickup{{else}}dropoff{{end}}"{{end}} data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-geocode-location="{{itineraryGeocodeQuery .}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
+                  <li class="timeline-item" data-itinerary-item data-map-itinerary-point data-itinerary-item-id="{{.Item.ID}}" data-map-day="{{$group.DayNumber}}" data-marker-kind="{{if ne .Lodging.ID ""}}stay{{else if ne .Vehicle.ID ""}}vehicle{{else if ne .Flight.ID ""}}flight{{else}}stop{{end}}"{{if ne .Flight.ID ""}} data-itinerary-booking-id="{{.Flight.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Flight.DepartItineraryID}}depart{{else}}arrive{{end}}"{{end}}{{if ne .Lodging.ID ""}} data-itinerary-booking-id="{{.Lodging.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Lodging.CheckInItineraryID}}checkin{{else}}checkout{{end}}"{{end}}{{if ne .Vehicle.ID ""}} data-itinerary-booking-id="{{.Vehicle.ID}}" data-itinerary-booking-leg="{{if eq .Item.ID .Vehicle.PickUpItineraryID}}pickup{{else}}dropoff{{end}}"{{end}} data-lat="{{.Item.Latitude}}" data-lng="{{.Item.Longitude}}" data-title="{{.Item.Title}}" data-location="{{.Item.Location}}" data-geocode-location="{{itineraryGeocodeQuery .}}" data-search-text="{{.Item.Title}} {{.Item.Location}} {{.Item.Notes}} {{.Item.TimeNeeded}} {{.Lodging.Name}} {{.Lodging.Address}} {{.Lodging.Notes}} {{.Vehicle.PickUpLocation}} {{.Vehicle.VehicleDetail}} {{.Vehicle.BookingConfirmation}} {{.Vehicle.Notes}} {{.Flight.FlightName}} {{.Flight.FlightNumber}} {{.Flight.DepartAirport}} {{.Flight.ArriveAirport}} {{.Flight.BookingConfirmation}} {{.Flight.Notes}}">
                     {{if not $.Details.Trip.IsArchived}}
                     <details class="item-actions trip-inline-actions-dropdown">
                       <summary class="trip-inline-actions-summary">
@@ -377,6 +370,12 @@
                         <span class="itinerary-value">{{if .Item.Location}}{{locationLineBeforeComma .Item.Location}}{{else}}<span class="muted">—</span>{{end}}{{with googleMapsSearchURL .Item.Latitude .Item.Longitude $mapHint}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</span>
                         {{end}}
                       </div>
+                      {{if and (eq .Lodging.ID "") (eq .Vehicle.ID "") (eq .Flight.ID "") (trimSpace (.Item.VenueHoursSummary))}}
+                      <div class="itinerary-field itinerary-field--venue-hours">
+                        <span class="itinerary-label">Venue hours</span>
+                        <span class="itinerary-value muted small">{{.Item.VenueHoursSummary}}</span>
+                      </div>
+                      {{end}}
                       {{if ne .Lodging.ID ""}}
                       {{if eq .Item.ID .Lodging.CheckInItineraryID}}
                       {{if trimSpace .Lodging.BookingConfirmation}}
@@ -449,6 +448,12 @@
                       <div class="itinerary-field">
                         <span class="itinerary-label">Cost</span>
                         <span class="itinerary-value">{{$.CurrencySymbol}}{{printf "%.2f" .Item.EstCost}}</span>
+                      </div>
+                      {{end}}
+                      {{if trimSpace .Item.TimeNeeded}}
+                      <div class="itinerary-field">
+                        <span class="itinerary-label">Time Needed</span>
+                        <span class="itinerary-value">{{.Item.TimeNeeded}}</span>
                       </div>
                       {{end}}
                       {{end}}
@@ -655,14 +660,34 @@
                       <button type="button" class="secondary-btn" data-inline-edit-cancel="flight-itinerary-edit-{{.Item.ID}}">Cancel</button>
                     </form>
                     {{else}}
-                    <form id="itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/update" class="form-grid item-edit hidden" enctype="multipart/form-data" data-ajax-submit data-toast-message="Itinerary stop updated.">
+                    <form id="itinerary-edit-{{.Item.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary/{{.Item.ID}}/update" class="form-grid item-edit hidden" enctype="multipart/form-data" data-itinerary-form data-ajax-submit data-toast-message="Itinerary stop updated." data-location-lookup-enabled="{{$.Settings.EnableLocationLookup}}" data-trip-start="{{$.Details.Trip.StartDate}}" data-trip-end="{{$.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.EndDate}}">
                       <input type="hidden" name="item_kind" value="stop">
                       <input type="hidden" name="expected_updated_at" value="{{.Item.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
-                      <label class="full">Location Name<input type="text" name="location" value="{{.Item.Location}}" placeholder="e.g. Coron Island" data-location-autocomplete required></label>
+                      <label class="full itinerary-location-label">Location Name
+                        <span class="itinerary-location-input-wrap" data-itinerary-location-wrap>
+                          <input type="text" name="location" value="{{.Item.Location}}" placeholder="e.g. Coron Island" data-location-input autocomplete="off" required>
+                          <button type="button" class="itinerary-location-clear-btn" data-itinerary-location-clear aria-label="Clear location" hidden>
+                            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                          </button>
+                          <div class="location-suggestions hidden" data-location-suggestions></div>
+                        </span>
+                      </label>
+                      <div class="full place-hours-chip-wrap" data-place-hours-wrap hidden>
+                        <div class="place-hours-chip" data-place-hours-chip role="status" aria-live="polite"></div>
+                      </div>
+                      <p class="full location-hint muted small" data-location-status></p>
                       <label class="full">Title<input type="text" name="title" value="{{.Item.Title}}" placeholder="Kayaking Big Lagoon" required></label>
                       <label class="full">Start date &amp; time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "start_at" "value" (joinItineraryLocalDateTime $group.DateLabel .Item.StartTime) "required" true)}}</label>
-                      <label class="full">End date &amp; time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "end_at" "value" (joinItineraryLocalDateTime $group.DateLabel .Item.EndTime) "required" true)}}</label>
+                      {{$stopEndAtVal := ""}}{{if trimSpace .Item.EndTime}}{{$stopEndAtVal = joinItineraryLocalDateTime $group.DateLabel .Item.EndTime}}{{end}}
+                      <label class="full">End date &amp; time (optional){{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "end_at" "value" $stopEndAtVal "required" false)}}</label>
+                      <p class="full location-hint" data-date-status></p>
+                      <p class="full location-hint venue-hours-time-warning hidden" data-venue-hours-time-warning></p>
+                      <input type="hidden" name="latitude" data-latitude-input value="{{if ne .Item.Latitude 0.0}}{{printf "%.8f" .Item.Latitude}}{{end}}">
+                      <input type="hidden" name="longitude" data-longitude-input value="{{if ne .Item.Longitude 0.0}}{{printf "%.8f" .Item.Longitude}}{{end}}">
+                      <input type="hidden" name="google_place_id" data-google-place-id-input value="{{.Item.GooglePlaceID}}">
+                      <input type="hidden" name="venue_hours_json" data-venue-hours-json-input value="{{.Item.VenueHoursJSON}}">
                       <label class="full">Cost<input type="number" step="0.01" min="0" name="est_cost" value="{{printf "%.2f" .Item.EstCost}}" placeholder="0.00"></label>
+                      <label class="full">Time Needed<input type="text" name="time_needed" maxlength="120" value="{{.Item.TimeNeeded}}" placeholder="e.g. 2 hours, 30 min"></label>
                       <label class="full">Notes<input type="text" name="notes" value="{{.Item.Notes}}" placeholder="Optional details"></label>
                       {{$rems := index $.ItineraryCustomRemindersByItem .Item.ID}}
                       <fieldset class="full itinerary-reminders-fieldset">
@@ -1355,7 +1380,7 @@
           {{range .SidebarWidgetOrder}}
           {{if sidebarWidgetVisible . $.Details.Trip}}
           {{if eq . "add_stop"}}
-          <section class="card add-card add-stop-card">
+          <section class="card add-card add-stop-card trip-sidebar-itinerary-composer">
             <div class="trip-itinerary-sidebar-card-head">
               <h3>{{tripSidebarWidgetLabel "add_stop"}}</h3>
             </div>
@@ -1368,17 +1393,20 @@
                 Stop details
               </h4>
               <p class="trip-itinerary-drawer-section-intro muted small">Add a map pin and day-list row. <strong>Custom reminders</strong> are on the second tab below.</p>
-              <form method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-location-lookup-enabled="{{$.Settings.EnableLocationLookup}}" data-trip-start="{{$.Details.Trip.StartDate}}" data-trip-end="{{$.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.EndDate}}">
+              <form method="post" action="/trips/{{$.Details.Trip.ID}}/itinerary" class="form-grid remi-trip-widget-form" enctype="multipart/form-data" data-itinerary-form data-ajax-submit data-toast-message="Stop added." data-remi-trip-fab-add-stop="1" data-location-lookup-enabled="{{$.Settings.EnableLocationLookup}}" data-trip-start="{{$.Details.Trip.StartDate}}" data-trip-end="{{$.Details.Trip.EndDate}}" data-trip-start-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.StartDate}}" data-trip-end-label="{{formatTripUIDate $.Details.Trip $.Settings $.Details.Trip.EndDate}}">
                 {{template "tripAddStopFormInner" (dict "Trip" $.Details.Trip "Settings" $.Settings "TabNamespace" "sidebar")}}
                 <label class="full remi-widget-file-label">Attach Image<input type="file" name="stop_image" accept="image/*"></label>
-                <button class="full" type="submit">Add to Itinerary</button>
+                <div class="full remi-trip-fab-dual-submit">
+                  <button class="full" type="submit">Add to Itinerary</button>
+                  <button class="full secondary-btn" type="submit" data-remi-itinerary-save-another="1">Save &amp; Add Another</button>
+                </div>
               </form>
             </div>
             {{end}}
           </section>
           {{end}}
           {{if eq . "add_commute"}}
-          <section class="card add-card add-stop-card add-commute-card">
+          <section class="card add-card add-stop-card add-commute-card trip-sidebar-itinerary-composer">
             <div class="trip-itinerary-sidebar-card-head">
               <h3>{{tripSidebarWidgetLabel "add_commute"}}</h3>
             </div>

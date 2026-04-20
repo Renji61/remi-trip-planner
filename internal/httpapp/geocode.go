@@ -13,10 +13,25 @@ import (
 
 // locationSuggestion is the JSON shape consumed by web/static/app.js location autocomplete.
 type locationSuggestion struct {
-	Lat         float64 `json:"lat"`
-	Lng         float64 `json:"lng"`
-	DisplayName string  `json:"displayName"`
-	ShortName   string  `json:"shortName"`
+	Lat              float64 `json:"lat"`
+	Lng              float64 `json:"lng"`
+	DisplayName      string  `json:"displayName"`
+	ShortName        string  `json:"shortName"`
+	PlaceID          string  `json:"placeId"`
+	PlaceName        string  `json:"placeName"`
+	FormattedAddress string  `json:"formattedAddress"`
+}
+
+// googlePlaceDetailsResponse is returned by GET /api/location/place-details.
+type googlePlaceDetailsResponse struct {
+	PlaceID          string          `json:"placeId"`
+	Lat              float64         `json:"lat"`
+	Lng              float64         `json:"lng"`
+	FormattedAddress string          `json:"formattedAddress"`
+	PlaceName        string          `json:"placeName"`
+	UTCOffsetMinutes int             `json:"utcOffsetMinutes"`
+	OpeningHours     json.RawMessage `json:"openingHours,omitempty"`
+	HasHours         bool            `json:"hasHours"`
 }
 
 // geocodeCoords resolves a free-text location to coordinates using Google Geocoding when
@@ -230,8 +245,10 @@ func nominatimSuggestions(ctx context.Context, query string, limit int, lang str
 		}
 		out = append(out, locationSuggestion{
 			Lat: lat, Lng: lng,
-			DisplayName: displayName,
-			ShortName:   shortName,
+			DisplayName:      displayName,
+			ShortName:        shortName,
+			PlaceName:        shortName,
+			FormattedAddress: displayName,
 		})
 	}
 	globalMapsLocationCache.suggestSet(sKey, out, nominatimSuggestTTL)
@@ -273,7 +290,8 @@ func googlePlaceSuggestions(ctx context.Context, input, apiKey string, limit int
 		Predictions []struct {
 			PlaceID              string `json:"place_id"`
 			StructuredFormatting struct {
-				MainText string `json:"main_text"`
+				MainText      string `json:"main_text"`
+				SecondaryText string `json:"secondary_text"`
 			} `json:"structured_formatting"`
 			Description string `json:"description"`
 		} `json:"predictions"`
@@ -293,52 +311,83 @@ func googlePlaceSuggestions(ctx context.Context, input, apiKey string, limit int
 		if strings.TrimSpace(p.PlaceID) == "" {
 			continue
 		}
-		lat, lng, display := googlePlaceDetail(ctx, p.PlaceID, apiKey, client, lang)
-		if display == "" {
-			display = p.Description
+		placeName := strings.TrimSpace(p.StructuredFormatting.MainText)
+		formatted := strings.TrimSpace(p.StructuredFormatting.SecondaryText)
+		if formatted == "" {
+			formatted = strings.TrimSpace(p.Description)
 		}
-		shortName := strings.TrimSpace(p.StructuredFormatting.MainText)
-		if shortName == "" && display != "" {
-			shortName = strings.TrimSpace(strings.Split(display, ",")[0])
+		if placeName == "" {
+			placeName = strings.TrimSpace(strings.Split(formatted, ",")[0])
 		}
-		if shortName == "" {
-			shortName = display
-		}
-		if display == "" {
+		if formatted == "" {
 			continue
 		}
+		display := strings.TrimSpace(p.Description)
+		if display == "" {
+			display = formatted
+		}
+		shortName := placeName
+		if shortName == "" {
+			shortName = strings.TrimSpace(strings.Split(display, ",")[0])
+		}
 		out = append(out, locationSuggestion{
-			Lat: lat, Lng: lng,
-			DisplayName: display,
-			ShortName:   shortName,
+			Lat:              0,
+			Lng:              0,
+			DisplayName:      display,
+			ShortName:        shortName,
+			PlaceID:          strings.TrimSpace(p.PlaceID),
+			PlaceName:        placeName,
+			FormattedAddress: formatted,
 		})
 	}
 	globalMapsLocationCache.suggestSet(sKey, out, placeSuggestTTL)
 	return out
 }
 
-func googlePlaceDetail(ctx context.Context, placeID, apiKey string, client *http.Client, lang string) (lat, lng float64, formatted string) {
+// fetchGooglePlaceDetails loads (and caches) rich Place Details for a place_id — geometry, address, name, opening hours.
+func fetchGooglePlaceDetails(ctx context.Context, placeID, apiKey string, client *http.Client, lang string) googlePlaceDetailsResponse {
+	out := googlePlaceDetailsResponse{PlaceID: strings.TrimSpace(placeID)}
+	if out.PlaceID == "" {
+		return out
+	}
 	if strings.TrimSpace(lang) == "" {
 		lang = "en"
 	}
 	tag := mapsAPIKeyTagFrom(apiKey)
 	pKey := globalMapsLocationCache.placeKey(tag, placeID, lang)
-	if la, ln, disp, ok := globalMapsLocationCache.placeGet(pKey); ok {
-		return la, ln, disp
+	if cached, ok := globalMapsLocationCache.placeGetFull(pKey); ok {
+		oh := json.RawMessage(nil)
+		if strings.TrimSpace(cached.openingHoursJSON) != "" {
+			oh = json.RawMessage(cached.openingHoursJSON)
+		}
+		hasHours := len(oh) > 0
+		return googlePlaceDetailsResponse{
+			PlaceID:          out.PlaceID,
+			Lat:              cached.lat,
+			Lng:              cached.lng,
+			FormattedAddress: cached.formattedAddress,
+			PlaceName:        cached.name,
+			UTCOffsetMinutes: cached.utcOffsetMinutes,
+			OpeningHours:     oh,
+			HasHours:         hasHours,
+		}
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 12 * time.Second}
 	}
 	u := fmt.Sprintf(
-		"https://maps.googleapis.com/maps/api/place/details/json?place_id=%s&fields=geometry%%2Flocation%%2Cformatted_address%%2Cname&key=%s&language=%s",
+		"https://maps.googleapis.com/maps/api/place/details/json?place_id=%s&fields=geometry%%2Flocation%%2Cformatted_address%%2Cname%%2Copening_hours%%2Cutc_offset&key=%s&language=%s",
 		url.QueryEscape(placeID),
 		url.QueryEscape(apiKey),
 		url.QueryEscape(lang),
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return 0, 0, ""
+		return out
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, 0, ""
+		return out
 	}
 	defer resp.Body.Close()
 	var payload struct {
@@ -346,22 +395,48 @@ func googlePlaceDetail(ctx context.Context, placeID, apiKey string, client *http
 		Result struct {
 			FormattedAddress string `json:"formatted_address"`
 			Name             string `json:"name"`
+			UTCOffset        int    `json:"utc_offset"`
 			Geometry         struct {
 				Location struct {
 					Lat float64 `json:"lat"`
 					Lng float64 `json:"lng"`
 				} `json:"location"`
 			} `json:"geometry"`
+			OpeningHours *json.RawMessage `json:"opening_hours"`
 		} `json:"result"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil || payload.Status != "OK" {
-		return 0, 0, ""
+		return out
 	}
-	formatted = strings.TrimSpace(payload.Result.FormattedAddress)
+	formatted := strings.TrimSpace(payload.Result.FormattedAddress)
+	name := strings.TrimSpace(payload.Result.Name)
 	if formatted == "" {
-		formatted = strings.TrimSpace(payload.Result.Name)
+		formatted = name
 	}
 	loc := payload.Result.Geometry.Location
-	globalMapsLocationCache.placeSet(pKey, loc.Lat, loc.Lng, formatted, placeDetailTTL)
-	return loc.Lat, loc.Lng, formatted
+	var ohStr string
+	var ohRaw json.RawMessage
+	if payload.Result.OpeningHours != nil && len(*payload.Result.OpeningHours) > 0 {
+		ohRaw = *payload.Result.OpeningHours
+		ohStr = string(ohRaw)
+	}
+	globalMapsLocationCache.placeSetFull(pKey, placeDetailCacheEntry{
+		lat:                loc.Lat,
+		lng:                loc.Lng,
+		formattedAddress:   formatted,
+		name:               name,
+		openingHoursJSON:   ohStr,
+		utcOffsetMinutes:   payload.Result.UTCOffset,
+		expires:            time.Time{},
+	}, placeDetailTTL)
+	return googlePlaceDetailsResponse{
+		PlaceID:          out.PlaceID,
+		Lat:              loc.Lat,
+		Lng:              loc.Lng,
+		FormattedAddress: formatted,
+		PlaceName:        name,
+		UTCOffsetMinutes: payload.Result.UTCOffset,
+		OpeningHours:     ohRaw,
+		HasHours:         len(ohRaw) > 0,
+	}
 }

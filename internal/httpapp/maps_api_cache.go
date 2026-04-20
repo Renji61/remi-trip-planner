@@ -43,9 +43,13 @@ type suggestCacheEntry struct {
 }
 
 type placeDetailCacheEntry struct {
-	lat, lng float64
-	display  string
-	expires  time.Time
+	lat                float64
+	lng                float64
+	formattedAddress   string
+	name               string
+	openingHoursJSON   string
+	utcOffsetMinutes   int
+	expires            time.Time
 }
 
 type mapsLocationCache struct {
@@ -174,7 +178,7 @@ func (c *mapsLocationCache) purgeExpiredSuggestLocked() {
 	}
 }
 
-func (c *mapsLocationCache) placeGet(key string) (lat, lng float64, display string, ok bool) {
+func (c *mapsLocationCache) placeGetFull(key string) (placeDetailCacheEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, found := c.place[key]
@@ -182,18 +186,16 @@ func (c *mapsLocationCache) placeGet(key string) (lat, lng float64, display stri
 		if found {
 			delete(c.place, key)
 		}
-		return 0, 0, "", false
+		return placeDetailCacheEntry{}, false
 	}
-	return e.lat, e.lng, e.display, true
+	return e, true
 }
 
-func (c *mapsLocationCache) placeSet(key string, lat, lng float64, display string, ttl time.Duration) {
+func (c *mapsLocationCache) placeSetFull(key string, e placeDetailCacheEntry, ttl time.Duration) {
+	e.expires = time.Now().Add(ttl)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.place[key] = placeDetailCacheEntry{
-		lat: lat, lng: lng, display: strings.TrimSpace(display),
-		expires: time.Now().Add(ttl),
-	}
+	c.place[key] = e
 	c.purgeExpiredPlaceLocked()
 	for len(c.place) > mapsCacheMaxPlace {
 		for k := range c.place {

@@ -57,6 +57,76 @@ func TestAddItineraryCommute_DuplicateRejected(t *testing.T) {
 	}
 }
 
+func TestAddItineraryCommute_CrossTripDay_FromDayOwnsRow(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.OpenAndMigrate(dbPath, filepath.Join("..", "..", "migrations", "001_init.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	repo := sqlite.NewRepository(db)
+	svc := trips.NewService(repo)
+
+	tripID, err := repo.CreateTrip(ctx, trips.Trip{Name: "T", StartDate: "2026-06-01", EndDate: "2026-06-05", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	day1 := trips.ItineraryItem{TripID: tripID, DayNumber: 1, Title: "A", StartTime: "09:00", EndTime: "10:00"}
+	day2 := trips.ItineraryItem{TripID: tripID, DayNumber: 2, Title: "B", StartTime: "11:00", EndTime: "12:00"}
+	if err := svc.AddItineraryItem(ctx, day1); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AddItineraryItem(ctx, day2); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := repo.ListItineraryItems(ctx, tripID)
+	var idA, idB string
+	var sortA int
+	for _, it := range items {
+		if it.Title == "A" {
+			idA = it.ID
+			sortA = it.SortOrder
+		}
+		if it.Title == "B" {
+			idB = it.ID
+		}
+	}
+	if idA == "" || idB == "" {
+		t.Fatal("missing item ids")
+	}
+	err = svc.AddItineraryCommute(ctx, idA, idB, trips.ItineraryItem{TripID: tripID, Title: "Overnight", StartTime: "22:00", EndTime: "07:00", CommuteEndDayOffset: 1})
+	if err != nil {
+		t.Fatalf("cross-day commute: %v", err)
+	}
+	items, _ = repo.ListItineraryItems(ctx, tripID)
+	var commute trips.ItineraryItem
+	var found bool
+	for _, it := range items {
+		if trips.NormalizeItineraryItemKind(it.ItemKind) == trips.ItineraryItemKindCommute {
+			commute = it
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected a commute row")
+	}
+	if commute.DayNumber != 1 {
+		t.Fatalf("commute day: want 1 (from day), got %d", commute.DayNumber)
+	}
+	if commute.CommuteFromItemID != idA || commute.CommuteToItemID != idB {
+		t.Fatalf("commute links: %+v", commute)
+	}
+	if commute.SortOrder <= sortA {
+		t.Fatalf("commute sort_order should be after From on day 1: from=%d commute=%d", sortA, commute.SortOrder)
+	}
+	if commute.CommuteEndDayOffset != 1 {
+		t.Fatalf("CommuteEndDayOffset: want 1, got %d", commute.CommuteEndDayOffset)
+	}
+}
+
 func TestDeleteItineraryItem_ClearsCommuteLinks(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -1,4 +1,4 @@
-const CACHE = "remi-trip-planner-v17";
+const CACHE = "remi-trip-planner-v18";
 // Do not precache "/" — HTML must always come from the network so UI updates (templates) are not stuck on an old install snapshot.
 const CORE_ASSETS = [
   "/static/app.css",
@@ -37,6 +37,14 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request).then((res) => res).catch(() => caches.match(event.request))
     );
+    return;
+  }
+
+  // Trip page HTML requested via fetch() (live refresh after forms) must hit the network — cache-first
+  // below would serve a stale document and drop itinerary day groups until a full reload.
+  const acceptHdr = event.request.headers.get("Accept") || "";
+  if (reqURL.pathname.startsWith("/trips/") && acceptHdr.includes("text/html")) {
+    event.respondWith(fetch(event.request));
     return;
   }
 

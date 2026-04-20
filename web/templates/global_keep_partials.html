@@ -1,0 +1,92 @@
+{{define "globalKeepComposerTabbed"}}
+{{/* Tabbed composer for global library; no trip reminders / due dates. Posts to /notes-checklists/*. */}}
+<div class="trip-keep-composer-embed">
+  <section class="card trip-keep-composer-card trip-keep-composer-card--tabbed" aria-label="Add note / checklist">
+    <h3 class="trip-keep-composer-title">Add Note / Checklist</h3>
+    <p class="muted trip-keep-composer-hint trip-keep-composer-hint--card">Create a note or a checklist.</p>
+    <div class="add-stop-tabs trip-keep-composer-tabs" data-add-stop-tabs>
+      <div class="add-stop-tabs__bar" role="tablist" aria-label="Note or checklist">
+        <button type="button" class="add-stop-tabs__tab add-stop-tabs__tab--active" role="tab" aria-selected="true" id="{{.Prefix}}-tab-note" data-add-stop-tab="note">Add Note</button>
+        <button type="button" class="add-stop-tabs__tab" role="tab" aria-selected="false" tabindex="-1" id="{{.Prefix}}-tab-checklist" data-add-stop-tab="checklist">Add Checklist</button>
+      </div>
+      <div class="add-stop-tabs__panel trip-keep-composer-tab-panel" role="tabpanel" id="{{.Prefix}}-panel-note" data-add-stop-panel="note" aria-labelledby="{{.Prefix}}-tab-note">
+        <p class="muted trip-keep-composer-hint">Title is optional. Add notes, links, or reminders.</p>
+        <form method="post" action="/notes-checklists/note" class="trip-keep-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <input class="trip-keep-input" type="text" name="title" placeholder="Note Title (e.g. Hidden gems in Tokyo)" maxlength="500" autocomplete="off">
+          <textarea class="trip-keep-textarea" name="body" rows="3" placeholder="Write your notes, links, or reminders..."></textarea>
+          {{template "tripKeepNoteColorSwatches" (dict "Colors" .KeepNoteColors "Selected" "" "LegacyColor" "" "PickerID" .ColorPickerID)}}
+          <button type="submit" class="btn">Save Note</button>
+        </form>
+      </div>
+      <div class="add-stop-tabs__panel trip-keep-composer-tab-panel hidden" role="tabpanel" id="{{.Prefix}}-panel-checklist" data-add-stop-panel="checklist" aria-labelledby="{{.Prefix}}-tab-checklist" hidden>
+        <form method="post" action="/notes-checklists/checklist" class="form-grid remi-trip-widget-form trip-keep-notes-checklist-builder" data-checklist-builder>
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <label class="full">Category
+            <select name="category" required>
+              <option value="" disabled selected>Select a category</option>
+              {{range .ReminderCategories}}<option value="{{.}}">{{.}}</option>{{end}}
+            </select>
+          </label>
+          <div class="inline-form full">
+            <input type="text" data-checklist-item-input placeholder="Add item..." autocomplete="off">
+            <button type="button" class="secondary-btn checklist-add-btn" data-checklist-add-btn>Add Item</button>
+          </div>
+          <p class="muted full checklist-builder-empty" data-checklist-draft-empty>No items added yet.</p>
+          <ul class="list full checklist-draft-list hidden" data-checklist-draft-list></ul>
+          <input type="hidden" name="items_json" value="[]" data-checklist-items-json>
+          <p class="location-hint full" data-checklist-builder-status></p>
+          <button class="full" type="submit">Add Checklist</button>
+        </form>
+      </div>
+    </div>
+  </section>
+</div>
+{{end}}
+
+{{define "globalKeepNotesBoardInner"}}
+<div class="trip-keep-notes-board" data-trip-keep-board-root>
+  <div class="trip-keep-masonry trip-keep-masonry--notes" aria-live="polite">
+    {{range .GlobalKeepNotes}}
+    <article class="trip-keep-card trip-keep-card--note trip-keep-card--color-{{.Color}}">
+      <div class="trip-keep-card-head trip-keep-card-title-row">
+        <div class="trip-keep-card-title-main">
+          <h3 class="trip-keep-note-title">{{if trimSpace .Title}}{{.Title}}{{else}}Note{{end}}</h3>
+        </div>
+        {{template "globalKeepNoteTitleActions" (dict "NoteID" .ID "CSRFToken" $.CSRFToken "View" $.KeepView "NotePinned" .Pinned "ReturnTo" $.ReturnTo)}}
+      </div>
+      {{template "tripKeepNoteCardBody" (dict "Note" .)}}
+    </article>
+    {{end}}
+    {{range .GlobalChecklistTemplates}}
+    <article class="reminder-checklist-card remi-checklist-category-panel">
+      <header class="trip-keep-card-title-row remi-checklist-card-title-row">
+        <div class="trip-keep-card-title-main">
+          <h4 class="remi-checklist-category-title">{{if trimSpace .Category}}{{.Category}}{{else}}Checklist{{end}}</h4>
+        </div>
+        {{template "globalKeepChecklistTitleActions" (dict "TemplateID" .ID "CSRFToken" $.CSRFToken "View" $.KeepView "TemplatePinned" .Pinned "ReturnTo" $.ReturnTo)}}
+      </header>
+      <ul class="list reminder-checklist-list remi-checklist-items">
+        {{range $i, $text := .Lines}}
+        <li class="list-item reminder-checklist-item remi-checklist-item">
+          <div id="global-keep-tpl-line-{{$.ID}}-{{$i}}" class="item-view checklist-view remi-checklist-item-view">
+            <span class="check-btn remi-checklist-check-btn remi-checklist-check-btn--library-template" role="img" aria-label="Template line (import into a trip to check off)">
+              <span class="material-symbols-outlined remi-checklist-check-icon" aria-hidden="true"></span>
+            </span>
+            <div class="remi-checklist-item-body">
+              <div class="remi-checklist-item-open-edit--static">
+                <span class="remi-checklist-item-text">{{$text}}</span>
+              </div>
+            </div>
+          </div>
+        </li>
+        {{end}}
+      </ul>
+    </article>
+    {{end}}
+  </div>
+  {{if and (eq (len .GlobalKeepNotes) 0) (eq (len .GlobalChecklistTemplates) 0)}}
+  <p class="muted trip-keep-empty">Nothing here yet</p>
+  {{end}}
+</div>
+{{end}}

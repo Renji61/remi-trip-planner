@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en" data-theme-pref="{{.Settings.ThemePreference}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  {{template "themeHeadScript" .}}
+  <title>Import notes &amp; checklists | {{.Details.Trip.Name}} | {{.Settings.AppTitle}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v={{remiStaticAssetV}}">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script defer src="/static/app.js?v={{remiStaticAssetV}}"></script>
+</head>
+<body class="page-trip-notes-import" data-trip-id="{{.Details.Trip.ID}}">
+  <main class="app-shell trip-fab-flyout-root" aria-label="Import notes and checklists" data-long-press-sheet-root data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Go to dashboard">
+        <div class="brand-logo">R</div>
+        <div><h1>{{.Settings.AppTitle}}</h1><p>Serene Navigator</p></div>
+      </a>
+      {{template "tripSidebarNav" .}}
+      {{template "tripMembersPanel" .}}
+      <div class="sidebar-bottom">
+        <a class="btn" href="/">Back to Dashboard</a>
+        <a class="support-link sidebar-icon-link" href="/about"><span class="material-symbols-outlined" aria-hidden="true">info</span>About</a>
+        <form method="post" action="/logout" class="sidebar-logout-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button type="submit" class="logout-link sidebar-icon-link"><span class="material-symbols-outlined" aria-hidden="true">logout</span>Logout</button>
+        </form>
+      </div>
+    </aside>
+    <section class="main">
+      <header class="trip-mobile-header site-settings-mobile-header">
+        <a class="budget-mobile-header-btn" href="/trips/{{.Details.Trip.ID}}/notes" aria-label="Back to notes" title="Back to notes"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span></a>
+        <h2 class="trip-mobile-header-title">Import</h2>
+        <div class="budget-mobile-header-actions">
+          <button type="button" class="budget-mobile-header-btn" data-theme-toggle aria-label="Switch between light and dark theme; preference is saved">
+            <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+          </button>
+          {{template "tripMobileHeaderProfileBtn" .}}
+        </div>
+      </header>
+      <div class="trip-members-mobile-shell">{{template "tripMembersPanel" .}}</div>
+      <header class="topbar trip-mobile-topbar">
+        <div class="title-group">
+          <h2>Import notes &amp; checklists</h2>
+          <p>Copy your global templates into <strong>{{.Details.Trip.Name}}</strong>. Already imported items stay listed but cannot be selected again.</p>
+        </div>
+        <div class="topbar-right topbar-right--tools">{{template "tripDesktopHeaderTools" .}}</div>
+      </header>
+
+      <div class="trip-keep-page">
+        {{if .GlobalKeepImportEmpty}}
+        <p class="muted card">You don&rsquo;t have any global templates yet. Create them under <a href="/notes-checklists">Notes &amp; Checklists</a> on the dashboard.</p>
+        <p><a class="btn secondary-btn" href="{{.ReturnTo}}">Back to trip notes</a></p>
+        {{else}}
+        <form method="post" action="/trips/{{.Details.Trip.ID}}/notes/import" class="card">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+          <ul class="trip-notes-import-list">
+            {{range .GlobalKeepImportRows}}
+            <li class="trip-notes-import-row{{if .AlreadyImported}} trip-notes-import-row--done{{end}}">
+              <label class="trip-notes-import-label">
+                {{if eq .Kind "note"}}
+                <input type="checkbox" name="import_note" value="{{.ID}}" {{if .AlreadyImported}}checked disabled{{end}}>
+                {{else}}
+                <input type="checkbox" name="import_checklist" value="{{.ID}}" {{if .AlreadyImported}}checked disabled{{end}}>
+                {{end}}
+                <span class="trip-notes-import-label__text">
+                  <strong>{{.Label}}</strong>
+                  <span class="muted"> — {{.Sub}}</span>
+                  {{if .AlreadyImported}}<span class="muted"> (imported)</span>{{end}}
+                </span>
+              </label>
+            </li>
+            {{end}}
+          </ul>
+          <div style="margin-top:1rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
+            <button type="submit" class="btn">Import selected</button>
+            <a class="btn secondary-btn" href="{{.ReturnTo}}">Cancel</a>
+          </div>
+        </form>
+        {{end}}
+      </div>
+    </section>
+  </main>
+  {{if not .Details.Trip.IsArchived}}
+  {{if tripMobileFabHasItems .Details.Trip}}
+  <div class="mobile-fab-wrap" data-mobile-fab>
+    <button type="button" class="mobile-fab-btn" data-mobile-fab-toggle aria-label="Open quick navigation" title="Open quick navigation"><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
+    <div class="mobile-fab-menu hidden" data-mobile-fab-menu>{{template "tripMobileFabLinks" (dict "Trip" .Details.Trip)}}</div>
+  </div>
+  {{end}}
+  {{template "tripFabFlyouts" .}}
+  {{end}}
+  {{template "tripBottomNavCore" (dict "Trip" .Details.Trip "Active" "notes")}}
+  {{template "tripLongPressSheet"}}
+  {{template "appMobileProfileSheet" .}}
+  {{template "appConfirmDialog"}}
+</body>
+</html>

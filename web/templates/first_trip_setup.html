@@ -199,7 +199,74 @@
               {{template "ftsSectionToggle" (dict "id" "fts-checklist" "name" "section_checklist" "title" "Notes & Checklists" "desc" "Notes and packing lists" "icon" "checklist" "on" .Details.Trip.UIShowChecklist)}}
               {{template "ftsSectionToggle" (dict "id" "fts-docs" "name" "section_documents" "title" "Trip Documents" "desc" "Passports & reservations" "icon" "description" "on" .Details.Trip.UIShowDocuments)}}
             </div>
+            <div class="first-trip-setup__display-prefs" data-fts-display-prefs>
+              <div class="first-trip-setup__sections-head first-trip-setup__sections-head--display">
+                <h3 class="first-trip-setup__sections-title">Display preferences</h3>
+              </div>
+              <div class="first-trip-setup__card first-trip-setup__card--compact">
+                <label class="first-trip-setup__field full" data-fts-display-for="itinerary">
+                  <span class="first-trip-setup__label">Default itinerary view</span>
+                  <select name="ui_itinerary_expand" data-fts-display-select="itinerary">
+                    <option value="first" {{if eq .Details.Trip.UIItineraryExpand "first"}}selected{{end}}>Expand first day</option>
+                    <option value="all" {{if eq .Details.Trip.UIItineraryExpand "all"}}selected{{end}}>Expand all</option>
+                    <option value="none" {{if eq .Details.Trip.UIItineraryExpand "none"}}selected{{end}}>Collapse all</option>
+                  </select>
+                </label>
+                <label class="first-trip-setup__field full" data-fts-display-for="spends">
+                  <span class="first-trip-setup__label">Default expense view</span>
+                  <select name="ui_spends_expand" data-fts-display-select="spends">
+                    <option value="first" {{if eq .Details.Trip.UISpendsExpand "first"}}selected{{end}}>Expand first day</option>
+                    <option value="all" {{if eq .Details.Trip.UISpendsExpand "all"}}selected{{end}}>Expand all</option>
+                    <option value="none" {{if eq .Details.Trip.UISpendsExpand "none"}}selected{{end}}>Collapse all</option>
+                  </select>
+                </label>
+                <label class="first-trip-setup__field full" data-fts-display-for="the_tab">
+                  <span class="first-trip-setup__label">Default group expense view</span>
+                  <select name="ui_group_expenses_expand" data-fts-display-select="the_tab">
+                    <option value="first" {{if eq .Details.Trip.UITabExpand "first"}}selected{{end}}>Expand first day</option>
+                    <option value="all" {{if eq .Details.Trip.UITabExpand "all"}}selected{{end}}>Expand all</option>
+                    <option value="none" {{if eq .Details.Trip.UITabExpand "none"}}selected{{end}}>Collapse all</option>
+                  </select>
+                </label>
+              </div>
+            </div>
           </fieldset>
+
+          <fieldset class="first-trip-setup__step first-trip-setup__step--hidden" data-fts-step="4" data-fts-step-keep-import hidden>
+            <legend class="sr-only">Global notes and checklists</legend>
+            <h2 class="first-trip-setup__heading">Saved notes &amp; checklists</h2>
+            <p class="first-trip-setup__lede muted">Optionally copy items from your global library into this trip. You can always import more later from the trip&rsquo;s Notes &amp; Checklists page.</p>
+            <div class="first-trip-setup__card">
+              <h3 class="first-trip-setup__card-title">Your library</h3>
+              {{if not .FirstTripSetupHasGlobalLibrary}}
+              <p class="muted">You don&rsquo;t have any saved templates yet. Create them anytime from <a href="/notes-checklists" target="_blank" rel="noopener">Notes &amp; Checklists</a> on the dashboard.</p>
+              {{else}}
+              <ul class="trip-notes-import-list first-trip-setup__import-list" role="list">
+                {{range .FirstTripSetupGlobalNotes}}
+                <li class="trip-notes-import-row">
+                  <label class="trip-notes-import-label">
+                    <input type="checkbox" name="fts_import_note" value="{{.ID}}">
+                    <span class="trip-notes-import-label__text">
+                      <strong>{{if trimSpace .Title}}{{.Title}}{{else}}Untitled note{{end}}</strong><span class="muted"> — Note</span>
+                    </span>
+                  </label>
+                </li>
+                {{end}}
+                {{range .FirstTripSetupGlobalChecklists}}
+                <li class="trip-notes-import-row">
+                  <label class="trip-notes-import-label">
+                    <input type="checkbox" name="fts_import_checklist" value="{{.ID}}">
+                    <span class="trip-notes-import-label__text">
+                      <strong>{{if trimSpace .Category}}{{.Category}}{{else}}Checklist{{end}}</strong><span class="muted"> — Checklist{{if gt (len .Lines) 0}} · {{len .Lines}} {{if eq (len .Lines) 1}}item{{else}}items{{end}}{{end}}</span>
+                    </span>
+                  </label>
+                </li>
+                {{end}}
+              </ul>
+              {{end}}
+            </div>
+          </fieldset>
+
           <footer class="first-trip-setup__footer">
             <p class="first-trip-setup__next-hint muted" data-fts-next-hint></p>
             <div class="first-trip-setup__footer-row">

@@ -463,6 +463,93 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	if _, err = db.Exec(`ALTER TABLE trips ADD COLUMN setup_complete INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return nil, err
 	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN google_place_id TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN venue_hours_json TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN time_needed TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE itinerary_items ADD COLUMN commute_end_day_offset INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS global_keep_notes (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL DEFAULT '',
+			color TEXT NOT NULL DEFAULT '',
+			due_at TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_global_keep_notes_user ON global_keep_notes(user_id, updated_at DESC)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE global_keep_notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE global_keep_notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE global_keep_notes ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS global_checklist_templates (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			category TEXT NOT NULL DEFAULT '',
+			due_at TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_global_checklist_templates_user ON global_checklist_templates(user_id, updated_at DESC)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE global_checklist_templates ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE global_checklist_templates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE global_checklist_templates ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS global_checklist_template_lines (
+			id TEXT PRIMARY KEY,
+			template_id TEXT NOT NULL,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			text TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (template_id) REFERENCES global_checklist_templates(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_global_checklist_lines_tpl ON global_checklist_template_lines(template_id, sort_order)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS trip_global_keep_imports (
+			trip_id TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK(kind IN ('note','checklist')),
+			global_id TEXT NOT NULL,
+			imported_at DATETIME NOT NULL,
+			PRIMARY KEY (trip_id, kind, global_id),
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_trip_global_keep_imports_global ON trip_global_keep_imports(kind, global_id)`); err != nil {
+		return nil, err
+	}
 	return db, nil
 }
 

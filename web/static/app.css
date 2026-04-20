@@ -1962,21 +1962,25 @@ html.theme-dark .avatar {
   transform: none;
   inset: 0;
 }
-.dashboard-hero-adventure--custom-bg::after {
-  background: transparent;
-}
 .dashboard-hero-adventure--custom-bg .dashboard-hero-adventure__headline {
   text-shadow: 0 2px 24px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 .dashboard-hero-adventure--custom-bg .dashboard-hero-adventure__sub {
   text-shadow: 0 1px 16px rgba(0, 0, 0, 0.38);
 }
+/* Dark scrim for default / pattern heroes. Must appear before the custom-banner override so the latter wins. */
 .dashboard-hero-adventure::after {
   content: "";
   position: absolute;
   inset: 0;
   background: linear-gradient(125deg, rgba(0, 20, 45, 0.94) 0%, rgba(0, 12, 32, 0.9) 42%, rgba(0, 40, 62, 0.82) 100%);
   z-index: 0;
+}
+/* Custom dashboard banner: no scrim (previous rule had equal specificity and came later, hiding the photo). */
+.dashboard-hero-adventure.dashboard-hero-adventure--custom-bg::after {
+  background: none;
+  opacity: 0;
+  pointer-events: none;
 }
 .dashboard-hero-adventure__inner {
   position: relative;
@@ -3105,6 +3109,11 @@ html.theme-dark optgroup {
   letter-spacing: normal;
   font-weight: 500;
 }
+/* Reserve vertical space only when a hint has content; empty status lines still sat in the grid with min-height. */
+.location-hint:empty {
+  display: none;
+  min-height: 0;
+}
 .location-hint.error { color: var(--error); }
 .location-hint.success { color: var(--secondary); }
 /* Itinerary add-stop: anchor dropdown to the location label (was a grid sibling with no positioned ancestor). */
@@ -3114,6 +3123,59 @@ form[data-itinerary-form] .itinerary-location-label {
 }
 form[data-itinerary-form] .itinerary-location-label:has(.location-suggestions:not(.hidden)) {
   z-index: 50;
+}
+.itinerary-location-input-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+form[data-itinerary-form] .itinerary-location-input-wrap.itinerary-location-input-wrap--clearable input[data-location-input] {
+  padding-right: 44px;
+}
+.itinerary-location-clear-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  margin: 0;
+  z-index: 4;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--trip-resource-input-radius, 9px);
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.itinerary-location-clear-btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--on-surface) 7%, transparent);
+  color: var(--on-surface);
+}
+.itinerary-location-clear-btn:focus-visible {
+  outline: 2px solid var(--remi-focus-ring-color);
+  outline-offset: 2px;
+}
+.itinerary-location-clear-btn:focus:not(:focus-visible) {
+  outline: none;
+}
+.itinerary-location-clear-btn .material-symbols-outlined {
+  font-size: 18px;
+  line-height: 1;
+  display: block;
+}
+html.theme-dark .itinerary-location-clear-btn {
+  color: rgba(255, 255, 255, 0.78);
+}
+html.theme-dark .itinerary-location-clear-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 /* Add New Stop: tabbed stop details vs custom reminders (sidebar + mobile sheet). */
 .add-stop-tabs {
@@ -3341,6 +3403,59 @@ html.theme-dark .vehicle-dropoff-location input:disabled {
 .location-suggestion-btn:hover {
   background: var(--surface-low);
 }
+.location-suggestion-btn__primary {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.location-suggestion-btn__secondary {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 400;
+  color: var(--on-surface-muted, #64748b);
+}
+html.theme-dark .location-suggestion-btn__secondary {
+  color: rgba(226, 232, 240, 0.72);
+}
+.place-hours-chip-wrap {
+  margin-top: -4px;
+}
+.place-hours-chip {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: var(--surface-low);
+  border: 1px solid rgba(196, 198, 207, 0.28);
+  max-width: 100%;
+}
+.place-hours-chip.place-hours-chip--loading {
+  min-height: 1.2em;
+  min-width: 180px;
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.12) 0%,
+    rgba(148, 163, 184, 0.22) 50%,
+    rgba(148, 163, 184, 0.12) 100%
+  );
+  background-size: 200% 100%;
+  animation: remi-place-hours-pulse 1.25s ease-in-out infinite;
+}
+@keyframes remi-place-hours-pulse {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: -200% 0%;
+  }
+}
+.venue-hours-time-warning:not(.hidden) {
+  color: rgba(180, 83, 9, 0.95);
+}
 
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .timeline {
@@ -3394,6 +3509,7 @@ html.theme-dark .timeline::before {
 .itinerary-inline-map-link {
   display: inline-flex;
   align-items: center;
+  gap: 0.4em;
   justify-content: center;
   vertical-align: -3px;
   margin: 0;
@@ -3552,6 +3668,19 @@ html.theme-dark .timeline-connector-dropdown {
   grid-template-columns: 1fr;
   gap: 10px 16px;
   align-content: start;
+}
+/* Commute row: Material icon should match “Commute” label size (global symbols use --ds-font-size-h4). */
+.itinerary-commute-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+.itinerary-commute-badge .material-symbols-outlined {
+  font-size: 1em;
+  line-height: 1;
+  width: 1em;
+  height: 1em;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
 }
 .itinerary-vehicle-main > strong {
   grid-column: 1 / -1;
@@ -4389,6 +4518,19 @@ input.remi-remove-tab-sync {
 }
 .flight-edit-actions button {
   min-height: 42px;
+}
+.remi-trip-fab-dual-submit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+}
+.remi-trip-fab-dual-submit button {
+  min-height: 42px;
+}
+/* Trip details sidebar Add Stop: hide “Save & Add Another”; it remains in the mobile FAB flyout sheet. */
+.trip-sidebar-itinerary-section--stop .remi-trip-fab-dual-submit > button[data-remi-itinerary-save-another] {
+  display: none;
 }
 .flight-empty-state {
   border: 2px dashed rgba(196, 198, 207, 0.26);
@@ -8546,6 +8688,12 @@ html.theme-dark .remi-slide-actions-group {
 .remi-checklist-check-btn:hover:not(:disabled) {
   transform: scale(1.04);
 }
+/* Global library checklist preview: same empty-checkbox look as trip /notes, non-interactive */
+span.remi-checklist-check-btn.remi-checklist-check-btn--library-template {
+  cursor: default;
+  user-select: none;
+  pointer-events: none;
+}
 html.theme-dark .remi-checklist-check-btn {
   background: rgba(255, 255, 255, 0.12);
   color: rgba(255, 255, 255, 0.92);
@@ -10833,6 +10981,7 @@ html.theme-dark .trip-invite-flash {
 .itinerary-inline-map-link {
   display: inline-flex;
   align-items: center;
+  gap: 0.4em;
   vertical-align: middle;
   margin-left: 2px;
   text-decoration: none;
@@ -15440,6 +15589,18 @@ html.theme-dark .remi-datetime-inline-error {
 .remi-datetime-field--has-error .remi-datetime-combined-part {
   border-color: color-mix(in srgb, var(--error, #ba1a1a) 42%, transparent);
 }
+/* Venue-hours warning: border on the actual inputs (not outline on the flex wrapper). !important beats
+   .remi-trip-widget-form input and .vehicle-form-panel .vehicle-form-grid input:not(...) which set border on all inputs. */
+.remi-datetime-field--venue-hours-warn .remi-datetime-date-part,
+.remi-datetime-field--venue-hours-warn .remi-datetime-time-part,
+.remi-datetime-field--venue-hours-warn .remi-datetime-combined-part {
+  border-color: color-mix(in srgb, #d97706 48%, transparent) !important;
+}
+html.theme-dark .remi-datetime-field--venue-hours-warn .remi-datetime-date-part,
+html.theme-dark .remi-datetime-field--venue-hours-warn .remi-datetime-time-part,
+html.theme-dark .remi-datetime-field--venue-hours-warn .remi-datetime-combined-part {
+  border-color: color-mix(in srgb, #fbbf24 52%, transparent) !important;
+}
 .remi-date-field::after,
 .remi-time-field::after {
   content: "";
@@ -19845,6 +20006,19 @@ html.theme-dark .first-trip-setup__mode-title {
   gap: 10px;
   margin-bottom: 16px;
 }
+.first-trip-setup__display-prefs {
+  margin-top: 22px;
+}
+.first-trip-setup__sections-head--display {
+  margin-bottom: 12px;
+}
+.first-trip-setup__field--display-disabled {
+  opacity: 0.48;
+  pointer-events: none;
+}
+html.theme-dark .first-trip-setup__field--display-disabled .first-trip-setup__label {
+  color: #94a3b8;
+}
 .first-trip-setup__sections-title {
   margin: 0;
   font-size: 1rem;
@@ -20265,5 +20439,68 @@ summary:focus-visible {
 .first-trip-setup__switch input:focus-visible {
   outline: none !important;
   box-shadow: none !important;
+}
+
+.first-trip-setup__import-list {
+  margin-top: 0.35rem;
+}
+
+.trip-notes-import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.trip-notes-import-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--remi-border-subtle, rgba(0, 0, 0, 0.08));
+}
+.trip-notes-import-label {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.65rem;
+  width: 100%;
+  margin: 0;
+  cursor: pointer;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+  color: var(--on-surface);
+}
+.trip-notes-import-label input[type="checkbox"] {
+  flex-shrink: 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  margin: 0.2em 0 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  accent-color: var(--brand-navy, #1a2e4c);
+}
+.trip-notes-import-label__text {
+  flex: 1;
+  min-width: 0;
+}
+.trip-notes-import-label__text strong {
+  font-weight: 600;
+}
+html.theme-dark .trip-notes-import-row {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.trip-notes-import-row input[type="checkbox"]:disabled {
+  opacity: 0.6;
+}
+.trip-notes-import-row--done {
+  opacity: 0.85;
 }
 

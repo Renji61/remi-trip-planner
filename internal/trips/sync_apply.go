@@ -345,10 +345,13 @@ type itinerarySyncPayload struct {
 	ImagePath         string  `json:"image_path"`
 	Latitude          float64 `json:"latitude"`
 	Longitude         float64 `json:"longitude"`
+	GooglePlaceID     string  `json:"google_place_id"`
+	VenueHoursJSON    string  `json:"venue_hours_json"`
 	EstCost           float64 `json:"est_cost"`
 	EstCostCents      int64   `json:"est_cost_cents"`
 	StartTime         string  `json:"start_time"`
 	EndTime           string  `json:"end_time"`
+	TimeNeeded        string  `json:"time_needed"`
 	ExpectedUpdatedAt string  `json:"expected_updated_at"`
 }
 
@@ -373,7 +376,9 @@ func (s *Service) syncApplyItinerary(ctx context.Context, tripID string, oper st
 			ID: id, TripID: tripID, DayNumber: p.DayNumber, Title: strings.TrimSpace(p.Title),
 			Notes: p.Notes, Location: p.Location, ImagePath: p.ImagePath,
 			Latitude: p.Latitude, Longitude: p.Longitude,
+			GooglePlaceID: strings.TrimSpace(p.GooglePlaceID), VenueHoursJSON: strings.TrimSpace(p.VenueHoursJSON),
 			StartTime: p.StartTime, EndTime: p.EndTime,
+			TimeNeeded: strings.TrimSpace(p.TimeNeeded),
 		}
 		if p.EstCostCents != 0 || p.EstCost == 0 {
 			SetItineraryEstCostCents(&item, p.EstCostCents)
@@ -424,6 +429,8 @@ func (s *Service) syncApplyItinerary(ctx context.Context, tripID string, oper st
 		cur.ImagePath = p.ImagePath
 		cur.Latitude = p.Latitude
 		cur.Longitude = p.Longitude
+		cur.GooglePlaceID = strings.TrimSpace(p.GooglePlaceID)
+		cur.VenueHoursJSON = strings.TrimSpace(p.VenueHoursJSON)
 		if p.EstCostCents != 0 || p.EstCost == 0 {
 			SetItineraryEstCostCents(&cur, p.EstCostCents)
 		} else {
@@ -431,6 +438,7 @@ func (s *Service) syncApplyItinerary(ctx context.Context, tripID string, oper st
 		}
 		cur.StartTime = p.StartTime
 		cur.EndTime = p.EndTime
+		cur.TimeNeeded = strings.TrimSpace(p.TimeNeeded)
 		if ts := strings.TrimSpace(p.ExpectedUpdatedAt); ts != "" {
 			expected, err := time.Parse(time.RFC3339Nano, ts)
 			if err != nil {
