@@ -366,6 +366,8 @@ func NewRouter(deps Dependencies) http.Handler {
 						return trip.UIShowItinerary
 					case trips.MainSectionChecklist:
 						return trip.UIShowChecklist
+					case trips.MainSectionBookings:
+						return trip.UIShowStay || trip.UIShowVehicle || trip.UIShowFlights
 					case trips.MainSectionStay:
 						return trip.UIShowStay
 					case trips.MainSectionVehicle:
@@ -405,10 +407,71 @@ func NewRouter(deps Dependencies) http.Handler {
 				"googleMapsDirectionsURL":         googleMapsDirectionsURL,
 				"itineraryDayGoogleMapsURL":       itineraryDayGoogleMapsURL,
 				"locationLineBeforeComma":         locationLineBeforeComma,
-				"itineraryNotesDisplay":           itineraryNotesDisplay,
-				"isImageWebPath":                  isImageWebPath,
-				"itineraryGeocodeQuery":           itineraryGeocodeQuery,
-				"abbrevMoney":                     abbrevMoney,
+				"flightAirportHeadline": func(display, iata string, byIATA map[string]trips.Airport) string {
+					return trips.FormatFlightAirportHeadline(display, iata, byIATA)
+				},
+				"flightRouteIATALine": func(f trips.Flight) string {
+					d := strings.TrimSpace(f.DepartAirportIATA)
+					a := strings.TrimSpace(f.ArriveAirportIATA)
+					if len(d) == 3 && len(a) == 3 {
+						return strings.ToUpper(d) + " ✈ " + strings.ToUpper(a)
+					}
+					return ""
+				},
+				"formatFlightBlockDuration": trips.FormatFlightBlockDuration,
+				"isoDateFromDateTime": func(s string) string {
+					s = strings.TrimSpace(s)
+					if len(s) >= 10 {
+						return s[:10]
+					}
+					return s
+				},
+				"lodgingNightsLabel": func(l *trips.Lodging) string {
+					if l == nil {
+						return ""
+					}
+					return trips.FormatLodgingNightsLabel(*l)
+				},
+				"vehicleRentalDurationLabel": func(v *trips.VehicleRental) string {
+					if v == nil {
+						return ""
+					}
+					return trips.FormatVehicleRentalDurationLabel(*v)
+				},
+				"flightDurationLabel": func(f trips.Flight, byIATA map[string]trips.Airport) string {
+					if byIATA == nil {
+						return trips.FormatFlightDurationDisplay(f.DepartAt, f.ArriveAt, "", "")
+					}
+					depTZ, arrTZ := "", ""
+					if a, ok := byIATA[strings.ToUpper(strings.TrimSpace(f.DepartAirportIATA))]; ok {
+						depTZ = a.Timezone
+					}
+					if a, ok := byIATA[strings.ToUpper(strings.TrimSpace(f.ArriveAirportIATA))]; ok {
+						arrTZ = a.Timezone
+					}
+					return trips.FormatFlightDurationDisplay(f.DepartAt, f.ArriveAt, depTZ, arrTZ)
+				},
+				"itineraryNotesDisplay": itineraryNotesDisplay,
+				"itineraryOpeningHoursCardLine": func(trip trips.Trip, item trips.ItineraryItem) string {
+					return item.OpeningHoursCardPrimary(trip)
+				},
+				"itineraryOpeningHoursFormValue": func(trip trips.Trip, item trips.ItineraryItem) string {
+					return item.OpeningHoursFormValue(trip)
+				},
+				"isImageWebPath":               isImageWebPath,
+				"itineraryGeocodeQuery":        itineraryGeocodeQuery,
+				"itineraryBookingDisplayTitle": itineraryBookingDisplayTitle,
+				"abbrevMoney":                  abbrevMoney,
+				"bookingStatusLabel": func(s string) string {
+					switch trips.NormalizeBookingStatus(s) {
+					case trips.BookingStatusDone:
+						return "Done"
+					case trips.BookingStatusNotRequired:
+						return "Not required"
+					default:
+						return "To be done"
+					}
+				},
 				"profileInitial": func(u trips.User) string {
 					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
 					return p.InitialForAvatar()
@@ -579,6 +642,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/location/suggest", a.apiLocationSuggest)
 		r.Get("/api/location/geocode", a.apiLocationGeocode)
 		r.Get("/api/location/place-details", a.apiLocationPlaceDetails)
+		r.Get("/api/flight-airports/suggest", a.apiFlightAirportSuggest)
+		r.Post("/api/flight-airports/remember", a.apiFlightAirportRemember)
+		r.Get("/api/flight-airlines/suggest", a.apiFlightAirlineSuggest)
 		r.Post("/trips", a.createTrip)
 
 		r.Route("/trips/{tripID}", func(r chi.Router) {
@@ -607,6 +673,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/days/{dayNumber}/label", a.saveTripDayLabel)
 			r.Post("/itinerary/{itemID}/update", a.updateItineraryItem)
 			r.Post("/itinerary/{itemID}/delete", a.deleteItineraryItem)
+			r.Get("/itinerary/{itemID}/weather", a.apiStopWeather)
 			r.Get("/accommodation", a.accommodationPage)
 			r.Get("/vehicle-rental", a.vehicleRentalPage)
 			r.Get("/flights", a.flightsPage)
@@ -1142,6 +1209,16 @@ func (a *app) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if _, ok := r.PostForm["google_maps_map_id"]; ok {
 		app.GoogleMapsMapID = strings.TrimSpace(r.FormValue("google_maps_map_id"))
 	}
+	if vals, ok := r.PostForm["clear_airlabs_api"]; ok && len(vals) > 0 && vals[len(vals)-1] == "1" {
+		app.AirLabsAPIKey = ""
+	} else if v := strings.TrimSpace(r.FormValue("airlabs_api_key")); v != "" {
+		app.AirLabsAPIKey = v
+	}
+	if vals, ok := r.PostForm["clear_openweather_api"]; ok && len(vals) > 0 && vals[len(vals)-1] == "1" {
+		app.OpenWeatherAPIKey = ""
+	} else if v := strings.TrimSpace(r.FormValue("openweather_api_key")); v != "" {
+		app.OpenWeatherAPIKey = v
+	}
 	geoKey := strings.TrimSpace(app.GoogleMapsAPIKey)
 	app.AppTitle = defaultIfEmpty(r.FormValue("app_title"), "REMI Trip Planner")
 	applyMapDefaultPlaceFromForm(r.Context(), geoKey, &app, r)
@@ -1401,6 +1478,10 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		writeInternalServerError(w, r, err)
 		return
 	}
+	airportByIATA, _ := a.tripService.GetAirportsByIATACodes(r.Context(), iataListFromFlights(details.Flights))
+	if airportByIATA == nil {
+		airportByIATA = map[string]trips.Airport{}
+	}
 	acc, _ := TripAccessFromContext(r.Context())
 	party, _ := a.tripService.TripParty(r.Context(), tripID)
 	tripGuests, _ := a.tripService.ListTripGuests(r.Context(), tripID)
@@ -1459,6 +1540,7 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	}
 	tabParticipantLabels := participantLabelMap(party, tripGuests, tabDepartedParticipants)
 	tabEqualSplitBootstrap := buildEqualSplitJSON(party, tripGuests)
+	bookingStream := trips.BuildBookingStream(details.Trip, details.Lodgings, details.Vehicles, details.Flights)
 	mainSectionOrder := trips.NormalizeMainSectionOrder(details.Trip.UIMainSectionOrder)
 	sidebarWidgetOrder := trips.NormalizeSidebarWidgetOrder(details.Trip.UISidebarWidgetOrder)
 	customSidebarLinks := trips.ParseCustomSidebarLinksJSON(details.Trip.UICustomSidebarLinks)
@@ -1476,6 +1558,7 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 	}
 	pageData := map[string]any{
 		"Details":                        details,
+		"AirportByIATA":                  airportByIATA,
 		"FabReturnTo":                    "/trips/" + tripID,
 		"DayGroups":                      dayGroups,
 		"ExpenseGroups":                  expenseGroups,
@@ -1512,6 +1595,7 @@ func (a *app) tripPage(w http.ResponseWriter, r *http.Request) {
 		"TabParticipantLabels":           tabParticipantLabels,
 		"TabYourShareByExpenseID":        tabYourShareByExpenseID,
 		"TabEqualSplitBootstrap":         tabEqualSplitBootstrap,
+		"BookingStream":                  bookingStream,
 		"CSRFToken":                      CSRFToken(r.Context()),
 		"CurrentUserID":                  uid,
 		"CurrentUser":                    CurrentUser(r.Context()),
@@ -2635,6 +2719,41 @@ func itineraryItemMapWaypoint(v itineraryItemView) string {
 	if h := mapHintForItineraryItem(v); h != "" {
 		return h
 	}
+	return itineraryBookingDisplayTitle(v)
+}
+
+// itineraryBookingDisplayTitle is the single itinerary row title shown in the card heading, map pins, search, and calendar (via data-title).
+func itineraryBookingDisplayTitle(v itineraryItemView) string {
+	if strings.TrimSpace(v.Lodging.ID) != "" {
+		name := trips.ItineraryLodgingPropertyDisplay(v.Lodging, v.Item.Title)
+		if name == "" {
+			name = "Accommodation"
+		}
+		if v.Item.ID == v.Lodging.CheckInItineraryID {
+			return "Check-in: " + name
+		}
+		return "Check-out: " + name
+	}
+	if strings.TrimSpace(v.Vehicle.ID) != "" {
+		name := trips.ItineraryVehicleRentalNameDisplay(v.Vehicle, v.Item.Title)
+		if name == "" {
+			name = "Vehicle rental"
+		}
+		if v.Item.ID == v.Vehicle.PickUpItineraryID {
+			return "Pick Up: " + name
+		}
+		return "Drop Off: " + name
+	}
+	if strings.TrimSpace(v.Flight.ID) != "" {
+		airline := trips.ItineraryFlightAirlineDisplay(v.Flight, v.Item.Title)
+		if airline == "" {
+			airline = "Flight"
+		}
+		if v.Item.ID == v.Flight.DepartItineraryID {
+			return "Departure: " + airline
+		}
+		return "Arrival: " + airline
+	}
 	return strings.TrimSpace(v.Item.Title)
 }
 
@@ -3400,7 +3519,7 @@ func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 		Latitude:       lat,
 		Longitude:      lng,
 		GooglePlaceID:  strings.TrimSpace(r.FormValue("google_place_id")),
-		VenueHoursJSON: strings.TrimSpace(r.FormValue("venue_hours_json")),
+		VenueHoursJSON: trips.MergeOpeningHoursUserInput(strings.TrimSpace(r.FormValue("venue_hours_json")), r.FormValue("opening_hours")),
 		TimeNeeded:     strings.TrimSpace(r.FormValue("time_needed")),
 		EstCostCents:   estCostCents,
 		StartTime:      startHM,
@@ -3415,6 +3534,7 @@ func (a *app) addItineraryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = a.tripService.ReplaceItineraryCustomReminders(r.Context(), tripID, itemID, parseItineraryReminderRows(r))
+	a.tripService.ScheduleStopWeatherPrefetchForNewPlainStop(tripID, itemID, day)
 	if isAsyncRequest(r) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -3742,7 +3862,7 @@ func (a *app) updateItineraryItem(w http.ResponseWriter, r *http.Request) {
 		Latitude:              lat,
 		Longitude:             lng,
 		GooglePlaceID:         strings.TrimSpace(r.FormValue("google_place_id")),
-		VenueHoursJSON:        strings.TrimSpace(r.FormValue("venue_hours_json")),
+		VenueHoursJSON:        trips.MergeOpeningHoursUserInput(strings.TrimSpace(r.FormValue("venue_hours_json")), r.FormValue("opening_hours")),
 		Notes:                 r.FormValue("notes"),
 		TimeNeeded:            strings.TrimSpace(r.FormValue("time_needed")),
 		EstCostCents:          estCostCents,
@@ -4158,6 +4278,7 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	bookingStatus := trips.NormalizeBookingStatus(r.FormValue("booking_status"))
 	err = a.tripService.AddLodgingWithItinerary(r.Context(), trips.Lodging{
 		ID:                  lodgingID,
 		TripID:              tripID,
@@ -4166,6 +4287,7 @@ func (a *app) addLodging(w http.ResponseWriter, r *http.Request) {
 		CheckInAt:           checkInAt.Format("2006-01-02T15:04"),
 		CheckOutAt:          checkOutAt.Format("2006-01-02T15:04"),
 		BookingConfirmation: bookingNo,
+		BookingStatus:       bookingStatus,
 		CostCents:           costCents,
 		Notes:               notes,
 		AttachmentPath:      attachmentPath,
@@ -4308,6 +4430,7 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 	address := r.FormValue("address")
 	bookingNo := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
+	bookingStatus := trips.NormalizeBookingStatus(r.FormValue("booking_status"))
 	addrLat, addrLng := a.geocodeForApp(r.Context(), address)
 	addrLat, addrLng = fallbackItineraryCoordsOnGeocodeMiss(addrLat, addrLng, trips.ItineraryItem{
 		Latitude:  existing.Latitude,
@@ -4325,6 +4448,7 @@ func (a *app) updateLodging(w http.ResponseWriter, r *http.Request) {
 		CheckInAt:             checkInAt.Format("2006-01-02T15:04"),
 		CheckOutAt:            checkOutAt.Format("2006-01-02T15:04"),
 		BookingConfirmation:   bookingNo,
+		BookingStatus:         bookingStatus,
 		CostCents:             costCents,
 		Notes:                 notes,
 		AttachmentPath:        attachmentPath,
@@ -4499,6 +4623,7 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 	}
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
+	bookingStatus := trips.NormalizeBookingStatus(r.FormValue("booking_status"))
 	vehicleImagePath, err := storeVehicleImage(r, "vehicle_image", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -4542,6 +4667,7 @@ func (a *app) addVehicleRental(w http.ResponseWriter, r *http.Request) {
 		PickUpAt:            pickUpAt.Format("2006-01-02T15:04"),
 		DropOffAt:           dropOffAt.Format("2006-01-02T15:04"),
 		BookingConfirmation: booking,
+		BookingStatus:       bookingStatus,
 		Notes:               notes,
 		AttachmentPath:      attachmentPath,
 		VehicleImagePath:    vehicleImagePath,
@@ -4673,6 +4799,7 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 	}
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
+	bookingStatus := trips.NormalizeBookingStatus(r.FormValue("booking_status"))
 	vehicleImagePath, err := storeVehicleImage(r, "vehicle_image", a.maxUploadFileSizeBytes(r.Context()))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -4726,6 +4853,7 @@ func (a *app) updateVehicleRental(w http.ResponseWriter, r *http.Request) {
 		PickUpAt:              pickUpAt.Format("2006-01-02T15:04"),
 		DropOffAt:             dropOffAt.Format("2006-01-02T15:04"),
 		BookingConfirmation:   booking,
+		BookingStatus:         bookingStatus,
 		Notes:                 notes,
 		AttachmentPath:        attachmentPath,
 		VehicleImagePath:      vehicleImagePath,
@@ -5144,11 +5272,16 @@ func (a *app) flightsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	currencySymbol := defaultIfEmpty(details.Trip.CurrencySymbol, "$")
+	airportByIATA, _ := a.tripService.GetAirportsByIATACodes(r.Context(), iataListFromFlights(details.Flights))
+	if airportByIATA == nil {
+		airportByIATA = map[string]trips.Airport{}
+	}
 	pageData := map[string]any{
 		"Details":        details,
 		"Settings":       settings,
 		"CSRFToken":      CSRFToken(r.Context()),
 		"CurrencySymbol": currencySymbol,
+		"AirportByIATA":  airportByIATA,
 	}
 	a.mergeTripSidebarContext(r.Context(), r, tripID, details, pageData, "flights")
 	if err := a.mergeTripFabFlyoutContext(r.Context(), tripID, details, pageData, "flights"); err != nil {
@@ -5219,8 +5352,11 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 	}
 	flightName := r.FormValue("flight_name")
 	flightNumber := r.FormValue("flight_number")
+	bookingStatus := trips.NormalizeBookingStatus(r.FormValue("booking_status"))
 	departAirport := r.FormValue("depart_airport")
 	arriveAirport := r.FormValue("arrive_airport")
+	departIATA := normalizeOptionalAirportIATA(r.FormValue("depart_airport_iata"))
+	arriveIATA := normalizeOptionalAirportIATA(r.FormValue("arrive_airport_iata"))
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
 	label := flightTitleValue(flightName, flightNumber)
@@ -5250,8 +5386,11 @@ func (a *app) addFlight(w http.ResponseWriter, r *http.Request) {
 		TripID:              tripID,
 		FlightName:          flightName,
 		FlightNumber:        flightNumber,
+		BookingStatus:       bookingStatus,
 		DepartAirport:       departAirport,
 		ArriveAirport:       arriveAirport,
+		DepartAirportIATA:   departIATA,
+		ArriveAirportIATA:   arriveIATA,
 		DepartAt:            departAt.Format("2006-01-02T15:04"),
 		ArriveAt:            arriveAt.Format("2006-01-02T15:04"),
 		BookingConfirmation: booking,
@@ -5400,8 +5539,11 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 	}
 	flightName := r.FormValue("flight_name")
 	flightNumber := r.FormValue("flight_number")
+	bookingStatus := trips.NormalizeBookingStatus(r.FormValue("booking_status"))
 	departAirport := r.FormValue("depart_airport")
 	arriveAirport := r.FormValue("arrive_airport")
+	departIATA := normalizeOptionalAirportIATA(r.FormValue("depart_airport_iata"))
+	arriveIATA := normalizeOptionalAirportIATA(r.FormValue("arrive_airport_iata"))
 	booking := r.FormValue("booking_confirmation")
 	notes := r.FormValue("notes")
 	label := flightTitleValue(flightName, flightNumber)
@@ -5415,24 +5557,29 @@ func (a *app) updateFlight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = a.tripService.UpdateFlightWithItinerary(r.Context(), trips.Flight{
-		ID:                    flightID,
-		TripID:                tripID,
-		FlightName:            flightName,
-		FlightNumber:          flightNumber,
-		DepartAirport:         departAirport,
-		ArriveAirport:         arriveAirport,
-		DepartAt:              departAt.Format("2006-01-02T15:04"),
-		ArriveAt:              arriveAt.Format("2006-01-02T15:04"),
-		BookingConfirmation:   booking,
-		Notes:                 notes,
-		DocumentPath:          documentPath,
-		ImagePath:             imagePath,
-		CostCents:             costCents,
-		DepartItineraryID:     existing.DepartItineraryID,
-		ArriveItineraryID:     existing.ArriveItineraryID,
-		ExpenseID:             existing.ExpenseID,
-		ExpectedUpdatedAt:     expectedUpdatedAt,
-		EnforceOptimisticLock: true,
+		ID:                             flightID,
+		TripID:                         tripID,
+		FlightName:                     flightName,
+		FlightNumber:                   flightNumber,
+		BookingStatus:                  bookingStatus,
+		DepartAirport:                  departAirport,
+		ArriveAirport:                  arriveAirport,
+		DepartAirportIATA:              departIATA,
+		ArriveAirportIATA:              arriveIATA,
+		DepartAt:                       departAt.Format("2006-01-02T15:04"),
+		ArriveAt:                       arriveAt.Format("2006-01-02T15:04"),
+		BookingConfirmation:            booking,
+		Notes:                          notes,
+		DocumentPath:                   documentPath,
+		ImagePath:                      imagePath,
+		CostCents:                      costCents,
+		DepartItineraryID:              existing.DepartItineraryID,
+		ArriveItineraryID:              existing.ArriveItineraryID,
+		ExpenseID:                      existing.ExpenseID,
+		TripBookingsChecklistItemID:    existing.TripBookingsChecklistItemID,
+		TripBookingsChecklistDismissed: existing.TripBookingsChecklistDismissed,
+		ExpectedUpdatedAt:              expectedUpdatedAt,
+		EnforceOptimisticLock:          true,
 	}, trips.ItineraryItem{
 		ID:           existing.DepartItineraryID,
 		TripID:       tripID,
@@ -5946,6 +6093,39 @@ func (a *app) maxUploadFileSizeBytes(ctx context.Context) int64 {
 		mb = int64(s.MaxUploadFileSizeMB)
 	}
 	return mb * 1024 * 1024
+}
+
+func normalizeOptionalAirportIATA(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) != 3 {
+		return ""
+	}
+	u := strings.ToUpper(s)
+	for _, c := range u {
+		if c < 'A' || c > 'Z' {
+			return ""
+		}
+	}
+	return u
+}
+
+func iataListFromFlights(flights []trips.Flight) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, f := range flights {
+		for _, raw := range []string{f.DepartAirportIATA, f.ArriveAirportIATA} {
+			c := normalizeOptionalAirportIATA(raw)
+			if c == "" {
+				continue
+			}
+			if _, ok := seen[c]; ok {
+				continue
+			}
+			seen[c] = struct{}{}
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func parseDateTimeLocal(raw string) (time.Time, string, string, error) {
@@ -6725,7 +6905,7 @@ func formatTripDateTime(t trips.Trip, app trips.AppSettings, raw string) string 
 	if strings.TrimSpace(raw) == "" {
 		return "--"
 	}
-	parsed, err := time.Parse("2006-01-02T15:04", raw)
+	parsed, err := trips.ParseBookingStreamTime(raw)
 	if err != nil {
 		return raw
 	}
@@ -6738,6 +6918,7 @@ func formatTripDateTime(t trips.Trip, app trips.AppSettings, raw string) string 
 }
 
 // formatTripClock formats stored time strings (e.g. itinerary start/end) using the trip’s clock preference.
+// Accepts time-only (15:04) or full local datetimes (e.g. 2006-01-02T15:04) used on booking fields.
 func formatTripClock(t trips.Trip, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -6750,6 +6931,9 @@ func formatTripClock(t trips.Trip, raw string) string {
 		if err == nil {
 			break
 		}
+	}
+	if err != nil {
+		tt, err = trips.ParseBookingStreamTime(raw)
 	}
 	if err != nil {
 		return raw

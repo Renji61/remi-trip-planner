@@ -43,13 +43,13 @@ type suggestCacheEntry struct {
 }
 
 type placeDetailCacheEntry struct {
-	lat                float64
-	lng                float64
-	formattedAddress   string
-	name               string
-	openingHoursJSON   string
-	utcOffsetMinutes   int
-	expires            time.Time
+	lat              float64
+	lng              float64
+	formattedAddress string
+	name             string
+	openingHoursJSON string
+	utcOffsetMinutes int
+	expires          time.Time
 }
 
 type mapsLocationCache struct {

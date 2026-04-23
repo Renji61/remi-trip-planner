@@ -37,7 +37,7 @@ docker compose up -d --build
 
 ## Option B — Install from the official registry image (no git clone, no `.env` required)
 
-The **public** image is **`ghcr.io/renji61/remi-trip-planner:latest`** (SemVer tags like `:v1.50.2` are published from Git tags).
+The **public** image is **`ghcr.io/renji61/remi-trip-planner:latest`** (SemVer tags like `:v1.50.3` are published from Git tags).
 
 ### B1 — One file, zero env (Dockhand / copy-paste)
 
@@ -76,7 +76,7 @@ docker compose -f docker-compose.registry.yml up -d
 
 This fetches the newest image for your tag (e.g. `:latest`) and recreates the container. Your database remains in the **`remi-data`** volume.
 
-**Pinning:** For production, consider pinning `REMI_IMAGE` to a version tag (e.g. `:v1.50.2`) instead of `:latest`, and bump when you choose.
+**Pinning:** For production, consider pinning `REMI_IMAGE` to a version tag (e.g. `:v1.50.3`) instead of `:latest`, and bump when you choose.
 
 ### Optional auto-updates
 

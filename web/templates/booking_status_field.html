@@ -1,0 +1,10 @@
+{{/* Shared dropdown for booking status (Flights, accommodation, vehicle). Pass dict keys: name, value (canonical: to_be_done | done | not_required). */}}
+{{define "remiBookingStatusField"}}
+<label class="full">Booking Status
+  <select name="{{.name}}" required>
+    <option value="to_be_done" {{if eq .value "to_be_done"}}selected{{end}}>To be done</option>
+    <option value="done" {{if eq .value "done"}}selected{{end}}>Done</option>
+    <option value="not_required" {{if eq .value "not_required"}}selected{{end}}>Not Required</option>
+  </select>
+</label>
+{{end}}

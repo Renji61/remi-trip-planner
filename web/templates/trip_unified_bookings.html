@@ -1,0 +1,444 @@
+{{define "tripUnifiedBookings"}}
+<section class="card trip-page-section trip-unified-bookings-section" id="trip-page-unified-bookings" aria-labelledby="trip-unified-bookings-heading">
+  <details class="trip-unified-bookings__collapsible trip-page-section-fold" open data-unified-bookings-details>
+    <summary class="trip-unified-bookings__summary trip-page-section-fold__summary">
+      <span class="trip-page-section-fold__title">
+        <span class="material-symbols-outlined trip-page-section-fold__icon" aria-hidden="true">confirmation_number</span>
+        <h3 class="trip-page-section-fold__heading" id="trip-unified-bookings-heading">Booking details</h3>
+      </span>
+      <span class="trip-unified-bookings__summary-chevron trip-page-section-fold__chevron material-symbols-outlined" aria-hidden="true">expand_less</span>
+    </summary>
+    <div class="trip-unified-bookings" data-unified-bookings-panel data-trip-id="{{.Details.Trip.ID}}">
+      {{if .BookingStream}}
+      <div class="trip-unified-bookings__toolbar">
+        <div class="trip-unified-bookings__filter-wrap">
+          <div class="trip-unified-bookings-filter">
+            <button type="button" class="trip-unified-bookings-filter__btn" id="trip-unified-bookings-filter-trigger" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="trip-unified-bookings-filter-value">
+              <span class="material-symbols-outlined" aria-hidden="true">assignment</span>
+              <span id="trip-unified-bookings-filter-value">All bookings</span>
+              <span class="material-symbols-outlined trip-unified-bookings-filter__chev" aria-hidden="true">expand_more</span>
+            </button>
+            <ul class="trip-unified-bookings-filter__menu hidden" id="trip-unified-bookings-filter-menu" role="listbox" tabindex="-1" hidden>
+              <li role="option" data-unified-bookings-kind="all" class="is-active"><span class="material-symbols-outlined" aria-hidden="true">assignment</span> All bookings</li>
+              <li role="option" data-unified-bookings-kind="flight"><span class="material-symbols-outlined" aria-hidden="true">flight</span> Flights</li>
+              <li role="option" data-unified-bookings-kind="lodging"><span class="material-symbols-outlined" aria-hidden="true">hotel</span> Accommodation</li>
+              <li role="option" data-unified-bookings-kind="vehicle"><span class="material-symbols-outlined" aria-hidden="true">directions_car</span> Vehicle rentals</li>
+            </ul>
+          </div>
+        </div>
+        <div class="trip-unified-bookings-segment" role="group" aria-label="Booking state" data-unified-bookings-state-group>
+          <button type="button" class="trip-unified-bookings-segment__btn" data-unified-bookings-state="booked">Booked</button>
+          <button type="button" class="trip-unified-bookings-segment__btn" data-unified-bookings-state="to_book">To be booked</button>
+        </div>
+      </div>
+      <ul class="list trip-unified-bookings__list" data-unified-bookings-list>
+        {{range $idx, $entry := .BookingStream}}
+        {{if eq $entry.Kind "lodging"}}
+        {{$l := $entry.Lodging}}
+        <li class="trip-unified-booking-row accommodation-card-wrap"
+            data-unified-booking-index="{{$idx}}"
+            data-booking-kind="lodging"
+            data-booking-status="{{$entry.BookingStatus}}"
+            data-booking-state="{{if eq $entry.BookingStatus "to_be_done"}}to_book{{else}}booked{{end}}">
+          {{if not $.Details.Trip.IsArchived}}
+          <details class="item-actions accommodation-card-actions trip-inline-actions-dropdown">
+            <summary class="trip-inline-actions-summary">
+              <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
+              <span class="trip-inline-actions-summary-label">Accommodation actions</span>
+            </summary>
+            <div class="trip-inline-actions-buttons">
+              <button type="button" class="item-action-btn" data-inline-edit-open="trip-accommodation-edit-{{$l.ID}}" aria-label="Edit accommodation: {{$l.Name}}" title="Edit this accommodation">Edit</button>
+              <form method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{$l.ID}}/delete" data-app-confirm data-ajax-submit data-toast-message="Accommodation deleted." data-confirm-title="Delete this accommodation?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete accommodation" data-confirm-icon="hotel" data-confirm-variant="danger">
+                <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+                <button type="submit" class="item-action-btn danger" aria-label="Delete accommodation: {{$l.Name}}" title="Delete this accommodation">Delete</button>
+              </form>
+            </div>
+          </details>
+          {{end}}
+          <div class="trip-unified-booking-card trip-unified-booking-card--lodging">
+            <div class="trip-unified-booking-card__strip" aria-hidden="true">
+              <div class="trip-unified-booking-card__strip-left">
+                <span class="trip-unified-booking-card__strip-time">{{formatTripClock $.Details.Trip $l.CheckInAt}}</span>
+                <span class="trip-unified-booking-card__strip-date">{{formatTripUIDate $.Details.Trip $.Settings (isoDateFromDateTime $l.CheckInAt)}}</span>
+              </div>
+              <div class="trip-unified-booking-card__strip-mid">
+                <span class="material-symbols-outlined">bed</span>
+                <span>{{lodgingNightsLabel $l}}</span>
+              </div>
+              <div class="trip-unified-booking-card__strip-right">
+                <span class="trip-unified-booking-card__strip-time">{{formatTripClock $.Details.Trip $l.CheckOutAt}}</span>
+                <span class="trip-unified-booking-card__strip-date">{{formatTripUIDate $.Details.Trip $.Settings (isoDateFromDateTime $l.CheckOutAt)}}</span>
+              </div>
+            </div>
+            <div id="trip-accommodation-view-{{$l.ID}}" class="item-view">
+              <div class="vehicle-card-content">
+                <div class="vehicle-media">
+                  {{if isImageWebPath $l.AttachmentPath}}
+                  <a href="{{$l.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open booking attachment in a new tab: {{$l.Name}}">
+                    <img class="vehicle-card-image" src="{{$l.AttachmentPath}}" alt="Booking attachment image for {{$l.Name}}">
+                  </a>
+                  {{else if $l.AttachmentPath}}
+                  <a href="{{$l.AttachmentPath}}" target="_blank" rel="noreferrer" class="vehicle-card-image vehicle-card-image--doc" title="Open booking attachment in a new tab: {{$l.Name}}">
+                    <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                    <strong>View Attachment</strong>
+                  </a>
+                  {{else}}
+                  <div class="vehicle-card-image vehicle-card-image--placeholder" role="img" aria-label="No booking image">
+                    <span class="material-symbols-outlined" aria-hidden="true">hotel</span>
+                  </div>
+                  {{end}}
+                </div>
+                <div class="vehicle-main">
+                  <div class="vehicle-main-top">
+                    <div>
+                      <h4>{{$l.Name}}</h4>
+                      <p class="stay-address-line">{{if $l.Address}}{{locationLineBeforeComma $l.Address}}{{else}}—{{end}}{{with googleMapsSearchURL $l.Latitude $l.Longitude $l.Address}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</p>
+                    </div>
+                    <div class="vehicle-cost-block">
+                      <strong>{{$.CurrencySymbol}}{{printf "%.2f" $l.Cost}}</strong>
+                      <small>Accommodation cost</small>
+                    </div>
+                  </div>
+                  <div class="vehicle-meta-grid">
+                    <div><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><div><strong>{{formatTripDateTime $.Details.Trip $.Settings $l.CheckInAt}}</strong><small>Check-in Date &amp; Time</small></div></div>
+                    <div><span class="material-symbols-outlined" aria-hidden="true">event</span><div><strong>{{formatTripDateTime $.Details.Trip $.Settings $l.CheckOutAt}}</strong><small>Check-out Date &amp; Time</small></div></div>
+                    <div class="remi-flight-booking-meta-grid">
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--status"><span class="material-symbols-outlined" aria-hidden="true">task_alt</span><div><strong>{{bookingStatusLabel $entry.BookingStatus}}</strong><small>Booking status</small></div></div>
+                      {{if $l.BookingConfirmation}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--ref"><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{$l.BookingConfirmation}}</strong><small>Booking Reference</small></div></div>
+                      {{end}}
+                      {{if $l.AttachmentPath}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--attach"><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><a class="flight-doc-link" href="{{$l.AttachmentPath}}" target="_blank" rel="noreferrer">Open Attachment</a><small>View Attachment</small></div></div>
+                      {{end}}
+                      {{if $l.Notes}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--notes flight-meta-notes"><span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span><div><strong>{{$l.Notes}}</strong><small>Notes</small></div></div>
+                      {{end}}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {{if not $.Details.Trip.IsArchived}}
+          <form id="trip-accommodation-edit-{{$l.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{$l.ID}}/update" class="form-grid item-edit hidden full accommodation-edit-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form data-ajax-submit data-toast-message="Accommodation updated.">
+            <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+            <input type="hidden" name="expected_updated_at" value="{{$l.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
+            <label class="full">Property Name<input type="text" name="name" value="{{$l.Name}}" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
+            <label class="full">Address<input type="text" name="address" value="{{$l.Address}}" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
+            <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
+            <label class="full">Check-in Date &amp; Time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "check_in_at" "value" $l.CheckInAt "required" true)}}</label>
+            <label class="full">Check-out Date &amp; Time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "check_out_at" "value" $l.CheckOutAt "required" true)}}</label>
+            <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" $l.Cost}}" placeholder="0.00"></label>
+            {{template "remiBookingStatusField" (dict "name" "booking_status" "value" $l.BookingStatus)}}
+            <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{$l.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
+            <input type="hidden" name="current_attachment_path" value="{{$l.AttachmentPath}}">
+            <input type="hidden" name="current_image_path" value="{{$l.ImagePath}}">
+            {{if $l.AttachmentPath}}
+            <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{$l.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open current booking attachment in a new tab">Open existing attachment</a></p>
+            {{end}}
+            <label class="full">Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+            <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+            {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
+            {{template "remiRemoveAttachmentSelect" "remove_image"}}
+            <label class="full">Notes<input type="text" name="notes" value="{{$l.Notes}}" placeholder="Breakfast included, high floor requested..."></label>
+            <div class="full accommodation-edit-actions">
+              <button type="submit" class="accommodation-save-btn">Save Changes</button>
+              <button type="button" class="secondary-btn" data-inline-edit-cancel="trip-accommodation-edit-{{$l.ID}}">Cancel</button>
+            </div>
+          </form>
+          {{end}}
+        </li>
+        {{else if eq $entry.Kind "vehicle"}}
+        {{$v := $entry.Vehicle}}
+        <li class="trip-unified-booking-row vehicle-rental-item vehicle-rental-card"
+            data-unified-booking-index="{{$idx}}"
+            data-booking-kind="vehicle"
+            data-booking-status="{{$entry.BookingStatus}}"
+            data-booking-state="{{if eq $entry.BookingStatus "to_be_done"}}to_book{{else}}booked{{end}}">
+          {{if not $.Details.Trip.IsArchived}}
+          <details class="item-actions vehicle-card-actions trip-inline-actions-dropdown">
+            <summary class="trip-inline-actions-summary">
+              <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
+              <span class="trip-inline-actions-summary-label">Vehicle rental actions</span>
+            </summary>
+            <div class="trip-inline-actions-buttons">
+              <button type="button" class="item-action-btn" data-inline-edit-open="vehicle-rental-edit-{{$v.ID}}" aria-label="Edit vehicle rental: {{if $v.VehicleDetail}}{{$v.VehicleDetail}}{{else}}booking{{end}}" title="Edit this rental">Edit</button>
+              <form method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{$v.ID}}/delete" data-app-confirm data-ajax-submit data-toast-message="Vehicle rental deleted." data-confirm-title="Delete this vehicle rental?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete rental" data-confirm-icon="car_rental" data-confirm-variant="danger">
+                <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+                <button type="submit" class="item-action-btn danger" aria-label="Delete vehicle rental: {{if $v.VehicleDetail}}{{$v.VehicleDetail}}{{else}}booking{{end}}" title="Delete this rental">Delete</button>
+              </form>
+            </div>
+          </details>
+          {{end}}
+          <div class="trip-unified-booking-card trip-unified-booking-card--vehicle">
+            <div class="trip-unified-booking-card__strip trip-unified-booking-card__strip--vehicle" aria-hidden="true">
+              <div class="trip-unified-booking-card__strip-left">
+                <div>
+                  <span class="trip-unified-booking-card__strip-time">{{formatTripClock $.Details.Trip $v.PickUpAt}}</span>
+                  <span class="trip-unified-booking-card__strip-date">{{formatTripUIDate $.Details.Trip $.Settings (isoDateFromDateTime $v.PickUpAt)}}</span>
+                </div>
+              </div>
+              <div class="trip-unified-booking-card__strip-mid">
+                <span class="material-symbols-outlined">directions_car</span>
+                <span>{{with vehicleRentalDurationLabel $v}}{{.}}{{else}}Pickup{{end}}</span>
+              </div>
+              <div class="trip-unified-booking-card__strip-right">
+                <span class="trip-unified-booking-card__strip-time">{{formatTripClock $.Details.Trip $v.DropOffAt}}</span>
+                <span class="trip-unified-booking-card__strip-date">{{formatTripUIDate $.Details.Trip $.Settings (isoDateFromDateTime $v.DropOffAt)}}</span>
+              </div>
+            </div>
+            <div id="vehicle-rental-view-{{$v.ID}}" class="item-view">
+              <div class="vehicle-card-content">
+                <div class="vehicle-media">
+                  {{if $v.VehicleImagePath}}
+                  <a href="{{$v.VehicleImagePath}}" target="_blank" rel="noreferrer" title="Open vehicle photo in a new tab{{if $v.VehicleDetail}}: {{$v.VehicleDetail}}{{end}}">
+                    <img class="vehicle-card-image" src="{{$v.VehicleImagePath}}" alt="Photo of rental vehicle{{if $v.VehicleDetail}}: {{$v.VehicleDetail}}{{end}}">
+                  </a>
+                  {{else}}
+                  <div class="vehicle-card-image vehicle-card-image--placeholder" role="img" aria-label="No vehicle photo">
+                    <span class="material-symbols-outlined" aria-hidden="true">directions_car</span>
+                  </div>
+                  {{end}}
+                </div>
+                <div class="vehicle-main">
+                  <div class="vehicle-main-top">
+                    <div>
+                      <h4>{{if $v.VehicleDetail}}{{$v.VehicleDetail}}{{else}}Vehicle rental{{end}}</h4>
+                    </div>
+                    <div class="vehicle-cost-block">
+                      <strong>{{$.CurrencySymbol}}{{printf "%.2f" (addF $v.Cost $v.InsuranceCost)}}</strong>
+                      <small>Total Rental Cost</small>
+                    </div>
+                  </div>
+                  <div class="vehicle-meta-grid vehicle-meta-grid--rental-flow">
+                    <div class="vehicle-meta-grid--location"><span class="material-symbols-outlined vehicle-meta-flow-icon" aria-hidden="true">arrow_circle_up</span><div class="vehicle-meta-location-col"><div class="vehicle-meta-location-line vehicle-pickup-line">{{if $v.PickUpLocation}}<strong>{{locationLineBeforeComma $v.PickUpLocation}}</strong>{{else}}<strong>—</strong>{{end}}{{with googleMapsSearchURL 0 0 $v.PickUpLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open pickup location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings $v.PickUpAt}}</small></div></div>
+                    <div class="vehicle-meta-grid--location"><span class="material-symbols-outlined vehicle-meta-flow-icon" aria-hidden="true">arrow_circle_down</span><div class="vehicle-meta-location-col"><div class="vehicle-meta-location-line vehicle-pickup-line">{{if ne $v.DropOffLocation ""}}<strong>{{locationLineBeforeComma $v.DropOffLocation}}</strong>{{with googleMapsSearchURL 0 0 $v.DropOffLocation}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open drop-off location in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}{{else}}<strong class="vehicle-meta-same-pickup">Same as pickup</strong>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings $v.DropOffAt}}</small></div></div>
+                    <div class="remi-flight-booking-meta-grid">
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--status"><span class="material-symbols-outlined" aria-hidden="true">task_alt</span><div><strong>{{bookingStatusLabel $entry.BookingStatus}}</strong><small>Booking status</small></div></div>
+                      {{if $v.BookingConfirmation}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--ref"><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{$v.BookingConfirmation}}</strong><small>Booking Reference</small></div></div>
+                      {{end}}
+                      {{if $v.AttachmentPath}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--attach"><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><a class="flight-doc-link" href="{{$v.AttachmentPath}}" target="_blank" rel="noreferrer">Open Attachment</a><small>View Attachment</small></div></div>
+                      {{end}}
+                      {{if $v.Notes}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--notes flight-meta-notes"><span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span><div><strong>{{$v.Notes}}</strong><small>Notes</small></div></div>
+                      {{end}}
+                    </div>
+                    <div>
+                      {{if and (ne $v.Cost 0.0) (ne $v.InsuranceCost 0.0)}}
+                      <span class="material-symbols-outlined" aria-hidden="true">payments</span><div><strong>{{$.CurrencySymbol}}{{printf "%.2f" $v.Cost}} · {{$.CurrencySymbol}}{{printf "%.2f" $v.InsuranceCost}}</strong><small>Rental · Insurance</small></div>
+                      {{else if ne $v.Cost 0.0}}
+                      <span class="material-symbols-outlined" aria-hidden="true">car_rental</span><div><strong>{{$.CurrencySymbol}}{{printf "%.2f" $v.Cost}}</strong><small>Rental</small></div>
+                      {{else}}
+                      <span class="material-symbols-outlined" aria-hidden="true">shield</span><div><strong>{{$.CurrencySymbol}}{{printf "%.2f" $v.InsuranceCost}}</strong><small>Insurance</small></div>
+                      {{end}}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {{if not $.Details.Trip.IsArchived}}
+          <form id="vehicle-rental-edit-{{$v.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/vehicle-rental/{{$v.ID}}/update" class="form-grid item-edit hidden full vehicle-edit-form vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form data-ajax-submit data-toast-message="Vehicle rental updated.">
+            <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+            <input type="hidden" name="expected_updated_at" value="{{$v.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
+            <label class="full">Vehicle<input type="text" name="vehicle_detail" value="{{$v.VehicleDetail}}" placeholder="e.g. Range Rover Velar"></label>
+            {{template "remiBookingStatusField" (dict "name" "booking_status" "value" $v.BookingStatus)}}
+            <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{$v.BookingConfirmation}}" placeholder="#REMI-9921"></label>
+            <label class="full">Pickup Location<input type="text" name="pick_up_location" value="{{$v.PickUpLocation}}" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
+            <label class="full">Pickup Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "pick_up_at" "value" $v.PickUpAt "required" true)}}</label>
+            <fieldset class="vehicle-dropoff-fieldset full">
+              <legend class="vehicle-dropoff-legend">Drop-off Location</legend>
+              <div class="vehicle-dropoff-radios" role="group" aria-label="Drop-off relative to pickup">
+                <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="same" {{if eq $v.DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-same> Same as pickup</label>
+                <label class="vehicle-dropoff-radio"><input type="radio" name="drop_off_same" value="different" {{if ne $v.DropOffLocation ""}}checked{{end}} data-vehicle-dropoff-diff> Different drop-off location</label>
+              </div>
+              <label class="full vehicle-dropoff-location" data-vehicle-dropoff-field {{if eq $v.DropOffLocation ""}}hidden{{end}}>Drop-off Location<input type="text" name="drop_off_location" value="{{$v.DropOffLocation}}" placeholder="Return location" autocomplete="off" data-location-autocomplete {{if eq $v.DropOffLocation ""}}disabled{{end}}></label>
+            </fieldset>
+            <label class="full">Drop-off Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "drop_off_at" "value" $v.DropOffAt "required" true)}}</label>
+            <label class="full">Rental Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" $v.Cost}}" placeholder="0.00"></label>
+            <label class="full">Insurance Cost<input type="number" step="0.01" min="0" name="insurance_cost" value="{{printf "%.2f" $v.InsuranceCost}}" placeholder="0.00"></label>
+            <input type="hidden" name="current_vehicle_image_path" value="{{$v.VehicleImagePath}}">
+            <input type="hidden" name="current_attachment_path" value="{{$v.AttachmentPath}}">
+            {{if $v.AttachmentPath}}
+            <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{$v.AttachmentPath}}" target="_blank" rel="noreferrer" title="Open current booking attachment in a new tab">Open existing attachment</a></p>
+            {{end}}
+            <div class="vehicle-form-rental-attach-col full">
+              <label>Rental Agreement Attachment<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
+              {{template "remiRemoveAttachmentSelect" "remove_attachment"}}
+            </div>
+            <div class="vehicle-form-photo-stack full">
+              {{if $v.VehicleImagePath}}
+              <label class="vehicle-thumb-form-row">
+                <span>Current vehicle rental image</span>
+                <a href="{{$v.VehicleImagePath}}" target="_blank" rel="noreferrer" title="Open current vehicle rental image in a new tab">
+                  <img class="vehicle-thumb" src="{{$v.VehicleImagePath}}" alt="Current vehicle rental image">
+                </a>
+              </label>
+              {{end}}
+              <label>Vehicle Photo<input type="file" name="vehicle_image" accept="image/*"></label>
+              {{template "remiRemoveAttachmentSelect" "remove_vehicle_image"}}
+            </div>
+            <label class="full">Notes<input type="text" name="notes" value="{{$v.Notes}}" placeholder="Notes about insurance coverage, keys, etc."></label>
+            <div class="full vehicle-edit-actions">
+              <button type="submit" class="vehicle-submit-btn">Save Changes</button>
+              <button type="button" class="secondary-btn" data-inline-edit-cancel="vehicle-rental-edit-{{$v.ID}}">Cancel</button>
+            </div>
+          </form>
+          {{end}}
+        </li>
+        {{else if eq $entry.Kind "flight"}}
+        {{$f := $entry.Flight}}
+        <li class="trip-unified-booking-row flight-card"
+            data-unified-booking-index="{{$idx}}"
+            data-booking-kind="flight"
+            data-booking-status="{{$entry.BookingStatus}}"
+            data-booking-state="{{if eq $entry.BookingStatus "to_be_done"}}to_book{{else}}booked{{end}}">
+          {{if not $.Details.Trip.IsArchived}}
+          <details class="item-actions flight-card-actions trip-inline-actions-dropdown">
+            <summary class="trip-inline-actions-summary">
+              <span class="material-symbols-outlined" aria-hidden="true">more_vert</span>
+              <span class="trip-inline-actions-summary-label">Flight actions</span>
+            </summary>
+            <div class="trip-inline-actions-buttons">
+              <button type="button" class="item-action-btn" data-inline-edit-open="flight-edit-{{$f.ID}}">Edit</button>
+              <form method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{$f.ID}}/delete" data-app-confirm data-confirm-title="Delete this flight?" data-confirm-body="The booking and linked itinerary lines will be removed from this trip." data-confirm-ok="Delete flight" data-confirm-icon="flight_takeoff" data-confirm-variant="danger" data-ajax-submit data-toast-message="Flight deleted.">
+                <button type="submit" class="item-action-btn danger">Delete</button>
+              </form>
+            </div>
+          </details>
+          {{end}}
+          <div class="trip-unified-booking-card trip-unified-booking-card--flight">
+            <div class="trip-unified-booking-card__strip trip-unified-booking-card__strip--flight" aria-hidden="true">
+              <div class="trip-unified-booking-card__strip-left">
+                <span class="trip-unified-booking-card__strip-apt">{{$f.DepartAirportIATA}}</span>
+                <span class="trip-unified-booking-card__strip-time">{{formatTripClock $.Details.Trip $f.DepartAt}}</span>
+                <span class="trip-unified-booking-card__strip-date">{{formatTripUIDate $.Details.Trip $.Settings (isoDateFromDateTime $f.DepartAt)}}</span>
+              </div>
+              <div class="trip-unified-booking-card__strip-mid">
+                <span class="material-symbols-outlined">flight</span>
+                <span>{{formatFlightBlockDuration $f}}</span>
+              </div>
+              <div class="trip-unified-booking-card__strip-right">
+                <span class="trip-unified-booking-card__strip-apt">{{$f.ArriveAirportIATA}}</span>
+                <span class="trip-unified-booking-card__strip-time">{{formatTripClock $.Details.Trip $f.ArriveAt}}</span>
+                <span class="trip-unified-booking-card__strip-date">{{formatTripUIDate $.Details.Trip $.Settings (isoDateFromDateTime $f.ArriveAt)}}</span>
+              </div>
+            </div>
+            <div id="flight-view-{{$f.ID}}" class="item-view flight-view">
+              <div class="vehicle-card-content">
+                <div class="vehicle-media">
+                  {{if $f.ImagePath}}
+                  <a href="{{$f.ImagePath}}" target="_blank" rel="noreferrer" title="Open flight image">
+                    <img class="vehicle-card-image" src="{{$f.ImagePath}}" alt="Flight image for {{if $f.FlightName}}{{$f.FlightName}}{{else}}booking{{end}}">
+                  </a>
+                  {{else if $f.DocumentPath}}
+                  <a href="{{$f.DocumentPath}}" target="_blank" rel="noreferrer" class="vehicle-card-image vehicle-card-image--doc" title="Open flight attachment">
+                    <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                    <strong>View Attachment</strong>
+                  </a>
+                  {{else}}
+                  <div class="vehicle-card-image vehicle-card-image--placeholder" role="img" aria-label="No flight image">
+                    <span class="material-symbols-outlined" aria-hidden="true">flight</span>
+                  </div>
+                  {{end}}
+                </div>
+                <div class="vehicle-main">
+                  <div class="flight-main-head">
+                    <div>
+                      <h4>{{if $f.FlightName}}{{$f.FlightName}}{{else}}Flight{{end}}</h4>
+                      {{if $f.FlightNumber}}<p>{{$f.FlightNumber}}</p>{{end}}
+                    </div>
+                    <div class="flight-cost-block">
+                      <strong>{{$.CurrencySymbol}}{{printf "%.2f" $f.Cost}}</strong>
+                      <small>Total Cost</small>
+                    </div>
+                  </div>
+                  <div class="flight-meta-grid">
+                    {{$route := flightRouteIATALine $f}}
+                    {{if $route}}
+                    <div class="full flight-iata-summary" style="grid-column:1/-1">
+                      <p class="flight-iata-route"><strong>{{$route}}</strong></p>
+                    </div>
+                    {{end}}
+                    <div><span class="material-symbols-outlined">flight_takeoff</span><div class="flight-airport-col"><div class="flight-airport-line"><strong>{{flightAirportHeadline $f.DepartAirport $f.DepartAirportIATA $.AirportByIATA}}</strong>{{with googleMapsSearchURL 0 0 $f.DepartAirport}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open depart airport in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings $f.DepartAt}}</small></div></div>
+                    <div><span class="material-symbols-outlined">flight_land</span><div class="flight-airport-col"><div class="flight-airport-line"><strong>{{flightAirportHeadline $f.ArriveAirport $f.ArriveAirportIATA $.AirportByIATA}}</strong>{{with googleMapsSearchURL 0 0 $f.ArriveAirport}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open arrive airport in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings $f.ArriveAt}}</small></div></div>
+                    <div class="remi-flight-booking-meta-grid">
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--status"><span class="material-symbols-outlined" aria-hidden="true">task_alt</span><div><strong>{{bookingStatusLabel $entry.BookingStatus}}</strong><small>Booking status</small></div></div>
+                      {{if $f.BookingConfirmation}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--ref"><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{$f.BookingConfirmation}}</strong><small>Booking Confirmation</small></div></div>
+                      {{end}}
+                      {{if $f.DocumentPath}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--attach"><span class="material-symbols-outlined" aria-hidden="true">description</span><div><a class="flight-doc-link" href="{{$f.DocumentPath}}" target="_blank" rel="noreferrer">Open Attachment</a><small>View Attachment</small></div></div>
+                      {{end}}
+                      {{if $f.Notes}}
+                      <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--notes flight-meta-notes"><span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span><div><strong>{{$f.Notes}}</strong><small>Notes</small></div></div>
+                      {{end}}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {{if not $.Details.Trip.IsArchived}}
+          <form id="flight-edit-{{$f.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/flights/{{$f.ID}}/update" class="form-grid item-edit hidden full flight-edit-form flight-form-grid" enctype="multipart/form-data" data-ajax-submit data-toast-message="Flight updated.">
+            <input type="hidden" name="return_to" value="/trips/{{$.Details.Trip.ID}}">
+            <input type="hidden" name="expected_updated_at" value="{{$f.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
+            <div class="full flight-section-head flight-edit-form-head">
+              <div class="flight-section-icon" aria-hidden="true"><span class="material-symbols-outlined">edit_square</span></div>
+              <div class="flight-section-head-text">
+                <p class="flight-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.</p>
+              </div>
+            </div>
+            <label class="full">Airline<input type="text" name="flight_name" value="{{$f.FlightName}}" placeholder="Search airline name or IATA code" required data-flight-airline-autocomplete autocomplete="off"></label>
+            <label class="full">Flight Number<input type="text" name="flight_number" value="{{$f.FlightNumber}}" placeholder="e.g. PR 2781"></label>
+            <label class="full">Departure Airport<input type="text" name="depart_airport" value="{{flightAirportHeadline $f.DepartAirport $f.DepartAirportIATA $.AirportByIATA}}" placeholder="Search by city or IATA code" required data-flight-airport-autocomplete autocomplete="off"></label>
+            <input type="hidden" name="depart_airport_iata" value="{{$f.DepartAirportIATA}}">
+            <label class="full">Departure Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "depart_at" "value" $f.DepartAt "required" true)}}</label>
+            <label class="full">Arrival Airport<input type="text" name="arrive_airport" value="{{flightAirportHeadline $f.ArriveAirport $f.ArriveAirportIATA $.AirportByIATA}}" placeholder="Search by city or IATA code" required data-flight-airport-autocomplete autocomplete="off"></label>
+            <input type="hidden" name="arrive_airport_iata" value="{{$f.ArriveAirportIATA}}">
+            <label class="full">Arrival Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" $.Details.Trip "Settings" $.Settings "name" "arrive_at" "value" $f.ArriveAt "required" true)}}</label>
+            {{template "remiBookingStatusField" (dict "name" "booking_status" "value" $f.BookingStatus)}}
+            <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{$f.BookingConfirmation}}" placeholder="e.g. FLT-1234"></label>
+            <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" $f.Cost}}" placeholder="0.00"></label>
+            <input type="hidden" name="current_document_path" value="{{$f.DocumentPath}}">
+            <input type="hidden" name="current_image_path" value="{{$f.ImagePath}}">
+            {{if $f.DocumentPath}}
+            <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{$f.DocumentPath}}" target="_blank" rel="noreferrer" title="Open current flight attachment in a new tab">Open existing attachment</a></p>
+            {{end}}
+            {{if $f.ImagePath}}
+            <p class="full edit-form-attachment-open-wrap"><a class="secondary-btn edit-form-attachment-open" href="{{$f.ImagePath}}" target="_blank" rel="noreferrer" title="Open current flight image in a new tab">Open existing image</a></p>
+            {{end}}
+            <label class="full">Boarding Pass / Ticket Attachment<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
+            <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
+            {{template "remiRemoveAttachmentSelect" "remove_document"}}
+            {{template "remiRemoveAttachmentSelect" "remove_image"}}
+            <label class="full">Notes<input type="text" name="notes" value="{{$f.Notes}}" placeholder="Add any additional details"></label>
+            <div class="full flight-edit-actions">
+              <button type="submit" class="flight-submit-btn">Save Changes</button>
+              <button type="button" class="secondary-btn" data-inline-edit-cancel="flight-edit-{{$f.ID}}">Cancel</button>
+            </div>
+          </form>
+          {{end}}
+        </li>
+        {{end}}
+        {{end}}
+      </ul>
+      <nav class="trip-unified-bookings__pager hidden" data-unified-bookings-pager aria-label="Booking pages">
+        <button type="button" class="secondary-btn" data-unified-bookings-page="prev" disabled>Previous</button>
+        <span data-unified-bookings-page-label></span>
+        <button type="button" class="secondary-btn" data-unified-bookings-page="next">Next</button>
+      </nav>
+      <p class="trip-unified-bookings__manage muted small">Manage on dedicated pages: {{if $.Details.Trip.UIShowStay}}<a class="link-btn" href="/trips/{{$.Details.Trip.ID}}/accommodation">{{$.Details.Trip.StaySectionTitle}}</a>{{end}}{{if and $.Details.Trip.UIShowStay (or $.Details.Trip.UIShowVehicle $.Details.Trip.UIShowFlights)}} · {{end}}{{if $.Details.Trip.UIShowVehicle}}<a class="link-btn" href="/trips/{{$.Details.Trip.ID}}/vehicle-rental">{{$.Details.Trip.VehicleSectionTitle}}</a>{{end}}{{if and $.Details.Trip.UIShowVehicle $.Details.Trip.UIShowFlights}} · {{end}}{{if $.Details.Trip.UIShowFlights}}<a class="link-btn" href="/trips/{{$.Details.Trip.ID}}/flights">{{$.Details.Trip.FlightsSectionTitle}}</a>{{end}}</p>
+      {{else}}
+      <div class="accommodation-empty trip-unified-bookings-empty">
+        <div aria-hidden="true"><span class="material-symbols-outlined">event_available</span></div>
+        <h4>No bookings in this stream yet</h4>
+        <p>Add accommodation, a vehicle rental, or a flight from the <span class="no-wrap">+</span> menu or the section links in trip settings.</p>
+      </div>
+      {{end}}
+    </div>
+  </details>
+</section>
+{{end}}

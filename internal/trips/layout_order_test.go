@@ -20,7 +20,7 @@ func TestNormalizeMainSectionOrder_emptyUsesDefault(t *testing.T) {
 func TestNormalizeMainSectionOrder_reorderAndStripUnknown(t *testing.T) {
 	raw := "flights,map,bogus,itinerary"
 	got := NormalizeMainSectionOrder(raw)
-	if got[0] != MainSectionFlights || got[1] != MainSectionMap || got[2] != MainSectionItinerary {
+	if got[0] != MainSectionBookings || got[1] != MainSectionMap || got[2] != MainSectionItinerary {
 		t.Fatalf("prefix: %v", got)
 	}
 	if containsString(got, "bogus") {
@@ -201,9 +201,7 @@ func TestDefaultMainSectionOrder_tripDetailsSequence(t *testing.T) {
 	wantPrefix := []string{
 		MainSectionMap,
 		MainSectionItinerary,
-		MainSectionFlights,
-		MainSectionStay,
-		MainSectionVehicle,
+		MainSectionBookings,
 		MainSectionChecklist,
 		MainSectionSpends,
 		MainSectionTheTab,

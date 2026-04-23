@@ -20,6 +20,8 @@ func DefaultAppSettings() AppSettings {
 		DefaultDistanceUnit:     "km",
 		GoogleMapsAPIKey:        "",
 		GoogleMapsMapID:         "",
+		AirLabsAPIKey:           "",
+		OpenWeatherAPIKey:       "",
 		MaxUploadFileSizeMB:     5,
 		DefaultUIDateFormat:     "dmy",
 	}

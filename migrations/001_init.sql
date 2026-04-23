@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS lodging_entries (
   attachment_path TEXT NOT NULL DEFAULT '',
   check_in_itinerary_id TEXT NOT NULL DEFAULT '',
   check_out_itinerary_id TEXT NOT NULL DEFAULT '',
+  booking_status TEXT NOT NULL DEFAULT 'to_be_done',
   created_at DATETIME NOT NULL,
   FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
 );
@@ -119,6 +120,7 @@ CREATE TABLE IF NOT EXISTS vehicle_rentals (
   drop_off_itinerary_id TEXT NOT NULL DEFAULT '',
   rental_expense_id TEXT NOT NULL DEFAULT '',
   insurance_expense_id TEXT NOT NULL DEFAULT '',
+  booking_status TEXT NOT NULL DEFAULT 'to_be_done',
   created_at DATETIME NOT NULL,
   FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
 );
@@ -128,6 +130,7 @@ CREATE TABLE IF NOT EXISTS flight_entries (
   trip_id TEXT NOT NULL,
   flight_name TEXT NOT NULL DEFAULT '',
   flight_number TEXT NOT NULL DEFAULT '',
+  booking_status TEXT NOT NULL DEFAULT 'to_be_done',
   depart_airport TEXT NOT NULL DEFAULT '',
   arrive_airport TEXT NOT NULL DEFAULT '',
   depart_at TEXT NOT NULL DEFAULT '',
@@ -139,6 +142,8 @@ CREATE TABLE IF NOT EXISTS flight_entries (
   depart_itinerary_id TEXT NOT NULL DEFAULT '',
   arrive_itinerary_id TEXT NOT NULL DEFAULT '',
   expense_id TEXT NOT NULL DEFAULT '',
+  trip_bookings_checklist_item_id TEXT NOT NULL DEFAULT '',
+  trip_bookings_checklist_dismissed INTEGER NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL,
   FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
 );

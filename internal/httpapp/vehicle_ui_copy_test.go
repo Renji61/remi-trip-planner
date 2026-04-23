@@ -28,7 +28,11 @@ func TestVehicleRentalPageAndFormsCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tripAndFab := trip + "\n" + string(fabB)
+	ub, err := os.ReadFile(filepath.Join(root, "web", "templates", "trip_unified_bookings.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tripAndFab := trip + "\n" + string(fabB) + "\n" + string(ub)
 
 	jsB, err := os.ReadFile(filepath.Join(root, "web", "static", "app.js"))
 	if err != nil {
@@ -51,8 +55,7 @@ func TestVehicleRentalPageAndFormsCopy(t *testing.T) {
 		`> Different drop-off location</label>`,
 		`>Drop-off Location<input type="text" name="drop_off_location"`,
 		`type="submit">Save Vehicle Rental</button>`,
-		`<h3>Edit Vehicle Rental</h3>`,
-		`class="vehicle-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.`,
+		`{{template "remiBookingStatusField" (dict "name" "booking_status" "value" .BookingStatus)}}`,
 		`<small>Booking Reference</small>`,
 		`vehicle-meta-same-pickup">Same as pickup</strong>`,
 		`aria-label="Open pickup location in Google Maps"`,
@@ -88,19 +91,18 @@ func TestVehicleRentalPageAndFormsCopy(t *testing.T) {
 	tripWant := []string{
 		`id="vehicle-rental-itinerary-edit-`,
 		`label class="full">Vehicle<input type="text" name="vehicle_detail" value="{{.Vehicle.VehicleDetail}}"`,
-		`<span class="itinerary-label">Vehicle</span>`,
+		`{{template "remiBookingStatusField" (dict "name" "booking_status" "value" .Vehicle.BookingStatus)}}`,
+		`vehicle-meta-grid--rental-flow`,
 		`id="vehicle-rental-edit-`,
-		`<h3>Edit Vehicle Rental</h3>`,
-		`class="vehicle-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.`,
 		`id="mobile-sheet-vehicle"`,
 		`class="trip-resource-form-subtitle mobile-sheet-subtitle">Details sync with your itinerary and expenses.`,
 		`<label class="full">Pickup Location<input type="text" name="pick_up_location" value="{{.Vehicle.PickUpLocation}}"`,
-		`<label class="full">Pickup Location<input type="text" name="pick_up_location" value="{{.PickUpLocation}}"`,
+		`<label class="full">Pickup Location<input type="text" name="pick_up_location" value="{{$v.PickUpLocation}}"`,
 		`<label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.Vehicle.BookingConfirmation}}"`,
-		`<label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}"`,
+		`<label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{$v.BookingConfirmation}}"`,
 		`<label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>`,
 		`type="submit">Save Vehicle Rental</button>`,
-		`<strong>{{.BookingConfirmation}}</strong><small>Booking Reference</small>`,
+		`<strong>{{$v.BookingConfirmation}}</strong><small>Booking Reference</small>`,
 	}
 	for _, s := range tripWant {
 		if !strings.Contains(tripAndFab, s) {
@@ -123,8 +125,8 @@ func TestVehicleRentalPageAndFormsCopy(t *testing.T) {
 	}
 
 	// Vehicle itinerary row must not use "Same as pick-up" in the meta line.
-	if strings.Contains(trip, `vehicle-meta-same-pickup">Same as pick-up`) {
-		t.Error(`trip.html vehicle card should use "Same as pickup" in .vehicle-meta-same-pickup`)
+	if strings.Contains(tripAndFab, `vehicle-meta-same-pickup">Same as pick-up`) {
+		t.Error(`trip templates vehicle card should use "Same as pickup" in .vehicle-meta-same-pickup`)
 	}
 
 	// —— app.js attachment control (vehicle forms use same picker) ——

@@ -10,6 +10,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.50.3] - 2026-04-23
+
+### Added
+
+- **Booking status:** `booking_status` on **accommodation**, **vehicle rental**, and **flight** rows (booked vs to be done), with forms wired through templates and service-layer normalization.
+- **Unified Booking details** on the main trip page: collapsible section listing stays, vehicle rentals, and flights with **type** and **booked / to be booked** filters, inline actions, and shared styling with existing booking cards.
+- **AirLabs (optional):** `AirLabsAPIKey` in app settings; `GET` **`/api/flight-airports/suggest`**, **`POST` `/api/flight-airports/remember`**, and **`/api/flight-airlines/suggest`** back airport and airline autocomplete (cache-first, then AirLabs with fallbacks to existing map providers). Keys are stored encrypted when **`REMI_SETTINGS_ENCRYPTION_KEY`** is set; profile export redacts them.
+- **OpenWeather (optional):** `OpenWeatherAPIKey` in app settings; itinerary stops with coordinates and a day label can show a **same-day forecast** preview when the day is within the API window. **`GET` `/trips/{id}/itinerary/{itemID}/weather`** returns JSON for the client.
+- **Trip Bookings checklist sync:** for flights still **to be booked**, the app can create or update a **Trip Bookings** category checklist line (`Book: …`) and mark it done when the flight is booked, with dismiss support (`trip_bookings_checklist_item_id` / `trip_bookings_checklist_dismissed` on flights).
+
+### Changed
+
+- **Site settings UI:** key-management patterns (mask, update, delete) for **Google Maps**, **AirLabs**, and **OpenWeatherMap** API keys; **`app.js`** extended accordingly.
+- **Itinerary / maps:** `venue_hours_display` and display-title helpers; draft-day and layout-order test coverage; **PWA** service worker tweaks for cache behavior.
+- **New installs** (`migrations/001_init.sql` + `db.go`): schema defaults for `booking_status` and flight checklist metadata; existing databases pick up columns via existing migration paths in **`internal/storage/sqlite/db.go`**.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.50.3`** (and the **GHCR** image tag **`v1.50.3`** when CI builds) so **About** and **`GET /api/about/update-check`** report an update for installs on **1.50.2** or older.
+
 ## [1.50.2] - 2026-04-20
 
 ### Added
@@ -440,7 +460,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.2...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.3...HEAD
+[1.50.3]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.2...v1.50.3
 [1.50.2]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.1...v1.50.2
 [1.50.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.0...v1.50.1
 [1.50.0]: https://github.com/Renji61/remi-trip-planner/compare/v1.49.4...v1.50.0

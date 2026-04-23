@@ -2731,6 +2731,407 @@ const initSiteSettingsGoogleMapsKeySection = (mapForm) => {
   );
 };
 
+const AIRLABS_KEY_MIN_LEN = 8;
+
+const initSiteSettingsAirLabsKeySection = (mapForm) => {
+  const section = mapForm.querySelector("[data-airlabs-key-section]");
+  if (!(section instanceof HTMLElement)) return;
+
+  const editWrap = section.querySelector("[data-airlabs-key-edit]");
+  const savedCard = section.querySelector("[data-airlabs-key-saved]");
+  const textInput = section.querySelector("[data-airlabs-key-input]");
+  const submitHidden = section.querySelector("[data-airlabs-key-submit]");
+  const clearCheckbox = section.querySelector("[data-airlabs-clear-checkbox]");
+  const maskEl = section.querySelector("[data-airlabs-key-mask]");
+  const validationEl = section.querySelector("[data-airlabs-key-validation]");
+  const hasSavedCardEl = savedCard instanceof HTMLElement;
+
+  if (
+    !editWrap ||
+    !(textInput instanceof HTMLInputElement) ||
+    !(submitHidden instanceof HTMLInputElement) ||
+    !(clearCheckbox instanceof HTMLInputElement)
+  ) {
+    return;
+  }
+
+  const initialSavedKey = (section.getAttribute("data-saved-key") || "").trim();
+  let savedKeyForCopy = initialSavedKey;
+  let clearOnSave = false;
+  let showingSavedCard = initialSavedKey.length > 0;
+
+  const resetValidation = () => {
+    if (validationEl instanceof HTMLElement) {
+      validationEl.textContent = "";
+      validationEl.hidden = true;
+      validationEl.classList.remove("gmaps-key-validation--ok", "gmaps-key-validation--warn");
+    }
+  };
+
+  const updateValidationHint = () => {
+    if (!(validationEl instanceof HTMLElement)) return;
+    const v = textInput.value.trim();
+    if (!v) {
+      resetValidation();
+      return;
+    }
+    validationEl.hidden = false;
+    if (v.length >= 16) {
+      validationEl.textContent = "Length looks reasonable for an AirLabs API key.";
+      validationEl.classList.remove("gmaps-key-validation--warn");
+      validationEl.classList.add("gmaps-key-validation--ok");
+    } else {
+      validationEl.textContent =
+        "AirLabs keys are often longer. Double-check the value from your AirLabs dashboard before saving.";
+      validationEl.classList.remove("gmaps-key-validation--ok");
+      validationEl.classList.add("gmaps-key-validation--warn");
+    }
+  };
+
+  const render = () => {
+    clearCheckbox.checked = clearOnSave;
+    const hasStoredKey = Boolean(savedKeyForCopy.trim());
+    const showSavedUi = hasSavedCardEl && hasStoredKey && showingSavedCard && !clearOnSave;
+    if (showSavedUi) {
+      savedCard.hidden = false;
+      editWrap.hidden = true;
+      if (maskEl) {
+        maskEl.textContent = maskGoogleMapsKeyForDisplay(savedKeyForCopy);
+      }
+      submitHidden.value = "";
+      textInput.value = "";
+      textInput.removeAttribute("name");
+      resetValidation();
+    } else {
+      if (hasSavedCardEl) {
+        savedCard.hidden = true;
+      }
+      editWrap.hidden = false;
+      submitHidden.value = textInput.value.trim();
+    }
+  };
+
+  const onUpdateKey = () => {
+    clearOnSave = false;
+    clearCheckbox.checked = false;
+    showingSavedCard = false;
+    textInput.value = "";
+    submitHidden.value = "";
+    resetValidation();
+    render();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          textInput.focus({ preventScroll: false });
+        } catch (e) {
+          textInput.focus();
+        }
+      });
+    });
+  };
+
+  const onDeleteKeyConfirmed = () => {
+    savedKeyForCopy = "";
+    showingSavedCard = false;
+    clearOnSave = true;
+    textInput.value = "";
+    submitHidden.value = "";
+    section.setAttribute("data-saved-key", "");
+    section.setAttribute("data-initial-has-key", "0");
+    resetValidation();
+    render();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          textInput.focus({ preventScroll: false });
+        } catch (e) {
+          textInput.focus();
+        }
+      });
+    });
+  };
+
+  render();
+
+  textInput.addEventListener("input", () => {
+    if (clearOnSave && textInput.value.trim() !== "") {
+      clearOnSave = false;
+      clearCheckbox.checked = false;
+    }
+    submitHidden.value = textInput.value.trim();
+    updateValidationHint();
+  });
+
+  const openDeleteConfirm = () => {
+    const run = window.remiOpenAppConfirm;
+    if (typeof run === "function") {
+      run({
+        title: "Delete AirLabs API key?",
+        body: "Flight airport suggestions will use your saved cache and map location providers only. Save the form to apply this change.",
+        okText: "Delete key",
+        icon: "delete_forever",
+        variant: "danger",
+        onConfirm: onDeleteKeyConfirmed
+      });
+      return;
+    }
+    if (
+      window.confirm(
+        "Delete the AirLabs API key? Flight airport suggestions will use your saved cache and map location providers only. Save the form to apply."
+      )
+    ) {
+      onDeleteKeyConfirmed();
+    }
+  };
+
+  mapForm.addEventListener(
+    "click",
+    (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      const updateBtn = t.closest("[data-airlabs-key-update]");
+      if (updateBtn && section.contains(updateBtn)) {
+        e.preventDefault();
+        onUpdateKey();
+        return;
+      }
+      const deleteBtn = t.closest("[data-airlabs-key-delete]");
+      if (deleteBtn && section.contains(deleteBtn)) {
+        e.preventDefault();
+        openDeleteConfirm();
+        return;
+      }
+      const copyBtn = t.closest("[data-airlabs-key-copy]");
+      if (copyBtn && section.contains(copyBtn)) {
+        e.preventDefault();
+        const toCopy = savedKeyForCopy.trim();
+        if (!toCopy) return;
+        void (async () => {
+          const toast = typeof window.remiShowToast === "function" ? window.remiShowToast : null;
+          const ok = await copyTextToClipboard(toCopy);
+          if (ok) {
+            toast?.("AirLabs API key copied.");
+          } else {
+            toast?.("Could not copy to clipboard.");
+          }
+        })();
+      }
+    },
+    true
+  );
+
+  mapForm.addEventListener(
+    "submit",
+    (e) => {
+      if (clearOnSave) {
+        submitHidden.value = "";
+        clearCheckbox.checked = true;
+        return;
+      }
+      clearCheckbox.checked = false;
+      submitHidden.value = textInput.value.trim();
+      const draft = submitHidden.value;
+      if (draft !== "" && draft.length < AIRLABS_KEY_MIN_LEN) {
+        e.preventDefault();
+        if (typeof window.remiShowToast === "function") {
+          window.remiShowToast(
+            `That value is too short to be a valid AirLabs key (minimum ${AIRLABS_KEY_MIN_LEN} characters). Fix it or delete the key.`
+          );
+        }
+        textInput.focus();
+        updateValidationHint();
+      }
+    },
+    true
+  );
+};
+
+const OPENWEATHER_KEY_MIN_LEN = 8;
+
+const initSiteSettingsOpenWeatherKeySection = (mapForm) => {
+  const section = mapForm.querySelector("[data-openweather-key-section]");
+  if (!(section instanceof HTMLElement)) return;
+
+  const editWrap = section.querySelector("[data-openweather-key-edit]");
+  const savedCard = section.querySelector("[data-openweather-key-saved]");
+  const textInput = section.querySelector("[data-openweather-key-input]");
+  const submitHidden = section.querySelector("[data-openweather-key-submit]");
+  const clearCheckbox = section.querySelector("[data-openweather-clear-checkbox]");
+  const maskEl = section.querySelector("[data-openweather-key-masked]");
+  const validationEl = section.querySelector("[data-openweather-key-validation]");
+  const hasSavedCardEl = savedCard instanceof HTMLElement;
+
+  if (
+    !editWrap ||
+    !(textInput instanceof HTMLInputElement) ||
+    !(submitHidden instanceof HTMLInputElement) ||
+    !(clearCheckbox instanceof HTMLInputElement)
+  ) {
+    return;
+  }
+
+  const initialSavedKey = (section.getAttribute("data-saved-key") || "").trim();
+  let savedKeyForCopy = initialSavedKey;
+  let clearOnSave = false;
+  let showingSavedCard = initialSavedKey.length > 0;
+
+  const resetValidation = () => {
+    if (validationEl instanceof HTMLElement) {
+      validationEl.textContent = "";
+      validationEl.hidden = true;
+      validationEl.classList.remove("gmaps-key-validation--ok", "gmaps-key-validation--warn");
+    }
+  };
+
+  const updateValidationHint = () => {
+    if (!(validationEl instanceof HTMLElement)) return;
+    const v = textInput.value.trim();
+    if (!v) {
+      resetValidation();
+      return;
+    }
+    validationEl.hidden = false;
+    if (v.length >= 20) {
+      validationEl.textContent = "Length looks reasonable for an OpenWeatherMap API key.";
+      validationEl.classList.remove("gmaps-key-validation--warn");
+      validationEl.classList.add("gmaps-key-validation--ok");
+    } else {
+      validationEl.textContent =
+        "OpenWeather keys are often 32 characters. Check your OpenWeather dashboard.";
+      validationEl.classList.remove("gmaps-key-validation--ok");
+      validationEl.classList.add("gmaps-key-validation--warn");
+    }
+  };
+
+  const render = () => {
+    clearCheckbox.checked = clearOnSave;
+    const hasStoredKey = Boolean(savedKeyForCopy.trim());
+    const showSavedUi = hasSavedCardEl && hasStoredKey && showingSavedCard && !clearOnSave;
+    if (showSavedUi) {
+      savedCard.hidden = false;
+      editWrap.hidden = true;
+      if (maskEl) {
+        maskEl.textContent = maskGoogleMapsKeyForDisplay(savedKeyForCopy);
+      }
+      submitHidden.value = "";
+      textInput.value = "";
+      textInput.removeAttribute("name");
+      resetValidation();
+    } else {
+      if (hasSavedCardEl) {
+        savedCard.hidden = true;
+      }
+      editWrap.hidden = false;
+      submitHidden.value = textInput.value.trim();
+    }
+  };
+
+  const onUpdateKey = () => {
+    clearOnSave = false;
+    clearCheckbox.checked = false;
+    showingSavedCard = false;
+    textInput.value = "";
+    submitHidden.value = "";
+    resetValidation();
+    render();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          textInput.focus({ preventScroll: false });
+        } catch (e) {
+          textInput.focus();
+        }
+      });
+    });
+  };
+
+  const onDeleteKeyConfirmed = () => {
+    savedKeyForCopy = "";
+    showingSavedCard = false;
+    clearOnSave = true;
+    textInput.value = "";
+    submitHidden.value = "";
+    section.setAttribute("data-saved-key", "");
+    section.setAttribute("data-initial-has-key", "0");
+    resetValidation();
+    render();
+  };
+
+  render();
+
+  textInput.addEventListener("input", () => {
+    if (clearOnSave && textInput.value.trim() !== "") {
+      clearOnSave = false;
+      clearCheckbox.checked = false;
+    }
+    submitHidden.value = textInput.value.trim();
+    updateValidationHint();
+  });
+
+  const openDeleteConfirm = () => {
+    const run = window.remiOpenAppConfirm;
+    if (typeof run === "function") {
+      run({
+        title: "Delete OpenWeatherMap API key?",
+        body: "Stop weather previews on trip pages will be hidden. Save the form to apply this change.",
+        okText: "Delete key",
+        icon: "delete_forever",
+        variant: "danger",
+        onConfirm: onDeleteKeyConfirmed
+      });
+      return;
+    }
+    if (window.confirm("Delete the OpenWeatherMap API key? Save the form to apply.")) {
+      onDeleteKeyConfirmed();
+    }
+  };
+
+  mapForm.addEventListener(
+    "click",
+    (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      const updateBtn = t.closest("[data-openweather-key-update]");
+      if (updateBtn && section.contains(updateBtn)) {
+        e.preventDefault();
+        onUpdateKey();
+        return;
+      }
+      const deleteBtn = t.closest("[data-openweather-key-delete]");
+      if (deleteBtn && section.contains(deleteBtn)) {
+        e.preventDefault();
+        openDeleteConfirm();
+      }
+    },
+    true
+  );
+
+  mapForm.addEventListener(
+    "submit",
+    (e) => {
+      if (clearOnSave) {
+        submitHidden.value = "";
+        clearCheckbox.checked = true;
+        return;
+      }
+      clearCheckbox.checked = false;
+      submitHidden.value = textInput.value.trim();
+      const draft = submitHidden.value;
+      if (draft !== "" && draft.length < OPENWEATHER_KEY_MIN_LEN) {
+        e.preventDefault();
+        if (typeof window.remiShowToast === "function") {
+          window.remiShowToast(
+            `That value is too short to be a valid OpenWeather key (minimum ${OPENWEATHER_KEY_MIN_LEN} characters). Fix it or delete the key.`
+          );
+        }
+        textInput.focus();
+        updateValidationHint();
+      }
+    },
+    true
+  );
+};
+
 window.addEventListener("load", () => {
   /** Document / Element / DocumentFragment — not `instanceof ParentNode` (ParentNode is not a JS global in Firefox and others). */
   const remiIsDomQueryRoot = (node) => Boolean(node && typeof node.querySelectorAll === "function");
@@ -3152,6 +3553,16 @@ window.addEventListener("load", () => {
     const u = shell && shell.getAttribute("data-location-suggest-url");
     return (u && u.trim()) || "/api/location/suggest";
   };
+  const remiFlightAirportSuggestURL = () => {
+    const shell = document.querySelector("main.app-shell");
+    const u = shell && shell.getAttribute("data-flight-airport-suggest-url");
+    return (u && u.trim()) || "/api/flight-airports/suggest";
+  };
+  const remiFlightAirlineSuggestURL = () => {
+    const shell = document.querySelector("main.app-shell");
+    const u = shell && shell.getAttribute("data-flight-airline-suggest-url");
+    return (u && u.trim()) || "/api/flight-airlines/suggest";
+  };
   const remiGeocodeURL = () => "/api/location/geocode";
   const remiPlaceDetailsURL = () => "/api/location/place-details";
   const remiPlaceDetailsClientCache = new Map();
@@ -3218,30 +3629,47 @@ window.addEventListener("load", () => {
     return new Date(y, mo, d).getDay();
   };
 
+  const remiReadTripClock24h = () => {
+    const m = document.querySelector("main.app-shell.trip-details-page");
+    return Boolean(m && m.getAttribute("data-effective-clock-24h") === "1");
+  };
   const remiFormatMinutesClock = (mins) => {
     if (mins == null || !Number.isFinite(mins)) return "";
     const h = Math.floor(mins / 60) % 24;
     const mm = Math.round(mins % 60);
     const dt = new Date();
     dt.setHours(h, mm, 0, 0);
-    return dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (remiReadTripClock24h()) {
+      return dt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+    }
+    return dt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
   };
 
   const remiSummarizeHoursFromPlaceDetail = (detail, ymd) => {
     const day = remiWeekDayFromYMD(ymd);
     const oh = detail && detail.openingHours;
-    if (!oh) return { summary: "🔴 No hours listed for this place." };
+    if (!oh) {
+      return { chipLine: "Opening hours not available.", openMins: null, closeMins: null, status: "unavailable" };
+    }
+    const ivs = remiCollectSameDayIntervals(oh.periods, day);
+    if (ivs.length) {
+      const [a, b] = ivs[0];
+      const chipLine = `${remiFormatMinutesClock(a)} – ${remiFormatMinutesClock(b)}`;
+      return { chipLine, openMins: a, closeMins: b, status: "open" };
+    }
     const wt = oh.weekday_text;
     if (Array.isArray(wt) && wt[day]) {
       const line = String(wt[day]);
-      if (/closed/i.test(line)) return { summary: "🔴 Closed on this day." };
+      if (/closed/i.test(line)) {
+        return { chipLine: "Opening hours not available.", openMins: null, closeMins: null, status: "closed" };
+      }
       const rest = line.replace(/^[^:：]+[:：]\s*/, "").trim();
-      return { summary: `🟢 Open: ${rest || line}` };
+      if (!rest) {
+        return { chipLine: "Opening hours not available.", openMins: null, closeMins: null, status: "unavailable" };
+      }
+      return { chipLine: rest, openMins: null, closeMins: null, status: "open" };
     }
-    const ivs = remiCollectSameDayIntervals(oh.periods, day);
-    if (!ivs.length) return { summary: "🔴 Closed on this day." };
-    const [a, b] = ivs[0];
-    return { summary: `🟢 Open: ${remiFormatMinutesClock(a)} – ${remiFormatMinutesClock(b)}` };
+    return { chipLine: "Opening hours not available.", openMins: null, closeMins: null, status: "unavailable" };
   };
 
   const remiIsoLocalMinutes = (iso) => {
@@ -3740,8 +4168,13 @@ window.addEventListener("load", () => {
     const desktopCalFlyoutLabel = desktopCalFlyout?.querySelector("[data-desktop-calendar-flyout-label]");
     const quickAddState = { date: "", startMin: 8 * 60, lastClientX: null, lastClientY: null };
     if (listPanel && calendarPanels && dayView && weekView && toolbar && rangeLabel && tripStartRaw && tripEndRaw) {
-      const PX_PER_MIN = 1.2;
       const DAY_MINUTES = 24 * 60;
+      const computeItineraryPxPerMin = () => {
+        if (typeof window === "undefined" || typeof window.matchMedia !== "function") return 1.2;
+        if (window.matchMedia("(max-width: 420px)").matches) return 0.88;
+        if (window.matchMedia("(max-width: 720px)").matches) return 0.98;
+        return 1.2;
+      };
       const state = {
         view: "list",
         weekOffset: 0,
@@ -3754,7 +4187,9 @@ window.addEventListener("load", () => {
         dayScrollTop: 0,
         since: "",
         selectedDate: tripStartRaw,
-        lastDragEndAt: 0
+        lastDragEndAt: 0,
+        pxPerMin: 1.2,
+        alldayDnD: null
       };
       let calendarQuickEditUiAbort = null;
       const toDate = (iso) => {
@@ -3862,8 +4297,8 @@ window.addEventListener("load", () => {
         if (t.includes("arrive") || t.includes("arrival")) return "arrive";
         if (t.includes("check-out")) return "checkout";
         if (t.includes("check in") || t.includes("check-in")) return "checkin";
-        if (t.includes("drop-off")) return "dropoff";
-        if (t.includes("pick-up") || t.includes("pickup")) return "pickup";
+        if (t.includes("drop-off") || t.includes("drop off")) return "dropoff";
+        if (t.includes("pick-up") || t.includes("pick up") || t.includes("pickup")) return "pickup";
         return "single";
       };
       const inferRole = (row, title) => {
@@ -3906,7 +4341,15 @@ window.addEventListener("load", () => {
           const dayGroup = row.closest(".day-group");
           const date = (dayGroup?.getAttribute("data-date") || "").trim();
           const view = row.querySelector(".itinerary-item-view");
-          const title = (view?.querySelector("strong")?.textContent || "Stop").trim();
+          const title = (
+            row.getAttribute("data-title") ||
+            view?.querySelector(".itinerary-stop-card__title")?.textContent ||
+            view?.querySelector(".vehicle-main-top h4")?.textContent ||
+            view?.querySelector(".flight-main-head h4")?.textContent ||
+            view?.querySelector(":scope > strong")?.textContent ||
+            view?.querySelector("strong")?.textContent ||
+            "Stop"
+          ).trim();
           const markerKind = (row.getAttribute("data-marker-kind") || "stop").trim() || "stop";
           let form = row.querySelector(`form#itinerary-edit-${CSS.escape(itemID)}`);
           let category = "stop";
@@ -4046,35 +4489,66 @@ window.addEventListener("load", () => {
         }
         return out;
       };
-      const applyCollisionOffsets = (entries) => {
-        const sorted = [...entries].sort((a, b) => (a.startMin - b.startMin) || (a.endMin - b.endMin));
-        const groups = [];
-        let group = [];
-        let groupEnd = -1;
-        sorted.forEach((e) => {
-          if (!group.length || e.startMin < groupEnd) {
-            group.push(e);
-            groupEnd = Math.max(groupEnd, e.endMin);
-          } else {
-            groups.push(group);
-            group = [e];
-            groupEnd = e.endMin;
+        const isAllDayEvent = (e) =>
+          e &&
+          e.startMin === 0 &&
+          (e.endMin >= DAY_MINUTES - 1 || e.endMin === DAY_MINUTES);
+        const alldayDragMovable = (e) => {
+          if (!e) return false;
+          if (!isAllDayEvent(e)) return false;
+          if (e.category === "stop" || e.category === "commute") {
+            if (e.pairedSpan) return false;
+            if (String(e.itemID || "").includes("::")) return false;
+            return true;
           }
-        });
-        if (group.length) groups.push(group);
-        groups.forEach((g) => {
-          const lanes = [];
-          g.forEach((e) => {
-            let lane = 0;
-            while (lane < lanes.length && lanes[lane] > e.startMin) lane++;
-            lanes[lane] = e.endMin;
-            e.lane = lane;
-            e.laneCount = Math.max(1, lanes.length);
+          if (e.category !== "accommodation") return false;
+          if (e.pairedSpan && e.pairedStartAt && e.pairedEndAt && String(e.itemID || "").includes("::")) {
+            return true;
+          }
+          if (!e.pairedSpan && !String(e.itemID || "").includes("::")) {
+            const f = e.form;
+            return Boolean(
+              f &&
+              f.querySelector("input.remi-datetime-iso[name='check_in_at']") &&
+              f.querySelector("input.remi-datetime-iso[name='check_out_at']")
+            );
+          }
+          return false;
+        };
+        const applyCollisionOffsets = (entries) => {
+          const sorted = [...entries].sort((a, b) => {
+            if (a.startMin !== b.startMin) return a.startMin - b.startMin;
+            return (b.endMin - b.startMin) - (a.endMin - a.startMin);
           });
-          const count = Math.max(1, lanes.length);
-          g.forEach((e) => { e.laneCount = count; });
-        });
-      };
+          const groups = [];
+          let group = [];
+          let groupEnd = -1;
+          sorted.forEach((e) => {
+            if (!group.length || e.startMin < groupEnd) {
+              group.push(e);
+              groupEnd = Math.max(groupEnd, e.endMin);
+            } else {
+              groups.push(group);
+              group = [e];
+              groupEnd = e.endMin;
+            }
+          });
+          if (group.length) groups.push(group);
+          groups.forEach((g) => {
+            const lanes = [];
+            g.forEach((e) => {
+              let lane = 0;
+              while (lane < lanes.length && lanes[lane] > e.startMin) lane++;
+              lanes[lane] = e.endMin;
+              e.lane = lane;
+              e.laneCount = Math.max(1, lanes.length);
+            });
+            const count = Math.max(1, lanes.length);
+            g.forEach((e) => {
+              e.laneCount = count;
+            });
+          });
+        };
       const submitFormAjax = async (form) => {
         const formData = new FormData(form);
         const hasFileInput = Boolean(form.querySelector("input[type='file']"));
@@ -4130,6 +4604,59 @@ window.addEventListener("load", () => {
         if (singleField) {
           setField(entry.form, singleField, toDateTimeLocal(new Date(`${nextDate}T${toTime(edge === "start" ? nextStart : nextEnd)}`)));
         }
+      };
+      const addCalendarDays = (d, n) => {
+        const t = new Date(d.getTime());
+        t.setDate(t.getDate() + n);
+        return t;
+      };
+      const applyAccommodationAllDayDateShift = (entry, toDate) => {
+        if (!entry?.form) return false;
+        const dDays = toDayOffset(toDate) - toDayOffset(entry.date);
+        if (dDays === 0) return true;
+        const inEl = entry.form.querySelector("input.remi-datetime-iso[name='check_in_at']");
+        const outEl = entry.form.querySelector("input.remi-datetime-iso[name='check_out_at']");
+        if (!(inEl instanceof HTMLInputElement) || !(outEl instanceof HTMLInputElement)) {
+          showToast("Open the stay in the editor to move it.");
+          return false;
+        }
+        const fromParse = (raw) => parseDateTimeLocal(String(raw || "").trim());
+        if (String(entry.itemID || "").includes("::") && entry.pairedStartAt && entry.pairedEndAt) {
+          const newIn = addCalendarDays(entry.pairedStartAt, dDays);
+          const newOut = addCalendarDays(entry.pairedEndAt, dDays);
+          if (newOut.getTime() <= newIn.getTime()) {
+            showToast("Those dates are not valid for this stay.");
+            return false;
+          }
+          const inDay = fmtDate(newIn);
+          if (inDay < tripStartRaw || inDay > tripEndRaw) {
+            showToast("Check-in would land outside the trip.");
+            return false;
+          }
+          setField(entry.form, "check_in_at", toDateTimeLocal(newIn));
+          setField(entry.form, "check_out_at", toDateTimeLocal(newOut));
+          return true;
+        }
+        const curIn = fromParse(inEl.value);
+        const curOut = fromParse(outEl.value);
+        if (!curIn || !curOut) {
+          showToast("Open the stay in the editor to move it.");
+          return false;
+        }
+        const newIn = addCalendarDays(curIn, dDays);
+        const newOut = addCalendarDays(curOut, dDays);
+        if (newOut.getTime() <= newIn.getTime()) {
+          showToast("Those dates are not valid for this stay.");
+          return false;
+        }
+        const inDay2 = fmtDate(newIn);
+        if (inDay2 < tripStartRaw || inDay2 > tripEndRaw) {
+          showToast("Check-in would land outside the trip.");
+          return false;
+        }
+        setField(entry.form, "check_in_at", toDateTimeLocal(newIn));
+        setField(entry.form, "check_out_at", toDateTimeLocal(newOut));
+        return true;
       };
       const closeDesktopFlyout = () => {
         if (!desktopCalFlyout) return;
@@ -4340,13 +4867,17 @@ window.addEventListener("load", () => {
       const syncWeekHeaderAlignment = () => {
         if (!reshellItineraryCalendarDom()) return;
         const head = weekView.querySelector(".trip-itinerary-week-head");
+        const allday = weekView.querySelector("[data-itinerary-allday-row]");
         const body = weekView.querySelector(".trip-itinerary-week-body");
         if (!head || !body) return;
         const gutter = Math.max(0, body.offsetWidth - body.clientWidth);
         head.style.paddingRight = `${gutter}px`;
+        if (allday) allday.style.paddingRight = `${gutter}px`;
       };
       const renderCalendar = () => {
         if (!reshellItineraryCalendarDom()) return;
+        state.pxPerMin = computeItineraryPxPerMin();
+        const pxm = state.pxPerMin;
         const prevWeekSurface = weekView.querySelector("[data-itinerary-scroll-surface]");
         const prevDaySurface = dayView.querySelector("[data-itinerary-scroll-surface]");
         if (prevWeekSurface) state.weekScrollTop = prevWeekSurface.scrollTop;
@@ -4363,36 +4894,87 @@ window.addEventListener("load", () => {
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;");
-        /** Shorter labels on calendar cards only (list / quick view keep full server titles). */
+        const escapeCalEntryTitleAttr = (s) =>
+          String(s || "")
+            .replace(/&/g, "&amp;")
+            .replace(/"/g, "&quot;")
+            .replace(/</g, "&lt;")
+            .replace(/\n/g, " ");
+        /** Calendar-only labels (Today / Week): shorten booking leg prefixes for card space. */
         const calendarEntryDisplayTitle = (raw) => {
-          let t = String(raw || "");
-          t = t.replace(/^Accommodation check-in:\s*/i, "Accommodation: ");
-          t = t.replace(/^Vehicle rental pick-up:\s*/i, "Vehicle rental: ");
-          t = t.replace(/^Flight departure:\s*/i, "Flight: ");
-          return t;
+          let t = String(raw || "").trim();
+          if (!t) return t;
+          const rep = (re, to) => {
+            t = t.replace(re, to);
+          };
+          rep(/^Departure:\s*/i, "Flight: ");
+          rep(/^Arrival:\s*/i, "Flight: ");
+          rep(/^Pick Up:\s*/i, "Vehicle Rental: ");
+          rep(/^Drop Off:\s*/i, "Vehicle Rental: ");
+          rep(/^Check-in:\s*/i, "Accommodation: ");
+          rep(/^Check-out:\s*/i, "Accommodation: ");
+          return t.trim();
         };
-        const renderCalEntryArticle = (e) => {
-          const top = Math.max(0, e.startMin * PX_PER_MIN);
-          const h = Math.max(40, (e.endMin - e.startMin) * PX_PER_MIN);
+        const calEntryIcon = (e) =>
+          e.markerKind === "flight"
+            ? "flight"
+            : e.markerKind === "stay"
+              ? "hotel"
+              : e.markerKind === "vehicle"
+                ? "directions_car"
+                : e.markerKind === "commute"
+                  ? "directions_transit"
+                  : "pin_drop";
+        const entryPositionStyle = (e, top, h) => {
           const lane = e.lane || 0;
           const laneCount = Math.max(1, e.laneCount || 1);
-          let laneStepPct = laneCount <= 5 ? 0.08 : 0.065;
-          if (laneCount > 1) {
-            laneStepPct = Math.min(laneStepPct, 0.52 / (laneCount - 1)); // keep at least ~48% width visible
+          if (laneCount <= 1) {
+            return `top:${top}px;height:${h}px;left:6px;right:6px;`;
           }
-          const leftPct = laneCount > 1 ? lane * laneStepPct * 100 : 0;
-          const rightPct = laneCount > 1 ? (laneCount - lane - 1) * laneStepPct * 100 : 0;
+          const gapPx = 1;
+          const seg = `(100% - 12px - ${(laneCount - 1) * gapPx}px)`;
+          const w = `calc((${seg}) * ${(1 / laneCount).toFixed(8)})`;
+          const l = `calc(6px + (${seg}) * ${(lane / laneCount).toFixed(8)} + ${lane * gapPx}px)`;
+          return `top:${top}px;height:${h}px;left:${l};width:${w};right:auto;`;
+        };
+        const renderCalEntryArticle = (e) => {
+          const top = Math.max(0, e.startMin * pxm);
+          const h = Math.max(40, (e.endMin - e.startMin) * pxm);
+          const lane = e.lane || 0;
+          const laneCount = Math.max(1, e.laneCount || 1);
           const crowdedClass = laneCount >= 6 ? " is-crowded" : "";
           const rf = pairedSpanResizeFlags(e);
           const hideStart = rf.allowResizeStart ? "" : " hidden";
           const hideEnd = rf.allowResizeEnd ? "" : " hidden";
-          const calTitleHtml = escapeCalEntryTitleHtml(calendarEntryDisplayTitle(e.title));
-          return `<article class="trip-itinerary-entry${crowdedClass}" data-itinerary-drag-item="${e.itemID}" data-kind="${e.markerKind}" data-lane-count="${laneCount}" style="top:${top}px;height:${h}px;left:calc(6px + ${leftPct.toFixed(2)}%);right:calc(6px + ${rightPct.toFixed(2)}%)">
+          const calTitlePlain = calendarEntryDisplayTitle(e.title);
+          const calTitleHtml = escapeCalEntryTitleHtml(calTitlePlain);
+          const calTitleAttr = escapeCalEntryTitleAttr(calTitlePlain);
+          const timeHtml = escapeCalEntryTitleHtml(`${toTime(e.startMin)} – ${toTime(e.endMin)}`);
+          return `<article class="trip-itinerary-entry${crowdedClass}" data-itinerary-drag-item="${e.itemID}" data-kind="${e.markerKind}" data-lane-count="${laneCount}" data-it-lane="${lane}" data-it-lanes="${laneCount}" title="${calTitleAttr}" style="${entryPositionStyle(e, top, h)}">
               <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--start" data-itinerary-resize-handle="start" aria-hidden="true"${hideStart}></span>
-              <strong class="trip-itinerary-entry__title">${calTitleHtml}</strong>
-              <span class="trip-itinerary-entry__meta"><span class="material-symbols-outlined" aria-hidden="true">${e.markerKind === "flight" ? "flight" : e.markerKind === "stay" ? "hotel" : e.markerKind === "vehicle" ? "directions_car" : e.markerKind === "commute" ? "directions_transit" : "pin_drop"}</span>${toTime(e.startMin)} - ${toTime(e.endMin)}</span>
+              <div class="trip-itinerary-entry__stack">
+                <div class="trip-itinerary-entry__time">${timeHtml}</div>
+                <div class="trip-itinerary-entry__row">
+                  <span class="material-symbols-outlined trip-itinerary-entry__ico" aria-hidden="true">${calEntryIcon(e)}</span>
+                  <span class="trip-itinerary-entry__text">${calTitleHtml}</span>
+                </div>
+              </div>
               <span class="trip-itinerary-resize-handle trip-itinerary-resize-handle--end" data-itinerary-resize-handle="end" aria-hidden="true"${hideEnd}></span>
             </article>`;
+        };
+        const renderAlldayChips = (alldayEntries) => {
+          if (!alldayEntries.length) return "";
+          return alldayEntries
+            .map((e) => {
+              const titlePlain = calendarEntryDisplayTitle(e.title);
+              const t = escapeCalEntryTitleHtml(titlePlain);
+              const tAttr = escapeCalEntryTitleAttr(titlePlain);
+              const dnd = alldayDragMovable(e) ? ' draggable="true" data-itinerary-allday-dnd="1"' : "";
+              return `<div class="trip-itinerary-allday-chip"${dnd} data-itinerary-drag-item="${e.itemID}" data-itinerary-allday-from="${e.date}" data-kind="${e.markerKind}" title="${tAttr}"><div class="trip-itinerary-allday-chip__stack"><div class="trip-itinerary-allday-chip__row"><span class="material-symbols-outlined trip-itinerary-allday-chip__ico" aria-hidden="true">${calEntryIcon(
+                e
+              )}</span><span class="trip-itinerary-allday-chip__text">${t}</span></div></div></div>`;
+            })
+            .join("");
         };
         const wDates = weekDates();
         const visibleCols = Math.max(1, wDates.length);
@@ -4409,43 +4991,75 @@ window.addEventListener("load", () => {
             ? `${wf.toLocaleDateString(undefined, { month: "short", day: "numeric" })} - ${wl.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
             : "Week");
         const hourLines = Array.from({ length: 25 }, (_, h) =>
-          `<div class="trip-itinerary-hour-line" style="top:${h * 60 * PX_PER_MIN}px"></div>`
+          `<div class="trip-itinerary-hour-line" style="top:${h * 60 * pxm}px"></div>`
         ).join("");
         const timeTicks = Array.from({ length: 24 }, (_, h) =>
-          `<span style="top:${h * 60 * PX_PER_MIN}px">${pad2(h)}:00</span>`
+          `<span style="top:${h * 60 * pxm}px">${pad2(h)}:00</span>`
         ).join("");
+        const alldayCells = wDates
+          .map((d) => {
+            const key = fmtDate(d);
+            const dayEntries = entries.filter((e) => e.date === key);
+            const allday = dayEntries.filter((e) => isAllDayEvent(e));
+            const raw = renderAlldayChips(allday);
+            const has = Boolean(raw);
+            return `<div class="trip-itinerary-allday-cell${has ? " trip-itinerary-allday-cell--has" : ""}" data-itinerary-allday-date="${key}">${raw || '<span class="trip-itinerary-allday-empty" aria-hidden="true"></span>'}</div>`;
+          })
+          .join("");
+        const hasAnyAllday = wDates.some((d) => {
+          const key = fmtDate(d);
+          return entries.some((e) => e.date === key && isAllDayEvent(e));
+        });
         const weekCols = wDates.map((d) => {
           const key = fmtDate(d);
           const dayEntries = entries.filter((e) => e.date === key);
-          applyCollisionOffsets(dayEntries);
-          const cards = dayEntries.map((e) => renderCalEntryArticle(e)).join("");
+          const timed = dayEntries.filter((e) => !isAllDayEvent(e));
+          applyCollisionOffsets(timed);
+          const cards = timed.map((e) => renderCalEntryArticle(e)).join("");
           const selectedClass = state.selectedDate === key ? " is-selected" : "";
-          return `<div class="trip-itinerary-day-col${selectedClass}" data-itinerary-drop-date="${key}" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${hourLines}${cards}</div>`;
+          return `<div class="trip-itinerary-day-col${selectedClass}" data-itinerary-drop-date="${key}" style="min-height:${DAY_MINUTES * pxm}px">${hourLines}${cards}</div>`;
         }).join("");
-        weekView.innerHTML = `<section class="trip-itinerary-calendar-grid${compactCols ? " is-compact-cols" : ""}">
-          <header class="trip-itinerary-week-head" style="grid-template-columns:56px repeat(${visibleCols}, ${colDef})"><div></div>${wDates.map((d) => {
-            const key = fmtDate(d);
-            const selected = state.selectedDate === key ? " is-selected" : "";
-            return `<div class="${selected}" data-itinerary-select-date="${key}">${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>`;
-          }).join("")}</header>
-          <div class="trip-itinerary-week-body" style="grid-template-columns:56px repeat(${visibleCols}, ${colDef})" data-itinerary-scroll-surface><aside class="trip-itinerary-time-col" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${timeTicks}</aside>${weekCols}</div>
+        const alldayRow = hasAnyAllday
+          ? `<div class="trip-itinerary-allday-row" style="grid-template-columns:56px repeat(${visibleCols}, ${colDef})" data-itinerary-allday-row>
+            <div class="trip-itinerary-allday-gutter" role="rowheader">All day</div>
+            ${alldayCells}
+          </div>`
+          : "";
+        weekView.innerHTML = `<section class="trip-itinerary-calendar-grid${compactCols ? " is-compact-cols" : ""}${hasAnyAllday ? " has-allday-row" : ""}">
+          <header class="trip-itinerary-week-head" style="grid-template-columns:56px repeat(${visibleCols}, ${colDef})"><div></div>${wDates
+            .map((d) => {
+              const key = fmtDate(d);
+              const selected = state.selectedDate === key ? " is-selected" : "";
+              return `<div class="${selected}" data-itinerary-select-date="${key}">${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>`;
+            })
+            .join("")}</header>
+          ${alldayRow}
+          <div class="trip-itinerary-week-body" style="grid-template-columns:56px repeat(${visibleCols}, ${colDef})" data-itinerary-scroll-surface><aside class="trip-itinerary-time-col" style="min-height:${DAY_MINUTES * pxm}px">${timeTicks}</aside>${weekCols}</div>
         </section>`;
         let dayDate = state.selectedDate;
         if (!wDates.some((d) => fmtDate(d) === dayDate)) {
           dayDate = wDates[0] ? fmtDate(wDates[0]) : tripStartRaw;
         }
         state.selectedDate = dayDate;
-        const dayEntries = entries.filter((e) => e.date === dayDate);
-        applyCollisionOffsets(dayEntries);
+        const dayEntriesRaw = entries.filter((e) => e.date === dayDate);
+        const dayAllday = dayEntriesRaw.filter((e) => isAllDayEvent(e));
+        const dayTimed = dayEntriesRaw.filter((e) => !isAllDayEvent(e));
+        applyCollisionOffsets(dayTimed);
         const dayHeadline = new Date(`${dayDate}T00:00:00`).toLocaleDateString(undefined, {
           weekday: "long",
           month: "short",
           day: "numeric"
         });
         const dayHeadlineAttr = dayHeadline.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-        dayView.innerHTML = `<section class="trip-itinerary-day-wrap" aria-label="Schedule for ${dayHeadlineAttr}">
+        const dayAlldayHtml = dayAllday.length
+          ? `<div class="trip-itinerary-day-allday" role="region" aria-label="All-day events" data-itinerary-allday-date="${dayDate}">${renderAlldayChips(
+              dayAllday
+            )}</div>`
+          : "";
+        dayView.innerHTML = `<section class="trip-itinerary-day-wrap${dayAllday.length ? " has-day-allday" : ""}" aria-label="Schedule for ${dayHeadlineAttr}">
           <header class="trip-itinerary-day-head"><small>Drag handles to adjust duration · tap an entry to edit</small></header>
-          <div class="trip-itinerary-day-body trip-itinerary-day-body--grid" data-itinerary-scroll-surface><aside class="trip-itinerary-time-col" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${timeTicks}</aside><div class="trip-itinerary-day-col trip-itinerary-day-col--single" data-itinerary-drop-date="${dayDate}" style="min-height:${DAY_MINUTES * PX_PER_MIN}px">${hourLines}${dayEntries.map((e) => renderCalEntryArticle(e)).join("")}</div></div>
+          ${dayAlldayHtml}
+          <div class="trip-itinerary-day-body trip-itinerary-day-body--grid" data-itinerary-scroll-surface><aside class="trip-itinerary-time-col" style="min-height:${DAY_MINUTES * pxm}px">${timeTicks}</aside><div class="trip-itinerary-day-col trip-itinerary-day-col--single" data-itinerary-drop-date="${dayDate}" style="min-height:${DAY_MINUTES * pxm}px">${hourLines}${dayTimed.map((e) => renderCalEntryArticle(e)).join("")}</div></div>
         </section>`;
         const nextWeekSurface = weekView.querySelector("[data-itinerary-scroll-surface]");
         const nextDaySurface = dayView.querySelector("[data-itinerary-scroll-surface]");
@@ -4498,6 +5112,54 @@ window.addEventListener("load", () => {
             state.dragHintEl = null;
           }
           colEl?.classList.remove("is-drop-target");
+        }
+      };
+      const onAllDayMoveCommit = async (entry, toDate) => {
+        if (!entry || !toDate) return;
+        if (toDate === entry.date) return;
+        if (!dateInRange(toDate)) {
+          showToast("That date is outside the trip range.");
+          return;
+        }
+        if (!alldayDragMovable(entry)) return;
+        const isAcc = entry.category === "accommodation";
+        const form = entry.form;
+        const accRollback =
+          isAcc && form
+            ? {
+                checkIn: form.querySelector("input.remi-datetime-iso[name='check_in_at']")?.value,
+                checkOut: form.querySelector("input.remi-datetime-iso[name='check_out_at']")?.value
+              }
+            : null;
+        const rollback = { date: entry.date, startMin: entry.startMin, endMin: entry.endMin };
+        state.overrides.set(entry.itemID, { date: toDate, startMin: 0, endMin: DAY_MINUTES - 1 });
+        renderCalendar();
+        if (isAcc) {
+          if (!applyAccommodationAllDayDateShift(entry, toDate)) {
+            state.overrides.delete(entry.itemID);
+            renderCalendar();
+            return;
+          }
+        } else {
+          applyResizeToForm(entry, toDate, 0, DAY_MINUTES - 1, "end");
+        }
+        try {
+          await submitFormAjax(entry.form);
+          await syncAllRenderedItineraryRows();
+          state.overrides.delete(entry.itemID);
+          state.lastDragEndAt = Date.now();
+          renderCalendar();
+          showToast(isAcc ? "Stay dates updated." : "Event moved.");
+        } catch (error) {
+          if (isAcc && accRollback && form) {
+            if (accRollback.checkIn != null) setField(form, "check_in_at", accRollback.checkIn);
+            if (accRollback.checkOut != null) setField(form, "check_out_at", accRollback.checkOut);
+          } else {
+            applyResizeToForm(entry, rollback.date, rollback.startMin, rollback.endMin, "end");
+          }
+          state.overrides.delete(entry.itemID);
+          renderCalendar();
+          showToast(error?.message || "Update failed. Reverted.");
         }
       };
       const bindCalendarInteractions = () => {
@@ -4556,8 +5218,9 @@ window.addEventListener("load", () => {
             clearDropHint();
             return;
           }
-          const snapped = Math.max(0, Math.min(DAY_MINUTES - 15, Math.round(rawY / PX_PER_MIN / 15) * 15));
-          const top = snapped * PX_PER_MIN;
+          const pxm = state.pxPerMin;
+          const snapped = Math.max(0, Math.min(DAY_MINUTES - 15, Math.round(rawY / pxm / 15) * 15));
+          const top = snapped * pxm;
           if (!state.dragHintEl || state.dragHintEl.parentElement !== col) {
             clearDropHint();
             const hint = document.createElement("div");
@@ -4633,7 +5296,8 @@ window.addEventListener("load", () => {
           if (!date) return;
           const rect = col.getBoundingClientRect();
           const y = e.clientY - rect.top;
-          const snapped = Math.max(0, Math.min(DAY_MINUTES - 15, Math.round(y / PX_PER_MIN / 15) * 15));
+          const pxm = state.pxPerMin;
+          const snapped = Math.max(0, Math.min(DAY_MINUTES - 15, Math.round(y / pxm / 15) * 15));
           openDesktopFlyout(date, snapped, e.clientX, e.clientY);
         });
         const autoScrollDragSurface = (surface, clientY) => {
@@ -4696,7 +5360,8 @@ window.addEventListener("load", () => {
           if (!col) return;
           const surface = col.closest("[data-itinerary-scroll-surface]");
           autoScrollDragSurface(surface, e.clientY);
-          const delta = Math.round((e.clientY - rs.startY) / PX_PER_MIN / 15) * 15;
+          const pxm = state.pxPerMin;
+          const delta = Math.round((e.clientY - rs.startY) / pxm / 15) * 15;
           let nextStart = rs.startMin;
           let nextEnd = rs.endMin;
           if (rs.edge === "start") {
@@ -4704,15 +5369,15 @@ window.addEventListener("load", () => {
           } else {
             nextEnd = Math.min(DAY_MINUTES, Math.max(nextStart + 15, rs.endMin + delta));
           }
-          const topPx = nextStart * PX_PER_MIN;
-          const heightPx = Math.max(40, (nextEnd - nextStart) * PX_PER_MIN);
+          const topPx = nextStart * pxm;
+          const heightPx = Math.max(40, (nextEnd - nextStart) * pxm);
           rs.nextStart = nextStart;
           rs.nextEnd = nextEnd;
           rs.card.style.top = `${topPx}px`;
           rs.card.style.height = `${heightPx}px`;
           state.dragOverCol = col;
           col.classList.add("is-drop-target");
-          updateDropHint(col, rs.edge === "start" ? topPx : (nextEnd * PX_PER_MIN));
+          updateDropHint(col, rs.edge === "start" ? topPx : (nextEnd * pxm));
           if (surface) {
             if (surface === weekView.querySelector("[data-itinerary-scroll-surface]")) state.weekScrollTop = surface.scrollTop;
             if (surface === dayView.querySelector("[data-itinerary-scroll-surface]")) state.dayScrollTop = surface.scrollTop;
@@ -4737,6 +5402,58 @@ window.addEventListener("load", () => {
         };
         tripCalendarRoot.addEventListener("pointerup", (e) => finishPointerDrop(e, false), { passive: false });
         tripCalendarRoot.addEventListener("pointercancel", (e) => finishPointerDrop(e, true), { passive: true });
+        const alldayDropTargetFromEvent = (e) =>
+          e?.target?.closest?.(".trip-itinerary-allday-cell, .trip-itinerary-day-allday[data-itinerary-allday-date]");
+        const clearAlldayDropHighlights = () => {
+          if (!tripCalendarRoot) return;
+          tripCalendarRoot
+            .querySelectorAll(".trip-itinerary-allday-cell.is-drop-target, .trip-itinerary-day-allday.is-drop-target")
+            .forEach((c) => c.classList.remove("is-drop-target"));
+        };
+        tripCalendarRoot.addEventListener("dragstart", (e) => {
+          const chip = e.target?.closest?.(".trip-itinerary-allday-chip[data-itinerary-allday-dnd='1']");
+          if (!chip) return;
+          const itemID = chip.getAttribute("data-itinerary-drag-item") || "";
+          const from = chip.getAttribute("data-itinerary-allday-from") || "";
+          const entry = getRenderableEntries().find((x) => x.itemID === itemID);
+          if (!alldayDragMovable(entry)) {
+            e.preventDefault();
+            return;
+          }
+          state.alldayDnD = { itemID, from };
+          e.dataTransfer.setData("text/plain", "remi-allday");
+          e.dataTransfer.effectAllowed = "move";
+          chip.classList.add("is-dragging");
+        });
+        tripCalendarRoot.addEventListener("dragend", (e) => {
+          const chip = e.target?.closest?.(".trip-itinerary-allday-chip");
+          chip?.classList.remove("is-dragging");
+          state.alldayDnD = null;
+          clearAlldayDropHighlights();
+        });
+        tripCalendarRoot.addEventListener("dragover", (e) => {
+          if (!state.alldayDnD) return;
+          const cell = alldayDropTargetFromEvent(e);
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+          clearAlldayDropHighlights();
+          if (cell) cell.classList.add("is-drop-target");
+        });
+        tripCalendarRoot.addEventListener("drop", (e) => {
+          const cell = alldayDropTargetFromEvent(e);
+          if (!cell || !state.alldayDnD) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const toDate = cell.getAttribute("data-itinerary-allday-date") || "";
+          const dnd = state.alldayDnD;
+          state.alldayDnD = null;
+          clearAlldayDropHighlights();
+          if (!toDate || toDate === dnd.from) return;
+          const entry = getRenderableEntries().find((x) => x.itemID === dnd.itemID);
+          if (!alldayDragMovable(entry)) return;
+          void onAllDayMoveCommit(entry, toDate);
+          state.lastDragEndAt = Date.now();
+        });
         const stripPreviewCloneIds = (root) => {
           if (!root) return;
           root.removeAttribute("id");
@@ -4902,7 +5619,14 @@ window.addEventListener("load", () => {
                     "item-view itinerary-item-view itinerary-booking-view trip-itinerary-quick-edit__preview-flight-merged";
                   const main = document.createElement("div");
                   main.className = "itinerary-vehicle-main";
-                  const depTitle = mainDepart.querySelector(":scope > strong");
+                  let depTitle = mainDepart.querySelector(":scope > strong");
+                  if (!depTitle) {
+                    const h4 = mainDepart.querySelector(".itinerary-flight-card .flight-main-head h4");
+                    if (h4?.textContent?.trim()) {
+                      depTitle = document.createElement("strong");
+                      depTitle.textContent = h4.textContent.trim();
+                    }
+                  }
                   if (depTitle) main.appendChild(depTitle.cloneNode(true));
                   ["airline", "flight number", "booking reference", "departure airport", "flight departure"].forEach(
                     (lab) => {
@@ -4918,7 +5642,9 @@ window.addEventListener("load", () => {
                     const n = takeField(mainDepart, lab);
                     if (n) main.appendChild(n);
                   });
-                  const mediaFlight = departRoot.querySelector(".itinerary-entry-media-row");
+                  const mediaFlight =
+                    departRoot.querySelector(".itinerary-entry-media-row") ||
+                    departRoot.querySelector(".itinerary-flight-card .vehicle-media");
                   if (mediaFlight) main.appendChild(mediaFlight.cloneNode(true));
                   const hint = mainDepart.querySelector(".itinerary-hint");
                   if (hint) main.appendChild(hint.cloneNode(true));
@@ -4936,8 +5662,15 @@ window.addEventListener("load", () => {
                     String(t || "")
                       .replace(/^Accommodation check-in:\s*/i, "")
                       .replace(/^Accommodation check-out:\s*/i, "")
+                      .replace(/^Check-in:\s*/i, "")
+                      .replace(/^Check-out:\s*/i, "")
+                      .replace(/^Accommodation:\s*/i, "")
                       .trim();
-                  const rawStrong = checkinMain.querySelector(":scope > strong")?.textContent?.trim() || "";
+                  const h4Stay = checkinMain.querySelector(".itinerary-lodging-card .vehicle-main-top h4");
+                  const rawStrong =
+                    checkinMain.querySelector(":scope > strong")?.textContent?.trim() ||
+                    h4Stay?.textContent?.trim() ||
+                    "";
                   const hotelName = stripAccTitle(rawStrong) || stripAccTitle(entry.title || "");
                   const merged = document.createElement("div");
                   merged.className =
@@ -4963,7 +5696,9 @@ window.addEventListener("load", () => {
                     else notes.classList.add("itinerary-field--full");
                     main.appendChild(notes);
                   }
-                  const mediaStay = checkinRoot.querySelector(".itinerary-entry-media-row");
+                  const mediaStay =
+                    checkinRoot.querySelector(".itinerary-entry-media-row") ||
+                    checkinRoot.querySelector(".itinerary-lodging-card .vehicle-media");
                   if (mediaStay) main.appendChild(mediaStay.cloneNode(true));
                   const hint = checkinMain.querySelector(".itinerary-hint");
                   if (hint) main.appendChild(hint.cloneNode(true));
@@ -4982,8 +5717,17 @@ window.addEventListener("load", () => {
                     String(t || "")
                       .replace(/^Vehicle rental pick-up:\s*/i, "")
                       .replace(/^Vehicle rental drop-off:\s*/i, "")
+                      .replace(/^Vehicle pick-up:\s*/i, "")
+                      .replace(/^Vehicle drop-off:\s*/i, "")
+                      .replace(/^Pick Up:\s*/i, "")
+                      .replace(/^Drop Off:\s*/i, "")
+                      .replace(/^Vehicle rental:\s*/i, "")
                       .trim();
-                  const rawStrong = pickupMain.querySelector(":scope > strong")?.textContent?.trim() || "";
+                  const h4Veh = pickupMain.querySelector(".itinerary-vehicle-rental-card .vehicle-main-top h4");
+                  const rawStrong =
+                    pickupMain.querySelector(":scope > strong")?.textContent?.trim() ||
+                    h4Veh?.textContent?.trim() ||
+                    "";
                   const vehicleName = stripVehTitle(rawStrong) || stripVehTitle(entry.title || "");
                   const merged = document.createElement("div");
                   merged.className =
@@ -5018,7 +5762,9 @@ window.addEventListener("load", () => {
                       main.appendChild(notesEl);
                     }
                   }
-                  const mediaVeh = pickupRoot.querySelector(".itinerary-entry-media-row");
+                  const mediaVeh =
+                    pickupRoot.querySelector(".itinerary-entry-media-row") ||
+                    pickupRoot.querySelector(".itinerary-vehicle-rental-card .vehicle-media");
                   if (mediaVeh) main.appendChild(mediaVeh.cloneNode(true));
                   const hint = pickupMain.querySelector(".itinerary-hint");
                   if (hint) main.appendChild(hint.cloneNode(true));
@@ -5125,7 +5871,7 @@ window.addEventListener("load", () => {
             schedule(POLL_BUSY_MS);
             return;
           }
-          if (state.resizeState || quickEditOpen()) {
+          if (state.resizeState || state.alldayDnD || quickEditOpen()) {
             schedule(POLL_BUSY_MS);
             return;
           }
@@ -5158,9 +5904,18 @@ window.addEventListener("load", () => {
         });
         schedule(POLL_BASE_MS);
       };
+      let itineraryCalResizeT = null;
+      const onItineraryLayoutResize = () => {
+        if (itineraryCalResizeT) clearTimeout(itineraryCalResizeT);
+        itineraryCalResizeT = setTimeout(() => {
+          itineraryCalResizeT = null;
+          syncWeekHeaderAlignment();
+          if (state.view === "day" || state.view === "week") renderCalendar();
+        }, 150);
+      };
       bindCalendarInteractions();
       renderCalendar();
-      window.addEventListener("resize", syncWeekHeaderAlignment);
+      window.addEventListener("resize", onItineraryLayoutResize);
       startChangePolling();
       toggleView("list");
       }
@@ -5771,6 +6526,22 @@ window.addEventListener("load", () => {
 
   const itineraryViewIdForForm = (formId) => {
     if (!formId) return null;
+    /* Fab flyout edit clones: must map to the same itinerary-view-* as the real form (and before non-flyout prefixes). */
+    if (formId.startsWith("itinerary-edit-flyout-")) {
+      return `itinerary-view-${formId.slice("itinerary-edit-flyout-".length)}`;
+    }
+    if (formId.startsWith("accommodation-itinerary-edit-flyout-")) {
+      return `itinerary-view-${formId.slice("accommodation-itinerary-edit-flyout-".length)}`;
+    }
+    if (formId.startsWith("vehicle-rental-itinerary-edit-flyout-")) {
+      return `itinerary-view-${formId.slice("vehicle-rental-itinerary-edit-flyout-".length)}`;
+    }
+    if (formId.startsWith("flight-itinerary-edit-flyout-")) {
+      return `itinerary-view-${formId.slice("flight-itinerary-edit-flyout-".length)}`;
+    }
+    if (formId.startsWith("commute-itinerary-edit-flyout-")) {
+      return `itinerary-view-${formId.slice("commute-itinerary-edit-flyout-".length)}`;
+    }
     if (formId.startsWith("accommodation-itinerary-edit-")) {
       return `itinerary-view-${formId.slice("accommodation-itinerary-edit-".length)}`;
     }
@@ -6214,6 +6985,7 @@ window.addEventListener("load", () => {
     let allowResolvedSubmit = false;
 
     const titleInput = itineraryForm.querySelector("input[name='title']");
+    const openingHoursInput = itineraryForm.querySelector("input[name='opening_hours']");
     const googlePlaceIdInput = itineraryForm.querySelector("[data-google-place-id-input]");
     const venueHoursJsonInput = itineraryForm.querySelector("[data-venue-hours-json-input]");
     const chipWrap = itineraryForm.querySelector("[data-place-hours-wrap]");
@@ -6277,12 +7049,18 @@ window.addEventListener("load", () => {
         return;
       }
       const ymd = venueYmd();
-      const { summary } = remiSummarizeHoursFromPlaceDetail(latestPlaceDetails, ymd);
-      venueHoursJsonInput.value = JSON.stringify({
+      const o = remiSummarizeHoursFromPlaceDetail(latestPlaceDetails, ymd);
+      const payload = {
         date: ymd,
-        summary,
-        google_place_id: latestGooglePlaceId
-      });
+        google_place_id: latestGooglePlaceId,
+        status: o.status,
+        summary: o.chipLine
+      };
+      if (o.openMins != null && o.closeMins != null) {
+        payload.open_mins = o.openMins;
+        payload.close_mins = o.closeMins;
+      }
+      venueHoursJsonInput.value = JSON.stringify(payload);
     };
 
     const validateTimesAgainstVenue = () => {
@@ -6300,10 +7078,13 @@ window.addEventListener("load", () => {
     const refreshPlaceChip = () => {
       if (!chip) return;
       if (!latestGooglePlaceId || !latestPlaceDetails) return;
-      const { summary } = remiSummarizeHoursFromPlaceDetail(latestPlaceDetails, venueYmd());
-      chip.textContent = summary;
+      const o = remiSummarizeHoursFromPlaceDetail(latestPlaceDetails, venueYmd());
+      chip.textContent = o.chipLine;
       chipWrap?.removeAttribute("hidden");
       syncVenueHoursHiddenField();
+      if (openingHoursInput instanceof HTMLInputElement) {
+        openingHoursInput.value = o.chipLine;
+      }
       validateTimesAgainstVenue();
     };
 
@@ -6318,6 +7099,7 @@ window.addEventListener("load", () => {
       if (googlePlaceIdInput instanceof HTMLInputElement) googlePlaceIdInput.value = "";
       if (venueHoursJsonInput instanceof HTMLInputElement) venueHoursJsonInput.value = "";
       if (titleInput instanceof HTMLInputElement) titleInput.value = "";
+      if (openingHoursInput instanceof HTMLInputElement) openingHoursInput.value = "";
       if (chip) chip.textContent = "";
       chipWrap?.setAttribute("hidden", "");
       chip?.classList.remove("place-hours-chip--loading");
@@ -6486,8 +7268,7 @@ window.addEventListener("load", () => {
       fillCoordinates(cachedCoords);
       setLocationStatus("", "");
       if (chip) {
-        chip.textContent =
-          "🔴 Hours unavailable for this result — pick a Google Places suggestion when Maps is enabled.";
+        chip.textContent = "Opening hours not available.";
       }
       chipWrap?.removeAttribute("hidden");
       syncVenueHoursHiddenField();
@@ -6664,9 +7445,16 @@ window.addEventListener("load", () => {
       } else if (venueHoursJsonInput instanceof HTMLInputElement && (venueHoursJsonInput.value || "").trim()) {
         try {
           const j = JSON.parse(venueHoursJsonInput.value);
-          if (chip && j.summary) {
-            chip.textContent = j.summary;
-            chipWrap?.removeAttribute("hidden");
+          if (chip) {
+            let line = "";
+            if (j.user_opening_hours) line = String(j.user_opening_hours);
+            else if (j.open_mins != null && j.close_mins != null) {
+              line = `${remiFormatMinutesClock(j.open_mins)} – ${remiFormatMinutesClock(j.close_mins)}`;
+            } else if (j.summary) line = String(j.summary);
+            if (line) {
+              chip.textContent = line;
+              chipWrap?.removeAttribute("hidden");
+            }
           }
         } catch (e) {
           /* ignore */
@@ -6835,6 +7623,424 @@ window.addEventListener("load", () => {
       window.setTimeout(hide, REMI_LOCATION_SUGGEST_BLUR_MS);
     });
   });
+
+  const rememberFlightAirportCache = (s) => {
+    const csrfMeta = document.querySelector("meta[name='csrf-token']");
+    const csrf = csrfMeta && csrfMeta.getAttribute("content") ? csrfMeta.getAttribute("content").trim() : "";
+    const iata = String(s.iataCode || s.IATACode || "").trim().toUpperCase();
+    if (!csrf || iata.length !== 3) {
+      return;
+    }
+    void fetch("/api/flight-airports/remember", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRF-Token": csrf
+      },
+      body: JSON.stringify({
+        iataCode: iata,
+        icaoCode: String(s.icaoCode || "").trim(),
+        name: String(s.displayName || "").trim(),
+        city: String(s.cityName || s.city || "").trim(),
+        country: String(s.country || "").trim(),
+        timezone: String(s.timezone || s.timeZone || "").trim()
+      })
+    }).catch(() => {});
+  };
+
+  const wireFlightAirportAutocompleteInput = (input) => {
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    if (input.dataset.remiFlightAirportBound === "1") {
+      return;
+    }
+    input.dataset.remiFlightAirportBound = "1";
+    let timer = null;
+    let inflight = 0;
+    let suggestionsHost = null;
+    const ensureHost = () => {
+      if (suggestionsHost) {
+        return suggestionsHost;
+      }
+      suggestionsHost = document.createElement("div");
+      suggestionsHost.className = "location-suggestions hidden";
+      const wrapper = input.closest("label") || input.parentElement;
+      if (wrapper) {
+        wrapper.classList.add("location-autocomplete-anchor");
+        wrapper.appendChild(suggestionsHost);
+      }
+      return suggestionsHost;
+    };
+    const hide = () => {
+      const host = ensureHost();
+      host.classList.add("hidden");
+      host.innerHTML = "";
+    };
+    const iataFieldName = input.name === "depart_airport" ? "depart_airport_iata" : "arrive_airport_iata";
+    const setIATA = (code) => {
+      const f = input.closest("form");
+      if (!f) {
+        return;
+      }
+      const h = f.querySelector(`input[name='${iataFieldName}']`);
+      if (h instanceof HTMLInputElement) {
+        h.value = code || "";
+      }
+    };
+    /** Visible field value: full airport name + IATA when known (e.g. "Kempegowda International Airport - BLR"). */
+    const flightAirportFieldValueFromPick = (s) => {
+      const iata = String(s.iataCode || "").trim().toUpperCase();
+      if (iata.length === 3) {
+        const name = String(s.displayName || s.secondaryLine || s.primaryLine || "").trim();
+        if (name) {
+          const tail = ` - ${iata}`;
+          if (name.toUpperCase().endsWith(tail.toUpperCase())) {
+            return name;
+          }
+          return `${name}${tail}`;
+        }
+        return iata;
+      }
+      return String(s.displayName || s.primaryLine || s.formattedAddress || "").trim();
+    };
+    input.addEventListener("input", () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      const query = input.value.trim();
+      if (query.length < 2) {
+        hide();
+        return;
+      }
+      timer = window.setTimeout(() => {
+        const req = ++inflight;
+        const host = ensureHost();
+        void (async () => {
+          const res = await fetch(
+            `${remiFlightAirportSuggestURL()}?q=${encodeURIComponent(query)}${remiLocationLangQuery()}`,
+            {
+              credentials: "same-origin",
+              cache: "no-store",
+              headers: { Accept: "application/json", "Cache-Control": "no-cache" }
+            }
+          );
+          if (req !== inflight) {
+            return;
+          }
+          if (!res.ok) {
+            hide();
+            return;
+          }
+          const manualFlightSearch =
+            String(res.headers.get("X-Flight-Search-Manual") || "").trim() === "1";
+          const data = await res.json();
+          if (
+            manualFlightSearch &&
+            (!Array.isArray(data) || data.length === 0) &&
+            typeof window.remiShowToast === "function"
+          ) {
+            window.remiShowToast(
+              "Airport lookup is unavailable (invalid or rate-limited AirLabs key). Enable map location search in Site Settings, or enter airports manually."
+            );
+          }
+          if (req !== inflight) {
+            return;
+          }
+          host.innerHTML = "";
+          if (!Array.isArray(data) || data.length === 0) {
+            hide();
+            return;
+          }
+          data.forEach((raw) => {
+            const s = {
+              lat: parseFloat(raw.lat ?? raw.Lat ?? "0") || 0,
+              lng: parseFloat(raw.lng ?? raw.Lon ?? "0") || 0,
+              displayName: String(raw.displayName || raw.display_name || "").trim(),
+              iataCode: String(raw.iataCode || raw.iata_code || "").trim().toUpperCase(),
+              placeId: String(raw.placeId || raw.place_id || "").trim(),
+              primaryLine: String(raw.primaryLine || raw.primary_line || "").trim(),
+              secondaryLine: String(raw.secondaryLine || raw.secondary_line || "").trim(),
+              placeName: String(raw.placeName || raw.place_name || "").trim(),
+              formattedAddress: String(raw.formattedAddress || raw.formatted_address || "").trim(),
+              source: String(raw.source || "").trim(),
+              cityName: String(raw.cityName || raw.city_name || "").trim(),
+              country: String(raw.country || "").trim(),
+              timezone: String(raw.timezone || "").trim(),
+              icaoCode: String(raw.icaoCode || raw.icao_code || "").trim()
+            };
+            if (!s.primaryLine) {
+              s.primaryLine = s.placeName || s.displayName;
+            }
+            if (!s.secondaryLine) {
+              s.secondaryLine = s.formattedAddress || s.displayName;
+            }
+            if (!s.displayName) {
+              s.displayName = s.formattedAddress || s.primaryLine;
+            }
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "location-suggestion-btn";
+            const line1 = document.createElement("span");
+            line1.className = "location-suggestion-btn__primary";
+            line1.textContent = s.primaryLine;
+            const line2 = document.createElement("span");
+            line2.className = "location-suggestion-btn__secondary muted small";
+            line2.textContent = s.secondaryLine;
+            btn.appendChild(line1);
+            btn.appendChild(line2);
+            remiPreventLocationSuggestBlur(btn);
+            btn.addEventListener("click", () => {
+              input.value = flightAirportFieldValueFromPick(s);
+              if (s.iataCode && s.iataCode.length === 3) {
+                setIATA(s.iataCode);
+                if (s.source === "airlabs" || s.source === "cache") {
+                  rememberFlightAirportCache(s);
+                }
+              } else {
+                setIATA("");
+              }
+              hide();
+            });
+            host.appendChild(btn);
+          });
+          host.classList.remove("hidden");
+        })();
+      }, 300);
+    });
+    input.addEventListener("blur", () => {
+      window.setTimeout(hide, REMI_LOCATION_SUGGEST_BLUR_MS);
+    });
+  };
+
+  const remiInitFlightAirportAutocompleteIn = (root) => {
+    const scope = remiIsDomQueryRoot(root) ? root : document;
+    scope.querySelectorAll("input[data-flight-airport-autocomplete]").forEach((el) => {
+      wireFlightAirportAutocompleteInput(el);
+    });
+  };
+  window.remiInitFlightAirportAutocompleteIn = remiInitFlightAirportAutocompleteIn;
+  remiInitFlightAirportAutocompleteIn(document);
+
+  /** Visible airline field after pick: "American Airlines - AA" (matches server primaryLine). */
+  const flightAirlineFieldValueFromPick = (s) => {
+    const primary = String(s.primaryLine || "").trim();
+    if (primary) {
+      return primary;
+    }
+    const iata = String(s.iataCode || "").trim().toUpperCase();
+    const name = String(s.displayName || "").trim();
+    if (name && iata.length >= 2) {
+      const tail = ` - ${iata}`;
+      if (name.toUpperCase().endsWith(tail.toUpperCase())) {
+        return name;
+      }
+      return `${name}${tail}`;
+    }
+    return String(s.displayName || "").trim();
+  };
+
+  const wireFlightAirlineAutocompleteInput = (input) => {
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    if (input.dataset.remiFlightAirlineBound === "1") {
+      return;
+    }
+    input.dataset.remiFlightAirlineBound = "1";
+    let timer = null;
+    let inflight = 0;
+    let suggestionsHost = null;
+    const ensureHost = () => {
+      if (suggestionsHost) {
+        return suggestionsHost;
+      }
+      suggestionsHost = document.createElement("div");
+      suggestionsHost.className = "location-suggestions hidden";
+      const wrapper = input.closest("label") || input.parentElement;
+      if (wrapper) {
+        wrapper.classList.add("location-autocomplete-anchor");
+        wrapper.appendChild(suggestionsHost);
+      }
+      return suggestionsHost;
+    };
+    const hide = () => {
+      const host = ensureHost();
+      host.classList.add("hidden");
+      host.innerHTML = "";
+    };
+    input.addEventListener("input", () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      const query = input.value.trim();
+      if (query.length < 2) {
+        hide();
+        return;
+      }
+      timer = window.setTimeout(() => {
+        const req = ++inflight;
+        const host = ensureHost();
+        void (async () => {
+          const res = await fetch(
+            `${remiFlightAirlineSuggestURL()}?q=${encodeURIComponent(query)}`,
+            {
+              credentials: "same-origin",
+              cache: "no-store",
+              headers: { Accept: "application/json", "Cache-Control": "no-cache" }
+            }
+          );
+          if (req !== inflight) {
+            return;
+          }
+          if (!res.ok) {
+            hide();
+            return;
+          }
+          const manualAirlineSearch =
+            String(res.headers.get("X-Flight-Airline-Search-Manual") || "").trim() === "1";
+          const data = await res.json();
+          if (
+            manualAirlineSearch &&
+            (!Array.isArray(data) || data.length === 0) &&
+            typeof window.remiShowToast === "function"
+          ) {
+            window.remiShowToast(
+              "Airline lookup is unavailable (invalid or rate-limited AirLabs key). Enter the airline manually, e.g. American Airlines - AA."
+            );
+          }
+          if (req !== inflight) {
+            return;
+          }
+          host.innerHTML = "";
+          if (!Array.isArray(data) || data.length === 0) {
+            hide();
+            return;
+          }
+          data.forEach((raw) => {
+            const s = {
+              displayName: String(raw.displayName || raw.display_name || "").trim(),
+              iataCode: String(raw.iataCode || raw.iata_code || "").trim().toUpperCase(),
+              primaryLine: String(raw.primaryLine || raw.primary_line || "").trim(),
+              secondaryLine: String(raw.secondaryLine || raw.secondary_line || "").trim(),
+              formattedAddress: String(raw.formattedAddress || raw.formatted_address || "").trim()
+            };
+            if (!s.primaryLine) {
+              s.primaryLine = flightAirlineFieldValueFromPick(s);
+            }
+            if (!s.secondaryLine) {
+              s.secondaryLine = s.formattedAddress || "";
+            }
+            if (!s.displayName && s.primaryLine) {
+              const parts = s.primaryLine.split(/\s+-\s+/);
+              s.displayName = parts[0] ? parts[0].trim() : s.primaryLine;
+            }
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "location-suggestion-btn";
+            const line1 = document.createElement("span");
+            line1.className = "location-suggestion-btn__primary";
+            line1.textContent = s.primaryLine;
+            const line2 = document.createElement("span");
+            line2.className = "location-suggestion-btn__secondary muted small";
+            line2.textContent = s.secondaryLine;
+            btn.appendChild(line1);
+            btn.appendChild(line2);
+            remiPreventLocationSuggestBlur(btn);
+            btn.addEventListener("click", () => {
+              input.value = flightAirlineFieldValueFromPick(s);
+              hide();
+            });
+            host.appendChild(btn);
+          });
+          host.classList.remove("hidden");
+        })();
+      }, 300);
+    });
+    input.addEventListener("blur", () => {
+      window.setTimeout(hide, REMI_LOCATION_SUGGEST_BLUR_MS);
+    });
+  };
+
+  const remiInitFlightAirlineAutocompleteIn = (root) => {
+    const scope = remiIsDomQueryRoot(root) ? root : document;
+    scope.querySelectorAll("input[data-flight-airline-autocomplete]").forEach((el) => {
+      wireFlightAirlineAutocompleteInput(el);
+    });
+  };
+  window.remiInitFlightAirlineAutocompleteIn = remiInitFlightAirlineAutocompleteIn;
+  remiInitFlightAirlineAutocompleteIn(document);
+
+  const remiInitStopWeatherIn = (root) => {
+    const scope = remiIsDomQueryRoot(root) ? root : document;
+    scope.querySelectorAll("[data-stop-weather]").forEach((slot) => {
+      if (!(slot instanceof HTMLElement) || slot.dataset.remiStopWeatherWired === "1") return;
+      slot.dataset.remiStopWeatherWired = "1";
+      const base = slot.getAttribute("data-weather-url");
+      const date = (slot.getAttribute("data-weather-date") || "").trim();
+      if (!base || !date) {
+        slot.remove();
+        return;
+      }
+      const u = new URL(base, window.location.origin);
+      u.searchParams.set("date", date);
+      void (async () => {
+        try {
+          const res = await fetch(u.toString(), {
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: { Accept: "application/json" }
+          });
+          if (!res.ok) {
+            slot.remove();
+            return;
+          }
+          const d = await res.json();
+          if (!d || !d.ok) {
+            const reason = String(d?.reason || "").trim();
+            if (reason === "fetch_failed" || reason === "out_of_range") {
+              slot.remove();
+              return;
+            }
+            slot.remove();
+            return;
+          }
+          const hi = typeof d.highC === "number" ? Math.round(d.highC) : "—";
+          const lo = typeof d.lowC === "number" ? Math.round(d.lowC) : "—";
+          const icon = String(d.icon || "☁️").trim() || "☁️";
+          slot.textContent = "";
+          const row = document.createElement("div");
+          row.className = "itinerary-weather-preview";
+          const line = document.createElement("div");
+          line.className = "itinerary-weather-line";
+          const ic = document.createElement("span");
+          ic.className = "itinerary-weather-icon";
+          ic.setAttribute("aria-hidden", "true");
+          ic.textContent = icon;
+          const temps = document.createElement("span");
+          temps.className = "itinerary-weather-temps";
+          temps.textContent = `H${hi}° L${lo}°`;
+          line.appendChild(ic);
+          line.appendChild(temps);
+          row.appendChild(line);
+          if (d.hasAlert) {
+            const alert = document.createElement("div");
+            alert.className = "itinerary-weather-alert";
+            alert.textContent = "⚠️ Weather Alert for this day.";
+            row.appendChild(alert);
+          }
+          slot.appendChild(row);
+          slot.hidden = false;
+        } catch {
+          slot.remove();
+        }
+      })();
+    });
+  };
+  window.remiInitStopWeatherIn = remiInitStopWeatherIn;
+  remiInitStopWeatherIn(document);
 
   const vehicleDropoffSyncByFieldset = new WeakMap();
   const initVehicleDropoffFieldsetsIn = (root) => {
@@ -7472,7 +8678,18 @@ window.addEventListener("load", () => {
     const meta = FILE_FIELD_META_BY_NAME[fileInput.name];
     if (!meta) return;
     const form = fileInput.closest("form");
-    if (!(form instanceof HTMLFormElement) || !form.classList.contains("item-edit")) return;
+    if (!(form instanceof HTMLFormElement)) return;
+    const inFlyoutEditClone = Boolean(form.closest(".remi-trip-flyout-edit-body"));
+    if (!form.classList.contains("item-edit") && !(form.classList.contains("remi-trip-widget-form") && inFlyoutEditClone)) {
+      return;
+    }
+    // Cloned flyout DOM may still carry a dead .edit-attachment-ui from the source form (listeners are not cloned).
+    let sib = fileInput.nextElementSibling;
+    while (sib instanceof HTMLElement && sib.classList.contains("edit-attachment-ui")) {
+      const rm = sib;
+      sib = sib.nextElementSibling;
+      rm.remove();
+    }
 
     const removeControl = form.querySelector(`[name="${meta.removeName}"]`);
     const currentPathInput =
@@ -7639,8 +8856,18 @@ window.addEventListener("load", () => {
 
   const initAttachmentEditFieldsIn = (root) => {
     const scope = remiIsDomQueryRoot(root) ? root : document;
-    scope.querySelectorAll("form.item-edit input[type='file'][name]").forEach((input) => {
-      initAttachmentEditField(input);
+    scope.querySelectorAll("input[type='file'][name]").forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) return;
+      if (!FILE_FIELD_META_BY_NAME[input.name]) return;
+      const form = input.closest("form");
+      if (!(form instanceof HTMLFormElement)) return;
+      if (form.classList.contains("item-edit")) {
+        initAttachmentEditField(input);
+        return;
+      }
+      if (form.classList.contains("remi-trip-widget-form") && form.closest(".remi-trip-flyout-edit-body")) {
+        initAttachmentEditField(input);
+      }
     });
   };
   window.remiInitAttachmentEditFieldsIn = initAttachmentEditFieldsIn;
@@ -7800,6 +9027,9 @@ window.addEventListener("load", () => {
     window.remiEnsureCsrfOnPostForms?.(scope);
     window.remiInitTripInviteMethodsIn?.(scope);
     window.remiInitVehicleDropoffFieldsetsIn?.(scope);
+    window.remiInitFlightAirportAutocompleteIn?.(scope);
+    window.remiInitFlightAirlineAutocompleteIn?.(scope);
+    window.remiInitStopWeatherIn?.(scope);
     window.remiSetupMobileEntryCarouselsIn?.(scope);
     window.remiRefreshTripDocumentsListFilter?.();
     window.remiFitBudgetDonutCenterValues?.(scope);
@@ -7813,6 +9043,8 @@ window.addEventListener("load", () => {
      * the UA hides .trip-inline-actions-buttons (Edit/Delete) until reload — same as after inline edit. */
     window.remiApplyExpenseActionsDropdownOpen?.();
     window.remiRewireTripItineraryCalendarAfterLiveRefresh?.();
+    window.remiInitTripPageSectionFoldsIn?.(scope);
+    window.remiInitUnifiedBookingsIn?.(scope);
   };
 
   const replaceSelectorFromFreshDoc = (selector, freshDoc) => {
@@ -7851,9 +9083,7 @@ window.addEventListener("load", () => {
     let changed = false;
     [
       ".trip-itinerary-shell",
-      ".trip-page-stays-section",
-      ".trip-page-vehicles-section",
-      ".trip-page-flights-section",
+      ".trip-unified-bookings-section",
       ".trip-members-mobile-shell",
       ".sidebar-trip-members-wrap",
       ".trip-mobile-header",
@@ -7883,9 +9113,9 @@ window.addEventListener("load", () => {
       rollbacks.push(() => updateChecklistToggleUI(form, !done));
     }
     if (action.includes("/delete") && !hasOptimisticRowRemoveSkip(form)) {
-      const row = form.closest(
-        ".timeline-item, .expense-item, .reminder-checklist-item, .budget-tx-view, .budget-mobile-tx-item, .flight-card, .vehicle-rental-item, .vehicle-rental-card, .accommodation-card-wrap, .trip-document-row"
-      );
+        const row = form.closest(
+          ".timeline-item, .expense-item, .reminder-checklist-item, .budget-tx-view, .budget-mobile-tx-item, .flight-card, .vehicle-rental-item, .vehicle-rental-card, .accommodation-card-wrap, .trip-unified-booking-row, .trip-document-row"
+        );
       if (row?.parentNode) {
         const parent = row.parentNode;
         const nextSibling = row.nextSibling;
@@ -8081,7 +9311,11 @@ window.addEventListener("load", () => {
   const smartRepositionItineraryItem = async (form) => {
     const viewId = itineraryViewIdForForm(form.id);
     if (!viewId || !viewId.startsWith("itinerary-view-")) return false;
-    const row = form.closest(".timeline-item");
+    let row = form.closest(".timeline-item");
+    if (!row) {
+      const v = document.getElementById(viewId);
+      if (v) row = v.closest(".timeline-item");
+    }
     if (!row) return false;
 
     const freshDoc = await fetchFreshDoc();
@@ -8480,6 +9714,20 @@ window.addEventListener("load", () => {
           }
           return;
         }
+        if (form.getAttribute("data-remi-trip-fab-stay-add") === "1") {
+          await refreshTripDetailsSupportSectionsFromServer();
+          showToast(inferToastMessage(form));
+          window.remiNotifyMobileSheetFormSaved?.(form);
+          requestDismissMobileBottomSheet();
+          return;
+        }
+        if (form.getAttribute("data-remi-trip-fab-vehicle-add") === "1") {
+          await refreshTripDetailsSupportSectionsFromServer();
+          showToast(inferToastMessage(form));
+          window.remiNotifyMobileSheetFormSaved?.(form);
+          requestDismissMobileBottomSheet();
+          return;
+        }
         if (form.getAttribute("data-remi-trip-fab-add-stop") === "1") {
           const saveAnother =
             submitterEl instanceof HTMLElement &&
@@ -8706,6 +9954,17 @@ window.addEventListener("load", () => {
               }
             }
           }
+        } else if (
+          document.querySelector(".trip-unified-bookings-section") &&
+          /\/trips\/[^/]+\/(accommodation|vehicle-rental|flights)\/[^/]+\/update$/i.test(form.action || "")
+        ) {
+          await refreshTripDetailsSupportSectionsFromServer();
+          if (/\/trips\/[^/]+\/(accommodation|vehicle-rental|flights)\/[^/]+\/update$/i.test(form.action || "")) {
+            await syncAllRenderedItineraryRows();
+          }
+          if (form.id && form.id.includes("-edit-")) {
+            closeInlineEdit(form.id);
+          }
         } else {
           await refreshInlineViewFromServer(form);
           if (/\/trips\/[^/]+\/(accommodation|vehicle-rental|flights)\/[^/]+\/update$/i.test(form.action || "")) {
@@ -8737,7 +9996,7 @@ window.addEventListener("load", () => {
             Boolean(form.closest("[data-tab-refresh-region], .tab-settle-card, .tab-expenses-section"));
           if (!skipRowRemove) {
             const row = form.closest(
-              ".timeline-item, .expense-item, .reminder-checklist-item, .budget-tx-view, .budget-mobile-tx-item"
+              ".timeline-item, .expense-item, .reminder-checklist-item, .budget-tx-view, .budget-mobile-tx-item, .trip-unified-booking-row"
             );
             if (row) {
               const id = row.getAttribute("data-budget-tx-view");
@@ -9184,12 +10443,20 @@ window.addEventListener("load", () => {
       "data-remi-inline-open-wired",
       "data-remi-ajax-wired",
       "data-remi-confirm-wired",
+      "data-remi-itinerary-form-bound",
       "data-remi-mobile-sheet-dirty-wired",
       "data-remi-attachment-field-wired",
-      "data-remi-unified-expense-wired"
+      "data-remi-unified-expense-wired",
+      "data-remi-flight-airport-bound",
+      "data-remi-flight-airline-bound",
+      "data-remi-stop-weather-wired",
+      "data-remi-vehicle-dropoff-bound"
     ];
     ATTRS.forEach((attr) => {
       root.querySelectorAll(`[${attr}]`).forEach((el) => el.removeAttribute(attr));
+    });
+    root.querySelectorAll(".edit-attachment-ui").forEach((el) => {
+      if (el instanceof HTMLElement) el.remove();
     });
   };
 
@@ -9205,6 +10472,15 @@ window.addEventListener("load", () => {
       root.querySelectorAll("form[data-app-confirm]").forEach((f) => window.remiWireAppConfirmOnForm(f));
     window.remiWireMobileSheetFormDirtyIn?.(root);
     window.remiEnsureCsrfOnPostForms?.(root);
+    window.remiInitFlightAirportAutocompleteIn?.(root);
+    window.remiInitFlightAirlineAutocompleteIn?.(root);
+    window.remiInitStopWeatherIn?.(root);
+    window.remiInitAttachmentEditFieldsIn?.(root);
+    root.querySelectorAll("[data-itinerary-form]").forEach((f) => {
+      if (f instanceof HTMLFormElement && !f.dataset.remiItineraryFormBound) {
+        initItineraryForm(f);
+      }
+    });
   };
   const findTripFlyoutSourceForm = (kind, id) => {
     const normalizedKind = String(kind || "").toLowerCase();
@@ -9262,7 +10538,19 @@ window.addEventListener("load", () => {
     if (!(editFormClone instanceof HTMLElement)) return false;
     editFormClone.classList.remove("hidden", "item-edit");
     editFormClone.classList.add("remi-trip-widget-form");
-    editFormClone.removeAttribute("id");
+    const flyoutFormIds = {
+      stop: `itinerary-edit-flyout-${parsed.id}`,
+      commute: `commute-itinerary-edit-flyout-${parsed.id}`,
+      flight: `flight-itinerary-edit-flyout-${parsed.id}`,
+      accommodation: `accommodation-itinerary-edit-flyout-${parsed.id}`,
+      vehicle: `vehicle-rental-itinerary-edit-flyout-${parsed.id}`
+    };
+    const nextFlyoutId = flyoutFormIds[parsed.kind];
+    if (nextFlyoutId) {
+      editFormClone.id = nextFlyoutId;
+    } else {
+      editFormClone.removeAttribute("id");
+    }
     stripRemiDomWireMarkersForClone(editFormClone);
     editBody.appendChild(editFormClone);
     openSheet.appendChild(editBody);
@@ -9270,6 +10558,7 @@ window.addEventListener("load", () => {
     if (meta?.editTitle) state.titleEl.textContent = meta.editTitle;
     openSheet.dataset.remiTripFlyoutEditActive = "1";
     wireDynamicInputsIn(editBody);
+    window.remiInitVehicleDropoffFieldsetsIn?.(editBody);
     window.setTimeout(() => {
       editBody.querySelector("input:not([type='hidden']), textarea, select")?.focus();
     }, 80);
@@ -9968,6 +11257,197 @@ window.addEventListener("load", () => {
         stripOpenQueryParam();
       }
     }
+  }
+
+  const initTripPageSectionFoldsIn = (root) => {
+    const scope = root instanceof Document || root instanceof HTMLElement ? root : document;
+    scope.querySelectorAll("[data-trip-page-section-fold]").forEach((el) => {
+      if (!(el instanceof HTMLDetailsElement)) return;
+      if (el.dataset.remiTripPageSectionFoldWired === "1") return;
+      el.dataset.remiTripPageSectionFoldWired = "1";
+      const sync = () => {
+        const ch = el.querySelector(".trip-page-section-fold__chevron");
+        if (ch) ch.textContent = el.open ? "expand_less" : "expand_more";
+      };
+      el.addEventListener("toggle", sync);
+      sync();
+    });
+  };
+  window.remiInitTripPageSectionFoldsIn = initTripPageSectionFoldsIn;
+
+  const initUnifiedBookingsIn = (root) => {
+    const scope = root instanceof Document || root instanceof HTMLElement ? root : document;
+    scope.querySelectorAll("[data-unified-bookings-panel]").forEach((panel) => {
+      if (!(panel instanceof HTMLElement) || panel.dataset.remiUnifiedBookingsInit === "1") return;
+      panel.dataset.remiUnifiedBookingsInit = "1";
+      const list = panel.querySelector("[data-unified-bookings-list]");
+      const pager = panel.querySelector("[data-unified-bookings-pager]");
+      const pageLabel = pager?.querySelector("[data-unified-bookings-page-label]");
+      const prevBtn = pager?.querySelector('[data-unified-bookings-page="prev"]');
+      const nextBtn = pager?.querySelector('[data-unified-bookings-page="next"]');
+      const filterMenu = panel.querySelector("#trip-unified-bookings-filter-menu");
+      const filterTrigger = panel.querySelector("#trip-unified-bookings-filter-trigger");
+      const filterValueEl = panel.querySelector("#trip-unified-bookings-filter-value");
+      const stateGroup = panel.querySelector("[data-unified-bookings-state-group]");
+      const detailsEl = panel.closest("[data-unified-bookings-details]");
+
+      const kindLabels = { all: "All bookings", flight: "Flights", lodging: "Accommodation", vehicle: "Vehicle rentals" };
+      let kindFilter = "all";
+      let stateFilter = "all";
+      let page = 0;
+      const perPage = 10;
+
+      const getRows = () => Array.from(list?.querySelectorAll(".trip-unified-booking-row") || []);
+
+      const applyFilters = () => {
+        const rows = getRows();
+        rows.forEach((row) => {
+          const k = row.getAttribute("data-booking-kind") || "";
+          const st = row.getAttribute("data-booking-state") || "";
+          let match = true;
+          if (kindFilter !== "all" && k !== kindFilter) match = false;
+          if (stateFilter === "booked" && st !== "booked") match = false;
+          if (stateFilter === "to_book" && st !== "to_book") match = false;
+          row.dataset.filterMatch = match ? "1" : "0";
+        });
+        const visible = rows.filter((r) => r.dataset.filterMatch === "1");
+        const n = visible.length;
+        const pageCount = Math.max(1, Math.ceil(n / perPage) || 1);
+        if (page >= pageCount) page = Math.max(0, pageCount - 1);
+        const start = page * perPage;
+        const end = start + perPage;
+        visible.forEach((row, i) => {
+          const onPage = i >= start && i < end;
+          row.hidden = !onPage;
+        });
+        rows.forEach((row) => {
+          if (row.dataset.filterMatch === "0") row.hidden = true;
+        });
+        if (pageLabel) {
+          pageLabel.textContent = n ? `Page ${page + 1} of ${pageCount}` : "";
+        }
+        if (prevBtn) prevBtn.disabled = page <= 0;
+        if (nextBtn) nextBtn.disabled = page >= pageCount - 1;
+        if (pager) {
+          if (n > perPage) {
+            pager.classList.remove("hidden");
+            pager.removeAttribute("hidden");
+          } else {
+            pager.classList.add("hidden");
+            pager.setAttribute("hidden", "");
+          }
+        }
+      };
+
+      const withFade = (fn) => {
+        if (list) {
+          list.classList.add("trip-unified-bookings--fading");
+          requestAnimationFrame(() => {
+            fn();
+            requestAnimationFrame(() => list.classList.remove("trip-unified-bookings--fading"));
+          });
+        } else {
+          fn();
+        }
+      };
+
+      filterMenu?.addEventListener("click", (e) => {
+        const li = e.target instanceof Element ? e.target.closest("li[data-unified-bookings-kind]") : null;
+        if (!li || !filterMenu.contains(li)) return;
+        e.stopPropagation();
+        const k = li.getAttribute("data-unified-bookings-kind") || "all";
+        kindFilter = k;
+        page = 0;
+        if (filterValueEl) filterValueEl.textContent = kindLabels[k] || "All bookings";
+        filterMenu.querySelectorAll("[data-unified-bookings-kind]").forEach((x) => x.classList.remove("is-active"));
+        li.classList.add("is-active");
+        filterMenu.setAttribute("hidden", "");
+        filterMenu.classList.add("hidden");
+        filterTrigger?.setAttribute("aria-expanded", "false");
+        withFade(applyFilters);
+      });
+
+      filterTrigger?.addEventListener("click", (e) => {
+        e.preventDefault();
+        const open = filterMenu?.hasAttribute("hidden");
+        if (open) {
+          filterMenu?.removeAttribute("hidden");
+          filterMenu?.classList.remove("hidden");
+          filterTrigger.setAttribute("aria-expanded", "true");
+        } else {
+          filterMenu?.setAttribute("hidden", "");
+          filterMenu?.classList.add("hidden");
+          filterTrigger.setAttribute("aria-expanded", "false");
+        }
+      });
+      document.addEventListener("click", (e) => {
+        if (!filterMenu || !filterTrigger) return;
+        const t = e.target;
+        if (!(t instanceof Node)) return;
+        if (filterMenu.contains(t) || filterTrigger.contains(t)) return;
+        filterMenu.setAttribute("hidden", "");
+        filterMenu.classList.add("hidden");
+        filterTrigger.setAttribute("aria-expanded", "false");
+      });
+
+      stateGroup?.querySelectorAll("[data-unified-bookings-state]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const s = btn.getAttribute("data-unified-bookings-state") || "all";
+          if (s === "booked" && stateFilter === "booked") {
+            stateFilter = "all";
+            btn.classList.remove("is-active");
+            withFade(applyFilters);
+            return;
+          }
+          if (s === "to_book" && stateFilter === "to_book") {
+            stateFilter = "all";
+            btn.classList.remove("is-active");
+            withFade(applyFilters);
+            return;
+          }
+          stateGroup.querySelectorAll("[data-unified-bookings-state]").forEach((b) => b.classList.remove("is-active"));
+          if (s === "booked" || s === "to_book") {
+            stateFilter = s;
+            btn.classList.add("is-active");
+          } else {
+            stateFilter = "all";
+          }
+          page = 0;
+          withFade(applyFilters);
+        });
+      });
+
+      prevBtn?.addEventListener("click", () => {
+        if (page > 0) {
+          page -= 1;
+          withFade(applyFilters);
+        }
+      });
+      nextBtn?.addEventListener("click", () => {
+        page += 1;
+        withFade(applyFilters);
+      });
+
+      if (detailsEl instanceof HTMLDetailsElement) {
+        detailsEl.addEventListener("toggle", () => {
+          const ch = detailsEl.querySelector(".trip-unified-bookings__summary-chevron");
+          if (ch) ch.textContent = detailsEl.open ? "expand_less" : "expand_more";
+        });
+      }
+
+      applyFilters();
+    });
+  };
+  window.remiInitUnifiedBookingsIn = initUnifiedBookingsIn;
+  window.remiRefreshTripBookingsStream = () => {
+    if (!document.querySelector(".trip-unified-bookings-section")) return Promise.resolve(false);
+    return refreshTripDetailsSupportSectionsFromServer();
+  };
+  if (document.querySelector("[data-unified-bookings-panel]")) {
+    initUnifiedBookingsIn(document);
+  }
+  if (document.querySelector("[data-trip-page-section-fold]")) {
+    initTripPageSectionFoldsIn(document);
   }
 
   const tripSearchInput = document.querySelector("[data-dashboard-trip-search]");
@@ -10959,7 +12439,14 @@ window.addEventListener("load", () => {
       return row.querySelector(".expense-view-title")?.textContent?.trim() || "Spend";
     }
     if (row.matches(".timeline-item")) {
-      return row.querySelector(".itinerary-item-view strong")?.textContent?.trim() || "Stop";
+      return (
+        row.getAttribute("data-title")?.trim() ||
+        row.querySelector(".itinerary-item-view .vehicle-main-top h4")?.textContent?.trim() ||
+        row.querySelector(".itinerary-item-view .flight-main-head h4")?.textContent?.trim() ||
+        row.querySelector(".itinerary-item-view .itinerary-stop-card__title")?.textContent?.trim() ||
+        row.querySelector(".itinerary-item-view strong")?.textContent?.trim() ||
+        "Stop"
+      );
     }
     if (row.matches(".reminder-checklist-item")) {
       const s = row.querySelector(".remi-checklist-item-text, .checklist-view > span");
@@ -12074,13 +13561,34 @@ window.addEventListener("load", () => {
 const wireSiteSettingsGoogleMapsKeyForms = () => {
   document.querySelectorAll("form[data-site-settings-map-form]").forEach((form) => {
     if (!(form instanceof HTMLFormElement)) return;
-    if (form.dataset.remiGmapsKeyWired === "1") return;
-    try {
-      initSiteSettingsGoogleMapsKeySection(form);
-      form.dataset.remiGmapsKeyWired = "1";
-    } catch (err) {
-      if (typeof window.remiToast === "function") {
-        window.remiToast("Map settings controls are temporarily unavailable.");
+    if (form.dataset.remiGmapsKeyWired !== "1") {
+      try {
+        initSiteSettingsGoogleMapsKeySection(form);
+        form.dataset.remiGmapsKeyWired = "1";
+      } catch (err) {
+        if (typeof window.remiToast === "function") {
+          window.remiToast("Map settings controls are temporarily unavailable.");
+        }
+      }
+    }
+    if (form.dataset.remiAirlabsKeyWired !== "1") {
+      try {
+        initSiteSettingsAirLabsKeySection(form);
+        form.dataset.remiAirlabsKeyWired = "1";
+      } catch (err) {
+        if (typeof window.remiToast === "function") {
+          window.remiToast("AirLabs API key controls are temporarily unavailable.");
+        }
+      }
+    }
+    if (form.dataset.remiOpenweatherKeyWired !== "1") {
+      try {
+        initSiteSettingsOpenWeatherKeySection(form);
+        form.dataset.remiOpenweatherKeyWired = "1";
+      } catch (err) {
+        if (typeof window.remiToast === "function") {
+          window.remiToast("OpenWeatherMap API key controls are temporarily unavailable.");
+        }
       }
     }
   });

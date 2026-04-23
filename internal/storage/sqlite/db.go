@@ -311,6 +311,21 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 	if _, err = db.Exec(`UPDATE flight_entries SET updated_at = created_at WHERE TRIM(COALESCE(updated_at, '')) = ''`); err != nil {
 		return nil, err
 	}
+	if _, err = db.Exec(`ALTER TABLE flight_entries ADD COLUMN booking_status TEXT NOT NULL DEFAULT 'to_be_done'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE lodging_entries ADD COLUMN booking_status TEXT NOT NULL DEFAULT 'to_be_done'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE vehicle_rentals ADD COLUMN booking_status TEXT NOT NULL DEFAULT 'to_be_done'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE flight_entries ADD COLUMN trip_bookings_checklist_item_id TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE flight_entries ADD COLUMN trip_bookings_checklist_dismissed INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
 	if _, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS trip_documents (
 			id TEXT PRIMARY KEY,
@@ -548,6 +563,74 @@ func OpenAndMigrate(dbPath, migrationFile string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_trip_global_keep_imports_global ON trip_global_keep_imports(kind, global_id)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS airports (
+			iata_code TEXT NOT NULL PRIMARY KEY,
+			icao_code TEXT NOT NULL DEFAULT '',
+			name TEXT NOT NULL DEFAULT '',
+			city TEXT NOT NULL DEFAULT '',
+			country TEXT NOT NULL DEFAULT '',
+			country_code TEXT NOT NULL DEFAULT '',
+			timezone TEXT NOT NULL DEFAULT '',
+			last_updated DATETIME NOT NULL
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_airports_name ON airports(name)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_airports_city ON airports(city)`); err != nil {
+		return nil, err
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE app_settings ADD COLUMN amadeus_client_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_settings ADD COLUMN amadeus_client_secret TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE flight_entries ADD COLUMN depart_airport_iata TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE flight_entries ADD COLUMN arrive_airport_iata TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE app_settings ADD COLUMN airlabs_api_key TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE airports ADD COLUMN icao_code TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE airports ADD COLUMN country_code TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err = db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+	}
+	if _, err = db.Exec(`UPDATE airports SET country_code = country WHERE TRIM(COALESCE(country_code, '')) = '' AND TRIM(COALESCE(country, '')) != ''`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`ALTER TABLE app_settings ADD COLUMN openweather_api_key TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return nil, err
+	}
+	if _, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS weather_cache (
+			id TEXT NOT NULL PRIMARY KEY,
+			trip_id TEXT NOT NULL,
+			itinerary_item_id TEXT NOT NULL,
+			cache_date TEXT NOT NULL,
+			latitude REAL NOT NULL,
+			longitude REAL NOT NULL,
+			payload_json TEXT NOT NULL,
+			fetched_at DATETIME NOT NULL,
+			UNIQUE(itinerary_item_id, cache_date),
+			FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		)`); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_weather_cache_trip ON weather_cache(trip_id)`); err != nil {
 		return nil, err
 	}
 	return db, nil

@@ -44,6 +44,12 @@ func RedactAppSettingsForExport(a AppSettings) AppSettings {
 	if strings.TrimSpace(a.GoogleMapsAPIKey) != "" {
 		a.GoogleMapsAPIKey = "[REDACTED]"
 	}
+	if strings.TrimSpace(a.AirLabsAPIKey) != "" {
+		a.AirLabsAPIKey = "[REDACTED]"
+	}
+	if strings.TrimSpace(a.OpenWeatherAPIKey) != "" {
+		a.OpenWeatherAPIKey = "[REDACTED]"
+	}
 	return a
 }
 

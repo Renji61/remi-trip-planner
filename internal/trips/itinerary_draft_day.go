@@ -30,6 +30,16 @@ func DraftItineraryDayNumberFromDate(t time.Time) int {
 	return y*10000 + int(m)*100 + d
 }
 
+// ItineraryDayDateISO returns the calendar YYYY-MM-DD for an itinerary day_number,
+// matching the trip page DateLabel (relative to trip start, or draft YYYYMMDD encoding).
+func ItineraryDayDateISO(tripStartDate string, dayNumber int) (iso string, ok bool) {
+	start := strings.TrimSpace(tripStartDate)
+	if t, err := time.Parse("2006-01-02", start); err == nil {
+		return t.AddDate(0, 0, dayNumber-1).Format("2006-01-02"), true
+	}
+	return CalendarDateFromDraftItineraryDayNumber(dayNumber)
+}
+
 // CalendarDateFromDraftItineraryDayNumber returns the YYYY-MM-DD for a draft-encoded
 // day_number, or ok == false if the value is not in that encoding.
 func CalendarDateFromDraftItineraryDayNumber(day int) (iso string, ok bool) {

@@ -164,6 +164,103 @@
                     <input type="hidden" name="google_maps_api_key" value="" data-gmaps-key-submit>
                   </div>
                 </div>
+
+                <div
+                  class="full gmaps-api-key-section"
+                  data-airlabs-key-section
+                  data-initial-has-key="{{if gt (len (trimSpace .Settings.AirLabsAPIKey)) 0}}1{{else}}0{{end}}"
+                  data-saved-key="{{trimSpace .Settings.AirLabsAPIKey}}"
+                >
+                  <span class="gmaps-api-key-section__label">AirLabs API key <span class="muted">(optional)</span></span>
+                  <p id="hint-airlabs" class="settings-field-hint muted full">API key from <a href="https://airlabs.co/" target="_blank" rel="noopener noreferrer">AirLabs</a>. When set, flight airport search uses your local cache first, then the AirLabs Airports Database, then your map location providers if enabled; airline fields use the AirLabs <a href="https://airlabs.co/docs/airlines" target="_blank" rel="noopener noreferrer">Airlines API</a>. Changes apply after saving. Values are encrypted when <code>REMI_SETTINGS_ENCRYPTION_KEY</code> is configured on the server.</p>
+
+                  <div class="gmaps-key-edit-wrap" data-airlabs-key-edit hidden>
+                    <input
+                      type="password"
+                      id="airlabs_api_key_input"
+                      class="gmaps-key-edit-input"
+                      data-airlabs-key-input
+                      autocomplete="off"
+                      placeholder="Enter your AirLabs Data API key"
+                      aria-describedby="hint-airlabs airlabs-key-validation"
+                    >
+                    <p id="airlabs-key-validation" class="gmaps-key-validation muted" data-airlabs-key-validation hidden></p>
+                  </div>
+
+                  {{if ne (trimSpace .Settings.AirLabsAPIKey) ""}}
+                  <div class="gmaps-key-saved-card" data-airlabs-key-saved hidden>
+                    <div class="gmaps-key-saved-card__label">AirLabs API key</div>
+                    <div class="gmaps-key-saved-card__row">
+                      <code class="gmaps-key-saved-card__mask" data-airlabs-key-mask aria-hidden="true"></code>
+                      <button type="button" class="icon-btn gmaps-key-copy-btn" data-airlabs-key-copy title="Copy key" aria-label="Copy AirLabs API key to clipboard">
+                        <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
+                      </button>
+                    </div>
+                    <div class="gmaps-key-saved-card__actions">
+                      <button type="button" class="btn gmaps-key-update-btn" data-airlabs-key-update>
+                        <span class="material-symbols-outlined" aria-hidden="true">sync</span>
+                        Update Key
+                      </button>
+                      <button type="button" class="secondary-btn gmaps-key-delete-btn" data-airlabs-key-delete>
+                        <span class="material-symbols-outlined" aria-hidden="true">delete</span>
+                        Delete Key
+                      </button>
+                    </div>
+                  </div>
+                  {{end}}
+
+                  <div class="sr-only">
+                    <input type="hidden" name="clear_airlabs_api" value="0">
+                    <input type="checkbox" name="clear_airlabs_api" value="1" tabindex="-1" data-airlabs-clear-checkbox>
+                    <input type="hidden" name="airlabs_api_key" value="" data-airlabs-key-submit>
+                  </div>
+                </div>
+
+                <div
+                  class="full gmaps-api-key-section"
+                  data-openweather-key-section
+                  data-initial-has-key="{{if gt (len (trimSpace .Settings.OpenWeatherAPIKey)) 0}}1{{else}}0{{end}}"
+                  data-saved-key="{{trimSpace .Settings.OpenWeatherAPIKey}}"
+                >
+                  <span class="gmaps-api-key-section__label">OpenWeatherMap API key <span class="muted">(optional)</span></span>
+                  <p id="hint-openweather" class="settings-field-hint muted full">API key from <a href="https://openweathermap.org/api" target="_blank" rel="noopener noreferrer">OpenWeatherMap</a>. When set, plain itinerary stops show a small same-day forecast (within 14 days) on the trip page. Changes apply after saving. Values are encrypted when <code>REMI_SETTINGS_ENCRYPTION_KEY</code> is configured on the server.</p>
+
+                  <div class="gmaps-key-edit-wrap" data-openweather-key-edit hidden>
+                    <input
+                      type="password"
+                      id="openweather_api_key_input"
+                      class="gmaps-key-edit-input"
+                      data-openweather-key-input
+                      autocomplete="off"
+                      placeholder="Enter your OpenWeatherMap API key"
+                      aria-describedby="hint-openweather openweather-key-validation"
+                    >
+                    <p id="openweather-key-validation" class="gmaps-key-validation muted" data-openweather-key-validation hidden></p>
+                  </div>
+
+                  {{if ne (trimSpace .Settings.OpenWeatherAPIKey) ""}}
+                  <div class="gmaps-key-saved-card" data-openweather-key-saved hidden>
+                    <div class="gmaps-key-saved-card__label">OpenWeatherMap API key</div>
+                    <div class="gmaps-key-saved-card__value" data-openweather-key-masked>••••••••••••</div>
+                    <div class="gmaps-key-saved-card__actions">
+                      <button type="button" class="btn gmaps-key-update-btn" data-openweather-key-update>
+                        <span class="material-symbols-outlined" aria-hidden="true">sync</span>
+                        Update Key
+                      </button>
+                      <button type="button" class="secondary-btn gmaps-key-delete-btn" data-openweather-key-delete>
+                        <span class="material-symbols-outlined" aria-hidden="true">delete</span>
+                        Delete Key
+                      </button>
+                    </div>
+                  </div>
+                  {{end}}
+
+                  <div class="sr-only">
+                    <input type="hidden" name="clear_openweather_api" value="0">
+                    <input type="checkbox" name="clear_openweather_api" value="1" tabindex="-1" data-openweather-clear-checkbox>
+                    <input type="hidden" name="openweather_api_key" value="" data-openweather-key-submit>
+                  </div>
+                </div>
                 <label class="full">Default Distance Unit
                   <select name="default_distance_unit" aria-describedby="hint-dist-app">
                     <option value="km" {{if eq .Settings.DefaultDistanceUnit "km"}}selected{{end}}>Kilometres</option>

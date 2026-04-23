@@ -24,6 +24,25 @@ func TestCalendarDateFromDraftItineraryDayNumberRejectsRelative(t *testing.T) {
 	}
 }
 
+func TestItineraryDayDateISO(t *testing.T) {
+	iso, ok := ItineraryDayDateISO("2026-04-10", 1)
+	if !ok || iso != "2026-04-10" {
+		t.Fatalf("relative start: ok=%v iso=%q", ok, iso)
+	}
+	iso2, ok2 := ItineraryDayDateISO("2026-04-10", 3)
+	if !ok2 || iso2 != "2026-04-12" {
+		t.Fatalf("relative day3: ok=%v iso=%q", ok2, iso2)
+	}
+	iso3, ok3 := ItineraryDayDateISO("not-a-date", DraftItineraryDayNumberFromDate(time.Date(2026, 4, 18, 0, 0, 0, 0, time.Local)))
+	if !ok3 || iso3 != "2026-04-18" {
+		t.Fatalf("draft: ok=%v iso=%q", ok3, iso3)
+	}
+	_, bad := ItineraryDayDateISO("not-a-date", 2)
+	if bad {
+		t.Fatal("expected no ISO for unparseable start and relative day")
+	}
+}
+
 func TestIsDraftTripForDateBounds(t *testing.T) {
 	if !IsDraftTripForDateBounds("", "") {
 		t.Fatal("empty bounds should be draft")

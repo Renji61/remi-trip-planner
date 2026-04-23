@@ -421,13 +421,13 @@ func fetchGooglePlaceDetails(ctx context.Context, placeID, apiKey string, client
 		ohStr = string(ohRaw)
 	}
 	globalMapsLocationCache.placeSetFull(pKey, placeDetailCacheEntry{
-		lat:                loc.Lat,
-		lng:                loc.Lng,
-		formattedAddress:   formatted,
-		name:               name,
-		openingHoursJSON:   ohStr,
-		utcOffsetMinutes:   payload.Result.UTCOffset,
-		expires:            time.Time{},
+		lat:              loc.Lat,
+		lng:              loc.Lng,
+		formattedAddress: formatted,
+		name:             name,
+		openingHoursJSON: ohStr,
+		utcOffsetMinutes: payload.Result.UTCOffset,
+		expires:          time.Time{},
 	}, placeDetailTTL)
 	return googlePlaceDetailsResponse{
 		PlaceID:          out.PlaceID,

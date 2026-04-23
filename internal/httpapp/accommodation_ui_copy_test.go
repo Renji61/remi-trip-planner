@@ -28,7 +28,11 @@ func TestAccommodationPageAndFormsCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tripAndFab := trip + "\n" + string(fabB)
+	ub, err := os.ReadFile(filepath.Join(root, "web", "templates", "trip_unified_bookings.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tripAndFab := trip + "\n" + string(fabB) + "\n" + string(ub)
 
 	jsB, err := os.ReadFile(filepath.Join(root, "web", "static", "app.js"))
 	if err != nil {
@@ -47,8 +51,7 @@ func TestAccommodationPageAndFormsCopy(t *testing.T) {
 		`>Save Accommodation</button>`,
 		`<h4>No accommodations yet.</h4>`,
 		`<p>Add your first accommodation to keep your itinerary and budget in sync.</p>`,
-		`<h3>Edit Accommodation</h3>`,
-		`class="accommodation-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.`,
+		`{{template "remiBookingStatusField" (dict "name" "booking_status" "value" .BookingStatus)}}`,
 		`<small>Booking Reference</small>`,
 	}
 	for _, s := range accWant {
@@ -78,19 +81,19 @@ func TestAccommodationPageAndFormsCopy(t *testing.T) {
 	tripWant := []string{
 		`id="accommodation-itinerary-edit-`,
 		`label class="full">Property Name<input type="text" name="name" value="{{.Lodging.Name}}"`,
+		`{{template "remiBookingStatusField" (dict "name" "booking_status" "value" .Lodging.BookingStatus)}}`,
 		`id="trip-accommodation-edit-`,
-		`<h3>Edit Accommodation</h3>`,
-		`class="accommodation-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.`,
+		`{{template "remiBookingStatusField" (dict "name" "booking_status" "value" $l.BookingStatus)}}`,
 		`id="mobile-sheet-accommodation"`,
 		`class="trip-resource-form-subtitle mobile-sheet-subtitle">Details sync with your itinerary and expenses.`,
 		`<label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Lodging.Cost}}"`,
-		`<label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}"`,
+		`<label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" $l.Cost}}"`,
 		`<label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>`,
 		`<label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.Lodging.BookingConfirmation}}"`,
-		`<label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}"`,
+		`<label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{$l.BookingConfirmation}}"`,
 		`<label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>`,
-		`<span class="itinerary-label">Total Cost</span>`,
-		`<strong>{{.BookingConfirmation}}</strong><small>Booking Reference</small>`,
+		`<strong>{{$.CurrencySymbol}}{{printf "%.2f" .Lodging.Cost}}</strong><small>Accommodation cost</small>`,
+		`<strong>{{$l.BookingConfirmation}}</strong><small>Booking Reference</small>`,
 	}
 	for _, s := range tripWant {
 		if !strings.Contains(tripAndFab, s) {

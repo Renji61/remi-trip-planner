@@ -80,6 +80,7 @@
             <label class="full">Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
             <label class="full">Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
             <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+            {{template "remiBookingStatusField" (dict "name" "booking_status" "value" "to_be_done")}}
             <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
             <label class="full">Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
             <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
@@ -143,15 +144,18 @@
                         <div class="vehicle-meta-grid">
                           <div><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><div><strong>{{formatTripDateTime $.Details.Trip $.Settings .CheckInAt}}</strong><small>Check-in Date &amp; Time</small></div></div>
                           <div><span class="material-symbols-outlined" aria-hidden="true">event</span><div><strong>{{formatTripDateTime $.Details.Trip $.Settings .CheckOutAt}}</strong><small>Check-out Date &amp; Time</small></div></div>
-                          {{if .BookingConfirmation}}
-                          <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Reference</small></div></div>
-                          {{end}}
-                          {{if .AttachmentPath}}
-                          <div><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><a class="flight-doc-link" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">Open Attachment</a><small>Booking Document</small></div></div>
-                          {{end}}
-                        {{if .Notes}}
-                        <div class="vehicle-meta-grid--notes"><span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span><div class="vehicle-meta-notes-col"><strong class="vehicle-meta-notes-text">{{.Notes}}</strong><small>Notes</small></div></div>
-                        {{end}}
+                          <div class="remi-flight-booking-meta-grid">
+                            <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--status"><span class="material-symbols-outlined" aria-hidden="true">task_alt</span><div><strong>{{bookingStatusLabel .BookingStatus}}</strong><small>Booking status</small></div></div>
+                            {{if .BookingConfirmation}}
+                            <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--ref"><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Reference</small></div></div>
+                            {{end}}
+                            {{if .AttachmentPath}}
+                            <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--attach"><span class="material-symbols-outlined" aria-hidden="true">attach_file</span><div><a class="flight-doc-link" href="{{.AttachmentPath}}" target="_blank" rel="noreferrer">Open Attachment</a><small>View Attachment</small></div></div>
+                            {{end}}
+                            {{if .Notes}}
+                            <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--notes flight-meta-notes"><span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span><div><strong>{{.Notes}}</strong><small>Notes</small></div></div>
+                            {{end}}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -160,19 +164,13 @@
                   {{if not $.Details.Trip.IsArchived}}
                   <form id="accommodation-edit-{{.ID}}" method="post" action="/trips/{{$.Details.Trip.ID}}/accommodation/{{.ID}}/update" class="form-grid item-edit hidden full accommodation-edit-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form data-ajax-submit data-toast-message="Accommodation updated.">
                     <input type="hidden" name="expected_updated_at" value="{{.UpdatedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
-                    <div class="full accommodation-form-head accommodation-edit-form-head">
-                      <div class="accommodation-form-icon" aria-hidden="true"><span class="material-symbols-outlined">edit_square</span></div>
-                      <div class="accommodation-form-head-text">
-                        <h3>Edit Accommodation</h3>
-                        <p class="accommodation-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.</p>
-                      </div>
-                    </div>
                     <label class="full">Property Name<input type="text" name="name" value="{{.Name}}" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
                     <label class="full">Address<input type="text" name="address" value="{{.Address}}" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
                     <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
                     <label class="full">Check-in Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_in_at" "value" .CheckInAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
                     <label class="full">Check-out Date &amp; Time{{template "remiDateTimeField" (dict "name" "check_out_at" "value" .CheckOutAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
                     <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
+                    {{template "remiBookingStatusField" (dict "name" "booking_status" "value" .BookingStatus)}}
                     <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. ABCD1234"></label>
                     <input type="hidden" name="current_attachment_path" value="{{.AttachmentPath}}">
                     <input type="hidden" name="current_image_path" value="{{.ImagePath}}">

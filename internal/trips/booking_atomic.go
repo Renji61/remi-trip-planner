@@ -65,25 +65,33 @@ func (s *Service) UpdateVehicleRentalWithItinerary(ctx context.Context, rental V
 }
 
 func (s *Service) AddFlightWithItinerary(ctx context.Context, flight Flight, departItem, arriveItem ItineraryItem) error {
-	return s.withRepoTransaction(ctx, func(txs *Service) error {
+	err := s.withRepoTransaction(ctx, func(txs *Service) error {
 		if err := txs.AddItineraryItem(ctx, departItem); err != nil {
 			return err
 		}
 		if err := txs.AddItineraryItem(ctx, arriveItem); err != nil {
 			return err
 		}
-		return txs.AddFlight(ctx, flight)
+		return s.addFlightInTransaction(ctx, txs, flight)
 	})
+	if err != nil {
+		return err
+	}
+	return s.postCommitSyncTripBookingsChecklistForFlightID(ctx, flight.TripID, flight.ID)
 }
 
 func (s *Service) UpdateFlightWithItinerary(ctx context.Context, flight Flight, departItem, arriveItem ItineraryItem) error {
-	return s.withRepoTransaction(ctx, func(txs *Service) error {
+	err := s.withRepoTransaction(ctx, func(txs *Service) error {
 		if err := txs.UpdateItineraryItem(ctx, departItem); err != nil {
 			return err
 		}
 		if err := txs.UpdateItineraryItem(ctx, arriveItem); err != nil {
 			return err
 		}
-		return txs.UpdateFlight(ctx, flight)
+		return s.updateFlightInTransaction(ctx, txs, flight)
 	})
+	if err != nil {
+		return err
+	}
+	return s.postCommitSyncTripBookingsChecklistForFlightID(ctx, flight.TripID, flight.ID)
 }

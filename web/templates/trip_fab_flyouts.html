@@ -81,13 +81,14 @@
       </button>
     </div>
     <p class="trip-resource-form-subtitle mobile-sheet-subtitle">Details sync with your itinerary and expenses.</p>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid remi-trip-widget-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/accommodation" class="form-grid remi-trip-widget-form accommodation-form-grid" enctype="multipart/form-data" data-accommodation-form data-ajax-submit data-toast-message="Accommodation saved." data-remi-trip-fab-stay-add="1">
       <label class="full">Property Name<input type="text" name="name" placeholder="e.g. Aman Tokyo" required data-accommodation-name></label>
       <label class="full">Address<input type="text" name="address" placeholder="Full street address" required data-accommodation-address data-location-autocomplete></label>
       <p class="full location-hint" data-accommodation-status>Address may auto-fill based on the property name.</p>
       <label class="full">Check-in Date &amp; Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "check_in_at" "value" "" "required" true)}}</label>
       <label class="full">Check-out Date &amp; Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "check_out_at" "value" "" "required" true)}}</label>
       <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
+      {{template "remiBookingStatusField" (dict "name" "booking_status" "value" "to_be_done")}}
       <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. ABCD1234"></label>
       <label class="full">Booking Document<input type="file" name="booking_attachment" accept=".pdf,.doc,.docx,image/*"></label>
       <label class="full">Cover Photo<input type="file" name="entry_image" accept="image/*"></label>
@@ -111,8 +112,9 @@
       </button>
     </div>
     <p class="trip-resource-form-subtitle mobile-sheet-subtitle">Details sync with your itinerary and expenses.</p>
-    <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid remi-trip-widget-form vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form>
+    <form method="post" action="/trips/{{.Details.Trip.ID}}/vehicle-rental" class="form-grid remi-trip-widget-form vehicle-form-grid" enctype="multipart/form-data" data-vehicle-form data-ajax-submit data-toast-message="Vehicle rental saved." data-remi-trip-fab-vehicle-add="1">
       <label class="full">Vehicle<input type="text" name="vehicle_detail" placeholder="e.g. Range Rover Velar"></label>
+      {{template "remiBookingStatusField" (dict "name" "booking_status" "value" "to_be_done")}}
       <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="#REMI-9921"></label>
       <label class="full">Pickup Location<input type="text" name="pick_up_location" placeholder="e.g. Zurich Airport" required data-location-autocomplete></label>
       <label class="full">Pickup Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "pick_up_at" "value" "" "required" true)}}</label>
@@ -149,12 +151,15 @@
       </button>
     </div>
     <form method="post" action="/trips/{{.Details.Trip.ID}}/flights" class="form-grid remi-trip-widget-form flight-form-grid" enctype="multipart/form-data" data-ajax-submit data-toast-message="{{.Details.Trip.FlightsSectionTitle}} booking saved." data-remi-trip-fab-flight-add="1">
-      <label class="full">Airline<input type="text" name="flight_name" placeholder="e.g. Philippine Airlines" required></label>
+      <label class="full">Airline<input type="text" name="flight_name" placeholder="Search airline name or IATA code" required data-flight-airline-autocomplete autocomplete="off"></label>
       <label class="full">Flight Number<input type="text" name="flight_number" placeholder="e.g. PR 2781"></label>
-      <label class="full">Departure Airport<input type="text" name="depart_airport" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
+      <label class="full">Departure Airport<input type="text" name="depart_airport" placeholder="Search by city or IATA code" required data-flight-airport-autocomplete autocomplete="off"></label>
+      <input type="hidden" name="depart_airport_iata" value="">
       <label class="full">Departure Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "depart_at" "value" "" "required" true)}}</label>
-      <label class="full">Arrival Airport<input type="text" name="arrive_airport" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
+      <label class="full">Arrival Airport<input type="text" name="arrive_airport" placeholder="Search by city or IATA code" required data-flight-airport-autocomplete autocomplete="off"></label>
+      <input type="hidden" name="arrive_airport_iata" value="">
       <label class="full">Arrival Date & Time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Details.Trip "Settings" .Settings "name" "arrive_at" "value" "" "required" true)}}</label>
+      {{template "remiBookingStatusField" (dict "name" "booking_status" "value" "to_be_done")}}
       <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. FLT-1234"></label>
       <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
       <label class="full">Boarding Pass / Ticket<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>

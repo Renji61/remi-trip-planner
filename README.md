@@ -61,6 +61,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - **Commute / travel legs** between two itinerary items on the **same day** (`item_kind=commute`): transport mode, ordering, sidebar + timeline + calendar, **ICS** feed entries, and optional **Google Maps directions** when both endpoints have coordinates (`POST /trips/{id}/itinerary/commute`).
 - **Day header map shortcut:** open all non-commute places for a day as a single Google Maps route/search in itinerary order.
 - **Per-day descriptions** (labels) editable inline on the trip page.
+- **Stop weather (optional):** with an **OpenWeatherMap** API key in site settings, plain itinerary stops with coordinates can show a compact **same-day forecast** on the trip page when the day is within the forecast window.
 - **Interactive map** (Leaflet + OpenStreetMap by default, or **Google Maps** when an API key is set) with markers, optional **day filters**, and travel hints between stops; editing a stop **updates stored coordinates** and map pins after save.
 - **Search** across itinerary text from the trip header.
 - **Geocoding** can be disabled globally (app settings) for privacy or rate-limit reasons.
@@ -80,6 +81,9 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### Stay, vehicle, flights
 
 - Full **accommodation**, **vehicle rental**, and **flights** sections with forms, attachments/images/documents, and links to **itinerary stops** and **expenses** where designed.
+- **Booking status** on each booking type (**booked** vs **to be booked**), and a unified **Booking details** section on the main trip page to filter and review stays, rentals, and flights together.
+- **Flights:** optional **AirLabs** API key enables **airport and airline** field autocomplete via server routes (with caching and fallbacks to existing location providers).
+- **Trip Bookings** checklist lines for flights not yet booked (`Book: …` in a dedicated category), kept in sync with flight fields and marked done when the flight is booked (dismissible).
 - **Add/update/delete** flows for those bookings run in **transactions** with linked itinerary lines (and related cleanup) so you do not get half-applied saves if something fails mid-way.
 
 ### Trip documents & uploads
@@ -90,7 +94,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 
 ### Checklist
 
-- **Categorized** reminder items; mark done/undo; add from the trip page (including multi-item draft list).
+- **Categorized** reminder items; mark done/undo; add from the trip page (including multi-item draft list). **Trip Bookings** lines can track flight booking to-dos linked to the flights list.
 - **Mobile:** **Add to Checklist** appears in the trip **FAB** menu when checklist + sidebar widget visibility allow it (same as trip settings); opens the checklist sheet on the main trip page or via `?open=checklist` from subpages.
 - **Trip FAB flyouts** are shared on trip subpages too (Notes, Expenses, Group expenses, Settings, Trip Documents, Stays, Vehicle Rental, Flights), so add flows no longer require navigating back to the main trip page.
 
@@ -112,11 +116,12 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### App-wide settings
 
 - App title, default currency, **default map location** (place search with short name stored; Tokyo fallback), map zoom, theme (light / dark / system), location lookup, dashboard presentation options — via **Settings** and quick theme POST from the trip shell.
+- Optional **AirLabs** and **OpenWeatherMap** API keys (same key-edit UX as the Google Maps key) — stored **encrypted** when `REMI_SETTINGS_ENCRYPTION_KEY` is set on the server.
 - **Desktop:** shared **account** dropdown (profile initial, **Profile**, **App settings**, **Log out**) on trip topbars and other app-shell pages for consistent navigation.
 
 ### Account export & privacy
 
-- **Profile → Your data:** `GET /profile/export` (session cookie, same-site browser navigation) downloads **`remi-export-YYYYMMDD.json`**: safe profile fields (no password hash), your user settings, app settings with **secrets redacted** (e.g. Google Maps API key), and every trip you can see (itinerary, expenses, checklist, stays, vehicles, flights, group/tab settlements, guests, departed participants, trip document metadata including stored paths — not file bytes). **CSRF:** export uses **GET** so it is not tied to form CSRF tokens; it only works for an authenticated session from the same site (mitigate cross-site download by keeping cookies `SameSite`/`Secure` in production as configured).
+- **Profile → Your data:** `GET /profile/export` (session cookie, same-site browser navigation) downloads **`remi-export-YYYYMMDD.json`**: safe profile fields (no password hash), your user settings, app settings with **secrets redacted** (e.g. Google Maps, AirLabs, and OpenWeatherMap API keys), and every trip you can see (itinerary, expenses, checklist, stays, vehicles, flights, group/tab settlements, guests, departed participants, trip document metadata including stored paths — not file bytes). **CSRF:** export uses **GET** so it is not tied to form CSRF tokens; it only works for an authenticated session from the same site (mitigate cross-site download by keeping cookies `SameSite`/`Secure` in production as configured).
 
 ### About & updates
 
@@ -229,7 +234,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.2` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.3` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 

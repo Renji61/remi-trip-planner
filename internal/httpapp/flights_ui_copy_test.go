@@ -27,7 +27,17 @@ func TestFlightsPageAndFormsCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tripAndFab := trip + "\n" + string(fabB)
+	bookingFieldB, err := os.ReadFile(filepath.Join(root, "web", "templates", "booking_status_field.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bookingField := string(bookingFieldB)
+	ub, err := os.ReadFile(filepath.Join(root, "web", "templates", "trip_unified_bookings.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tripAndFab := trip + "\n" + string(fabB) + "\n" + bookingField + "\n" + string(ub)
+	flightsWithBookingField := flights + "\n" + bookingField
 
 	jsB, err := os.ReadFile(filepath.Join(root, "web", "static", "app.js"))
 	if err != nil {
@@ -40,8 +50,11 @@ func TestFlightsPageAndFormsCopy(t *testing.T) {
 		"Manage your flight bookings.",
 		`>New Flight Booking</h3>`,
 		"Details sync with your itinerary and expenses.",
-		`>Edit Flight</h3>`,
+		`class="full flight-section-head flight-edit-form-head"`,
 		"Update details and they will sync with your itinerary and expenses.",
+		`name="{{.name}}"`,
+		`>Booking Status`,
+		`value="to_be_done"`,
 		`label class="full">Airline<input`,
 		`label class="full">Departure Airport<input`,
 		`label class="full">Departure Date & Time`,
@@ -52,8 +65,8 @@ func TestFlightsPageAndFormsCopy(t *testing.T) {
 		`placeholder="Add any additional details"`,
 	}
 	for _, s := range flightsWant {
-		if !strings.Contains(flights, s) {
-			t.Errorf("flights.html missing %q", s)
+		if !strings.Contains(flightsWithBookingField, s) {
+			t.Errorf("flights templates (incl. booking status field) missing %q", s)
 		}
 	}
 	flightsAvoid := []string{
@@ -79,14 +92,15 @@ func TestFlightsPageAndFormsCopy(t *testing.T) {
 
 	// —— trip.html (flight-related) ——
 	tripWant := []string{
-		`Departure Airport{{else}}Arrival Airport`,
-		`<span class="itinerary-label">Airline</span>`,
-		`<span class="itinerary-label">Booking Reference</span>`,
-		`Flight Departure{{else}}Flight Arrival`,
-		`<span class="itinerary-label">Total Cost</span>`,
+		`{{$route := flightRouteIATALine .Flight}}`,
+		`flight-meta-grid`,
+		`<strong>{{.Flight.BookingConfirmation}}</strong><small>Booking Confirmation</small>`,
+		`<strong>{{$.CurrencySymbol}}{{printf "%.2f" .Flight.Cost}}</strong><small>Total Cost</small>`,
 		`value="{{.Flight.Notes}}" placeholder="Add any additional details"`,
-		`<h3>Edit Flight</h3>`,
+		`class="full flight-section-head flight-edit-form-head"`,
 		`class="flight-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.`,
+		`name="{{.name}}"`,
+		`value="to_be_done"`,
 		`label class="full">Airline<input`,
 		`label class="full">Departure Airport<input`,
 		`label class="full">Departure Date & Time`,
@@ -94,7 +108,7 @@ func TestFlightsPageAndFormsCopy(t *testing.T) {
 		`label class="full">Arrival Date & Time`,
 		`label class="full">Booking Reference<input`,
 		`<label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Flight.Cost}}"`,
-		`<label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}"`,
+		`<label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" $f.Cost}}"`,
 		`action="/trips/{{.Details.Trip.ID}}/flights"`,
 	}
 	for _, s := range tripWant {

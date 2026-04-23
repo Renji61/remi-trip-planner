@@ -11,19 +11,19 @@ const (
 	MainSectionItinerary = "itinerary"
 	MainSectionSpends    = "spends"
 	MainSectionChecklist = "checklist"
-	MainSectionStay      = "stay"
-	MainSectionVehicle   = "vehicle"
-	MainSectionFlights   = "flights"
-	MainSectionTheTab    = "the_tab"
+	MainSectionBookings  = "bookings"
+	// MainSectionStay, MainSectionVehicle, MainSectionFlights are legacy keys merged into MainSectionBookings.
+	MainSectionStay    = "stay"
+	MainSectionVehicle = "vehicle"
+	MainSectionFlights = "flights"
+	MainSectionTheTab  = "the_tab"
 )
 
 // DefaultMainSectionOrder is the main-column order on Trip Details (below the hero).
 var DefaultMainSectionOrder = []string{
 	MainSectionMap,
 	MainSectionItinerary,
-	MainSectionFlights,
-	MainSectionStay,
-	MainSectionVehicle,
+	MainSectionBookings,
 	MainSectionChecklist,
 	MainSectionSpends,
 	MainSectionTheTab,
@@ -35,6 +35,7 @@ var mainSectionSet = map[string]struct{}{
 	MainSectionSpends:    {},
 	MainSectionTheTab:    {},
 	MainSectionChecklist: {},
+	MainSectionBookings:  {},
 	MainSectionStay:      {},
 	MainSectionVehicle:   {},
 	MainSectionFlights:   {},
@@ -66,10 +67,43 @@ var sidebarWidgetSet = map[string]struct{}{
 	SidebarAddChecklist: {},
 }
 
+// PreprocessMainSectionOrderCSV merges legacy stay, vehicle, flights into a single
+// "bookings" key (first position wins) so existing saved trip layouts keep working.
+func PreprocessMainSectionOrderCSV(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return raw
+	}
+	parts := strings.Split(raw, ",")
+	var out []string
+	inserted := false
+	for _, p := range parts {
+		k := strings.ToLower(strings.TrimSpace(p))
+		if k == "" {
+			continue
+		}
+		if k == MainSectionStay || k == MainSectionVehicle || k == MainSectionFlights {
+			if !inserted {
+				out = append(out, MainSectionBookings)
+				inserted = true
+			}
+			continue
+		}
+		if k == MainSectionBookings {
+			if !inserted {
+				out = append(out, MainSectionBookings)
+				inserted = true
+			}
+			continue
+		}
+		out = append(out, k)
+	}
+	return strings.Join(out, ",")
+}
+
 // NormalizeMainSectionOrder parses a comma-separated saved order, drops unknown
 // tokens, dedupes, then appends any missing keys in default order.
 func NormalizeMainSectionOrder(raw string) []string {
-	return normalizeOrder(raw, mainSectionSet, DefaultMainSectionOrder)
+	return normalizeOrder(PreprocessMainSectionOrderCSV(raw), mainSectionSet, DefaultMainSectionOrder)
 }
 
 // NormalizeSidebarWidgetOrder is like NormalizeMainSectionOrder for sidebar keys.
@@ -147,6 +181,25 @@ func MainSectionVisible(key string, t Trip) bool {
 		if !t.UIShowChecklist {
 			return false
 		}
+	case MainSectionBookings:
+		if !t.UIShowStay && !t.UIShowVehicle && !t.UIShowFlights {
+			return false
+		}
+		h := parseCommaKeySet(t.UIMainSectionHidden)
+		if h[MainSectionBookings] {
+			return false
+		}
+		// Show unified stream if at least one enabled booking type is not hidden.
+		if t.UIShowStay && !h[MainSectionStay] {
+			return true
+		}
+		if t.UIShowVehicle && !h[MainSectionVehicle] {
+			return true
+		}
+		if t.UIShowFlights && !h[MainSectionFlights] {
+			return true
+		}
+		return false
 	case MainSectionStay:
 		if !t.UIShowStay {
 			return false
@@ -274,6 +327,8 @@ func MainSectionVisibilityIcon(key string) string {
 		return "directions_car"
 	case MainSectionFlights:
 		return "flight"
+	case MainSectionBookings:
+		return "confirmation_number"
 	case MainSectionTheTab:
 		return "tab"
 	default:
@@ -320,6 +375,8 @@ func MainSectionLabel(key string) string {
 		return "Vehicle Rental"
 	case MainSectionFlights:
 		return "Flights"
+	case MainSectionBookings:
+		return "Booking details"
 	case MainSectionTheTab:
 		return "Group Expenses"
 	default:

@@ -82,9 +82,36 @@ func TestDashboardTripCardTemplateRenders(t *testing.T) {
 				"joinItineraryLocalDateTime":              stubJoinItineraryLocalDateTime,
 				"joinItineraryLocalDateTimeWithDayOffset": joinItineraryLocalDateTimeWithDayOffset,
 				"locationLineBeforeComma":                 func(s string) string { return s },
-				"itineraryNotesDisplay":                   func(s string) string { return s },
-				"isImageWebPath":                          func(string) bool { return true },
-				"itineraryGeocodeQuery":                   func(any) string { return "" },
+				"flightAirportHeadline":                   func(display, iata string, _ map[string]trips.Airport) string { return display },
+				"flightRouteIATALine":                     func(trips.Flight) string { return "" },
+				"flightDurationLabel":                     func(trips.Flight, map[string]trips.Airport) string { return "" },
+				"formatFlightBlockDuration":               trips.FormatFlightBlockDuration,
+				"isoDateFromDateTime": func(s string) string {
+					s = strings.TrimSpace(s)
+					if len(s) >= 10 {
+						return s[:10]
+					}
+					return s
+				},
+				"lodgingNightsLabel": func(l *trips.Lodging) string {
+					if l == nil {
+						return ""
+					}
+					return trips.FormatLodgingNightsLabel(*l)
+				},
+				"vehicleRentalDurationLabel": func(v *trips.VehicleRental) string {
+					if v == nil {
+						return ""
+					}
+					return trips.FormatVehicleRentalDurationLabel(*v)
+				},
+				"bookingStatusLabel":             func(s string) string { return s },
+				"itineraryNotesDisplay":          func(s string) string { return s },
+				"isImageWebPath":                 func(string) bool { return true },
+				"itineraryGeocodeQuery":          func(any) string { return "" },
+				"itineraryBookingDisplayTitle":   func(any) string { return "" },
+				"itineraryOpeningHoursCardLine":  func(trips.Trip, trips.ItineraryItem) string { return "" },
+				"itineraryOpeningHoursFormValue": func(trips.Trip, trips.ItineraryItem) string { return "" },
 				"profileInitial": func(u trips.User) string {
 					p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
 					return p.InitialForAvatar()
@@ -426,9 +453,36 @@ func htmlTemplateSmokeFuncs() ht.FuncMap {
 		"joinItineraryLocalDateTime":              stubJoinItineraryLocalDateTime,
 		"joinItineraryLocalDateTimeWithDayOffset": joinItineraryLocalDateTimeWithDayOffset,
 		"locationLineBeforeComma":                 func(s string) string { return s },
-		"itineraryNotesDisplay":                   func(s string) string { return s },
-		"isImageWebPath":                          func(string) bool { return true },
-		"itineraryGeocodeQuery":                   func(any) string { return "" },
+		"flightAirportHeadline":                   func(display, iata string, _ map[string]trips.Airport) string { return display },
+		"flightRouteIATALine":                     func(trips.Flight) string { return "" },
+		"flightDurationLabel":                     func(trips.Flight, map[string]trips.Airport) string { return "" },
+		"formatFlightBlockDuration":               trips.FormatFlightBlockDuration,
+		"isoDateFromDateTime": func(s string) string {
+			s = strings.TrimSpace(s)
+			if len(s) >= 10 {
+				return s[:10]
+			}
+			return s
+		},
+		"lodgingNightsLabel": func(l *trips.Lodging) string {
+			if l == nil {
+				return ""
+			}
+			return trips.FormatLodgingNightsLabel(*l)
+		},
+		"vehicleRentalDurationLabel": func(v *trips.VehicleRental) string {
+			if v == nil {
+				return ""
+			}
+			return trips.FormatVehicleRentalDurationLabel(*v)
+		},
+		"bookingStatusLabel":             func(s string) string { return s },
+		"itineraryNotesDisplay":          func(s string) string { return s },
+		"isImageWebPath":                 func(string) bool { return true },
+		"itineraryGeocodeQuery":          func(any) string { return "" },
+		"itineraryBookingDisplayTitle":   func(any) string { return "" },
+		"itineraryOpeningHoursCardLine":  func(trips.Trip, trips.ItineraryItem) string { return "" },
+		"itineraryOpeningHoursFormValue": func(trips.Trip, trips.ItineraryItem) string { return "" },
 		"profileInitial": func(u trips.User) string {
 			p := trips.UserProfile{DisplayName: u.DisplayName, Username: u.Username, Email: u.Email}
 			return p.InitialForAvatar()

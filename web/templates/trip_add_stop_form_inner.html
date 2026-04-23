@@ -20,6 +20,7 @@
     </div>
     <p class="full location-hint" data-location-status>Type a location and coordinates will be fetched automatically.</p>
     <label class="full">Title<input type="text" name="title" placeholder="Kayaking Big Lagoon" required></label>
+    <label class="full">Opening Hours<input type="text" name="opening_hours" maxlength="500" value="" placeholder="Filled when you pick a place with hours, or type your own" autocomplete="off"></label>
     {{if not (and .Trip.StartDate .Trip.EndDate)}}<p class="full muted small">No trip start/end dates yet — pick any date and time. You can set fixed trip dates later in trip settings.</p>{{end}}
     <label class="full">Start date &amp; time{{template "remiDateTimeFieldTripBound" (dict "Trip" .Trip "Settings" .Settings "name" "start_at" "value" (joinItineraryLocalDateTime .Trip.StartDate "09:00") "required" true)}}</label>
     <label class="full">End date &amp; time (optional){{template "remiDateTimeFieldTripBound" (dict "Trip" .Trip "Settings" .Settings "name" "end_at" "value" "" "required" false)}}</label>

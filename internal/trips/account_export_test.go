@@ -10,10 +10,14 @@ func TestRedactAppSettingsForExport(t *testing.T) {
 	in := AppSettings{
 		AppTitle:         "Test",
 		GoogleMapsAPIKey: "secret-key-123",
+		AirLabsAPIKey:    "airlabs-secret-key",
 	}
 	out := RedactAppSettingsForExport(in)
 	if out.GoogleMapsAPIKey != "[REDACTED]" {
 		t.Fatalf("expected redacted maps key, got %q", out.GoogleMapsAPIKey)
+	}
+	if out.AirLabsAPIKey != "[REDACTED]" {
+		t.Fatalf("expected redacted airlabs key, got %q", out.AirLabsAPIKey)
 	}
 	if in.GoogleMapsAPIKey != "secret-key-123" {
 		t.Fatalf("caller value should be unchanged (pass-by-value), got %q", in.GoogleMapsAPIKey)

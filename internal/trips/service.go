@@ -287,6 +287,7 @@ var ReminderChecklistCategories = []string{
 	"Electronics & Connectivity",
 	"Itinerary Planning",
 	"Transit & Arrival",
+	"Trip Bookings",
 }
 
 type Lodging struct {
@@ -310,6 +311,7 @@ type Lodging struct {
 	UpdatedAt             time.Time
 	ExpectedUpdatedAt     time.Time
 	EnforceOptimisticLock bool
+	BookingStatus         string
 }
 
 type VehicleRental struct {
@@ -337,30 +339,38 @@ type VehicleRental struct {
 	UpdatedAt             time.Time
 	ExpectedUpdatedAt     time.Time
 	EnforceOptimisticLock bool
+	BookingStatus         string
 }
 
 type Flight struct {
-	ID                    string
-	TripID                string
-	FlightName            string
-	FlightNumber          string
-	DepartAirport         string
-	ArriveAirport         string
-	DepartAt              string
-	ArriveAt              string
-	BookingConfirmation   string
-	Notes                 string
-	DocumentPath          string
-	ImagePath             string
-	CostCents             int64
-	Cost                  float64 // derived display value from CostCents
-	DepartItineraryID     string
-	ArriveItineraryID     string
-	ExpenseID             string
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	ExpectedUpdatedAt     time.Time
-	EnforceOptimisticLock bool
+	ID            string
+	TripID        string
+	FlightName    string
+	FlightNumber  string
+	BookingStatus string
+	DepartAirport string
+	ArriveAirport string
+	// DepartAirportIATA and ArriveAirportIATA are optional 3-letter codes when known (AirLabs / cache).
+	DepartAirportIATA   string
+	ArriveAirportIATA   string
+	DepartAt            string
+	ArriveAt            string
+	BookingConfirmation string
+	Notes               string
+	DocumentPath        string
+	ImagePath           string
+	CostCents           int64
+	Cost                float64 // derived display value from CostCents
+	DepartItineraryID   string
+	ArriveItineraryID   string
+	ExpenseID           string
+	// TripBookingsChecklistItemID links a "Trip Bookings" checklist row; cleared when the user deletes that row and TripBookingsChecklistDismissed is set.
+	TripBookingsChecklistItemID    string
+	TripBookingsChecklistDismissed bool
+	CreatedAt                      time.Time
+	UpdatedAt                      time.Time
+	ExpectedUpdatedAt              time.Time
+	EnforceOptimisticLock          bool
 }
 
 type Change struct {
@@ -392,6 +402,10 @@ type AppSettings struct {
 	GoogleMapsAPIKey string
 	// GoogleMapsMapID: optional Map ID from Google Cloud (same project as the API key) for vector maps + AdvancedMarkerElement on trip maps.
 	GoogleMapsMapID string
+	// AirLabsAPIKey: optional AirLabs Data API key for airport search (decrypted in memory when read from the repository).
+	AirLabsAPIKey string
+	// OpenWeatherAPIKey: optional OpenWeatherMap key for stop weather previews (decrypted in memory when read from the repository).
+	OpenWeatherAPIKey string
 	// DefaultDistanceUnit: km | mi for the whole instance when user/trip do not override.
 	DefaultDistanceUnit string
 	// UserDistanceUnit: merged from user_settings (per-user override); not a DB column on app_settings.
@@ -488,6 +502,14 @@ type Repository interface {
 	DeleteFlight(ctx context.Context, tripID, flightID string) error
 	ListFlights(ctx context.Context, tripID string) ([]Flight, error)
 	GetFlight(ctx context.Context, tripID, flightID string) (Flight, error)
+	GetFlightByTripBookingsChecklistItemID(ctx context.Context, tripID, checklistItemID string) (Flight, error)
+	UpdateFlightTripBookingsChecklistMeta(ctx context.Context, tripID, flightID, checklistItemID string, dismissed bool) error
+
+	SearchAirportsByKeyword(ctx context.Context, query string, limit int) ([]Airport, error)
+	GetAirportsByIATACodes(ctx context.Context, codes []string) (map[string]Airport, error)
+	UpsertAirport(ctx context.Context, a Airport) error
+	GetWeatherCache(ctx context.Context, tripID, itemID, cacheDate string) (payloadJSON string, fetchedAt time.Time, ok bool, err error)
+	UpsertWeatherCache(ctx context.Context, tripID, itemID, cacheDate string, lat, lon float64, payloadJSON string) error
 	ListChanges(ctx context.Context, tripID, since string) ([]Change, error)
 	ListChangesAfterID(ctx context.Context, tripID string, afterID int64) ([]Change, error)
 	LatestChangeLogID(ctx context.Context, tripID string) (int64, error)
@@ -890,6 +912,15 @@ func (s *Service) GetTripDetails(ctx context.Context, tripID string) (TripDetail
 	flights, err := s.repo.ListFlights(ctx, tripID)
 	if err != nil {
 		return TripDetails{}, err
+	}
+	for i := range lodgings {
+		lodgings[i].BookingStatus = NormalizeBookingStatus(lodgings[i].BookingStatus)
+	}
+	for i := range vehicles {
+		vehicles[i].BookingStatus = NormalizeBookingStatus(vehicles[i].BookingStatus)
+	}
+	for i := range flights {
+		flights[i].BookingStatus = NormalizeBookingStatus(flights[i].BookingStatus)
 	}
 	return TripDetails{
 		Trip:      trip,
@@ -1763,7 +1794,14 @@ func (s *Service) GetChecklistItem(ctx context.Context, itemID string) (Checklis
 }
 
 func (s *Service) ToggleChecklistItem(ctx context.Context, itemID string, done bool) error {
-	return s.repo.ToggleChecklistItem(ctx, itemID, done)
+	existing, err := s.repo.GetChecklistItem(ctx, itemID)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.ToggleChecklistItem(ctx, itemID, done); err != nil {
+		return err
+	}
+	return s.applyFlightBookingStatusFromTripBookingsChecklistToggle(ctx, existing.TripID, itemID, done)
 }
 
 func (s *Service) UpdateChecklistItem(ctx context.Context, item ChecklistItem) error {
@@ -1790,7 +1828,10 @@ func (s *Service) UpdateChecklistItem(ctx context.Context, item ChecklistItem) e
 	item.Done = existing.Done
 	item.CreatedAt = existing.CreatedAt
 	item.DueAt = strings.TrimSpace(item.DueAt)
-	return s.repo.UpdateChecklistItem(ctx, item)
+	if err := s.repo.UpdateChecklistItem(ctx, item); err != nil {
+		return err
+	}
+	return s.applyTripBookingsChecklistTextToFlightIfLinked(ctx, item)
 }
 
 func (s *Service) DeleteChecklistItem(ctx context.Context, itemID string) error {
@@ -1807,6 +1848,13 @@ func (s *Service) DeleteChecklistItem(ctx context.Context, itemID string) error 
 	}
 	if trip.IsArchived {
 		return errors.New("archived trips are read-only")
+	}
+	if flight, err := s.repo.GetFlightByTripBookingsChecklistItemID(ctx, existing.TripID, itemID); err == nil {
+		if err := s.repo.UpdateFlightTripBookingsChecklistMeta(ctx, flight.TripID, flight.ID, "", true); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
 	}
 	return s.repo.DeleteChecklistItem(ctx, itemID)
 }
@@ -1975,6 +2023,42 @@ func flightLabelFromItineraryTitle(title string) (label string, ok bool) {
 	}
 }
 
+// ItineraryLodgingPropertyDisplay returns the property name for itinerary UI (lodging name, or parsed from a stored itinerary title).
+func ItineraryLodgingPropertyDisplay(l Lodging, itineraryItemTitle string) string {
+	if n := strings.TrimSpace(l.Name); n != "" {
+		return n
+	}
+	t := strings.TrimSpace(itineraryItemTitle)
+	if n, ok := accommodationNameFromItineraryTitle(t); ok {
+		return strings.TrimSpace(n)
+	}
+	return t
+}
+
+// ItineraryVehicleRentalNameDisplay returns the vehicle / rental label for itinerary UI (detail, or parsed from a stored itinerary title).
+func ItineraryVehicleRentalNameDisplay(v VehicleRental, itineraryItemTitle string) string {
+	if n := strings.TrimSpace(v.VehicleDetail); n != "" {
+		return n
+	}
+	t := strings.TrimSpace(itineraryItemTitle)
+	if body, ok := vehicleLocationFromItineraryTitle(t); ok {
+		return strings.TrimSpace(body)
+	}
+	return t
+}
+
+// ItineraryFlightAirlineDisplay returns the airline (or best label) for itinerary UI.
+func ItineraryFlightAirlineDisplay(f Flight, itineraryItemTitle string) string {
+	if s := strings.TrimSpace(f.FlightName); s != "" {
+		return s
+	}
+	t := strings.TrimSpace(itineraryItemTitle)
+	if label, ok := flightLabelFromItineraryTitle(t); ok {
+		return strings.TrimSpace(label)
+	}
+	return flightLabelValue(f.FlightName, f.FlightNumber)
+}
+
 func (s *Service) AddVehicleRental(ctx context.Context, item VehicleRental) error {
 	return s.withRepoTransaction(ctx, func(txs *Service) error {
 		if item.TripID == "" || item.PickUpLocation == "" {
@@ -2079,53 +2163,75 @@ func (s *Service) DeleteVehicleRental(ctx context.Context, tripID, rentalID stri
 	})
 }
 
+func (s *Service) addFlightInTransaction(ctx context.Context, txs *Service, item Flight) error {
+	if item.TripID == "" || strings.TrimSpace(item.DepartAirport) == "" || strings.TrimSpace(item.ArriveAirport) == "" {
+		return errors.New("trip and airport details are required")
+	}
+	if item.CostCents == 0 && item.Cost != 0 {
+		item.CostCents = MoneyToCentsFloat(item.Cost)
+	}
+	SetFlightCostCents(&item, item.CostCents)
+	trip, err := txs.repo.GetTrip(ctx, item.TripID)
+	if err != nil {
+		return err
+	}
+	if trip.IsArchived {
+		return errors.New("archived trips are read-only")
+	}
+	if err := txs.repo.AddFlight(ctx, item); err != nil {
+		return err
+	}
+	return txs.SyncExpenseForFlight(ctx, item)
+}
+
+// Post-commit only: checklist uses DB connections that must not interleave with an open flight transaction.
+func (s *Service) postCommitSyncTripBookingsChecklistForFlightID(ctx context.Context, tripID, flightID string) error {
+	if tripID == "" || flightID == "" {
+		return nil
+	}
+	fresh, err := s.repo.GetFlight(ctx, tripID, flightID)
+	if err != nil {
+		return err
+	}
+	return s.syncTripBookingsChecklistForFlight(ctx, fresh)
+}
+
 func (s *Service) AddFlight(ctx context.Context, item Flight) error {
-	return s.withRepoTransaction(ctx, func(txs *Service) error {
-		if item.TripID == "" || strings.TrimSpace(item.DepartAirport) == "" || strings.TrimSpace(item.ArriveAirport) == "" {
-			return errors.New("trip and airport details are required")
-		}
-		if item.CostCents == 0 && item.Cost != 0 {
-			item.CostCents = MoneyToCentsFloat(item.Cost)
-		}
-		SetFlightCostCents(&item, item.CostCents)
-		trip, err := txs.repo.GetTrip(ctx, item.TripID)
-		if err != nil {
-			return err
-		}
-		if trip.IsArchived {
-			return errors.New("archived trips are read-only")
-		}
-		if err := txs.repo.AddFlight(ctx, item); err != nil {
-			return err
-		}
-		return txs.SyncExpenseForFlight(ctx, item)
-	})
+	if err := s.withRepoTransaction(ctx, func(txs *Service) error { return s.addFlightInTransaction(ctx, txs, item) }); err != nil {
+		return err
+	}
+	return s.postCommitSyncTripBookingsChecklistForFlightID(ctx, item.TripID, item.ID)
+}
+
+func (s *Service) updateFlightInTransaction(ctx context.Context, txs *Service, item Flight) error {
+	if item.TripID == "" || item.ID == "" || strings.TrimSpace(item.DepartAirport) == "" || strings.TrimSpace(item.ArriveAirport) == "" {
+		return errors.New("invalid flight entry")
+	}
+	if item.CostCents == 0 && item.Cost != 0 {
+		item.CostCents = MoneyToCentsFloat(item.Cost)
+	}
+	SetFlightCostCents(&item, item.CostCents)
+	if item.EnforceOptimisticLock && item.ExpectedUpdatedAt.IsZero() {
+		return errors.New("this flight was opened from an older view. Refresh the page and try again.")
+	}
+	trip, err := txs.repo.GetTrip(ctx, item.TripID)
+	if err != nil {
+		return err
+	}
+	if trip.IsArchived {
+		return errors.New("archived trips are read-only")
+	}
+	if err := txs.repo.UpdateFlight(ctx, item); err != nil {
+		return err
+	}
+	return txs.SyncExpenseForFlight(ctx, item)
 }
 
 func (s *Service) UpdateFlight(ctx context.Context, item Flight) error {
-	return s.withRepoTransaction(ctx, func(txs *Service) error {
-		if item.TripID == "" || item.ID == "" || strings.TrimSpace(item.DepartAirport) == "" || strings.TrimSpace(item.ArriveAirport) == "" {
-			return errors.New("invalid flight entry")
-		}
-		if item.CostCents == 0 && item.Cost != 0 {
-			item.CostCents = MoneyToCentsFloat(item.Cost)
-		}
-		SetFlightCostCents(&item, item.CostCents)
-		if item.EnforceOptimisticLock && item.ExpectedUpdatedAt.IsZero() {
-			return errors.New("this flight was opened from an older view. Refresh the page and try again.")
-		}
-		trip, err := txs.repo.GetTrip(ctx, item.TripID)
-		if err != nil {
-			return err
-		}
-		if trip.IsArchived {
-			return errors.New("archived trips are read-only")
-		}
-		if err := txs.repo.UpdateFlight(ctx, item); err != nil {
-			return err
-		}
-		return txs.SyncExpenseForFlight(ctx, item)
-	})
+	if err := s.withRepoTransaction(ctx, func(txs *Service) error { return s.updateFlightInTransaction(ctx, txs, item) }); err != nil {
+		return err
+	}
+	return s.postCommitSyncTripBookingsChecklistForFlightID(ctx, item.TripID, item.ID)
 }
 
 func (s *Service) GetFlight(ctx context.Context, tripID, flightID string) (Flight, error) {
@@ -2165,6 +2271,9 @@ func (s *Service) DeleteFlight(ctx context.Context, tripID, flightID string) err
 			if err := txs.repo.DeleteExpense(ctx, tripID, flight.ExpenseID); err != nil {
 				return err
 			}
+		}
+		if flight.TripBookingsChecklistItemID != "" {
+			_ = txs.repo.DeleteChecklistItem(ctx, flight.TripBookingsChecklistItemID)
 		}
 		return txs.repo.DeleteFlight(ctx, tripID, flightID)
 	})
@@ -2563,6 +2672,21 @@ func (s *Service) GetAppSettings(ctx context.Context) (AppSettings, error) {
 		settings.MaxUploadFileSizeMB = 5
 	}
 	return settings, nil
+}
+
+// SearchAirportsByKeyword returns cached airport rows matching the search string.
+func (s *Service) SearchAirportsByKeyword(ctx context.Context, query string, limit int) ([]Airport, error) {
+	return s.repo.SearchAirportsByKeyword(ctx, query, limit)
+}
+
+// GetAirportsByIATACodes loads airport cache rows for the given IATA codes.
+func (s *Service) GetAirportsByIATACodes(ctx context.Context, codes []string) (map[string]Airport, error) {
+	return s.repo.GetAirportsByIATACodes(ctx, codes)
+}
+
+// UpsertAirport stores or updates a row in the local airports cache.
+func (s *Service) UpsertAirport(ctx context.Context, a Airport) error {
+	return s.repo.UpsertAirport(ctx, a)
 }
 
 func (s *Service) SaveAppSettings(ctx context.Context, settings AppSettings) error {

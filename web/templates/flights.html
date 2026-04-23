@@ -15,7 +15,7 @@
   <script defer src="/static/app.js?v={{remiStaticAssetV}}"></script>
 </head>
 <body>
-  <main class="app-shell trip-fab-flyout-root" aria-label="{{.Details.Trip.FlightsSectionTitle}}" data-long-press-sheet-root data-location-suggest-url="/api/location/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
+  <main class="app-shell trip-fab-flyout-root" aria-label="{{.Details.Trip.FlightsSectionTitle}}" data-long-press-sheet-root data-location-suggest-url="/api/location/suggest" data-flight-airport-suggest-url="/api/flight-airports/suggest" data-flight-airline-suggest-url="/api/flight-airlines/suggest" data-distance-unit="{{effectiveDistanceUnit .Details.Trip .Settings}}" data-max-upload-file-size-mb="{{if gt .Settings.MaxUploadFileSizeMB 0}}{{.Settings.MaxUploadFileSizeMB}}{{else}}5{{end}}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Go to dashboard">
         <div class="brand-logo">R</div>
@@ -74,12 +74,15 @@
           <p class="muted">Trip is archived. Flight entries are disabled.</p>
           {{else}}
           <form method="post" action="/trips/{{.Details.Trip.ID}}/flights" class="form-grid flight-form-grid" enctype="multipart/form-data" data-ajax-submit data-ajax-reload-on-success data-toast-message="{{.Details.Trip.FlightsSectionTitle}} booking saved.">
-            <label class="full">Airline<input type="text" name="flight_name" placeholder="e.g. Philippine Airlines" required></label>
+            <label class="full">Airline<input type="text" name="flight_name" placeholder="Search airline name or IATA code" required data-flight-airline-autocomplete autocomplete="off"></label>
             <label class="full">Flight Number<input type="text" name="flight_number" placeholder="e.g. PR 2781"></label>
-            <label class="full">Departure Airport<input type="text" name="depart_airport" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
+            <label class="full">Departure Airport<input type="text" name="depart_airport" placeholder="Search by city or IATA code" required data-flight-airport-autocomplete autocomplete="off"></label>
+            <input type="hidden" name="depart_airport_iata" value="">
             <label class="full">Departure Date & Time{{template "remiDateTimeField" (dict "name" "depart_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
-            <label class="full">Arrival Airport<input type="text" name="arrive_airport" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
+            <label class="full">Arrival Airport<input type="text" name="arrive_airport" placeholder="Search by city or IATA code" required data-flight-airport-autocomplete autocomplete="off"></label>
+            <input type="hidden" name="arrive_airport_iata" value="">
             <label class="full">Arrival Date & Time{{template "remiDateTimeField" (dict "name" "arrive_at" "value" "" "min" (printf "%sT00:00" .Details.Trip.StartDate) "max" (printf "%sT23:59" .Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY .Details.Trip .Settings) "time24h" (effectiveUITimeIs24h .Details.Trip) "required" true)}}</label>
+            {{template "remiBookingStatusField" (dict "name" "booking_status" "value" "to_be_done")}}
             <label class="full">Booking Reference<input type="text" name="booking_confirmation" placeholder="e.g. FLT-1234"></label>
             <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" placeholder="0.00"></label>
             <label class="full">Boarding Pass / Ticket Attachment<input type="file" name="flight_document" accept=".pdf,.doc,.docx,image/*"></label>
@@ -142,17 +145,26 @@
                       </div>
                     </div>
                     <div class="flight-meta-grid">
-                      <div><span class="material-symbols-outlined" aria-hidden="true">flight_takeoff</span><div class="flight-airport-col"><div class="flight-airport-line"><strong>{{locationLineBeforeComma .DepartAirport}}</strong>{{with googleMapsSearchURL 0 0 .DepartAirport}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open depart airport in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings .DepartAt}}</small></div></div>
-                      <div><span class="material-symbols-outlined" aria-hidden="true">flight_land</span><div class="flight-airport-col"><div class="flight-airport-line"><strong>{{locationLineBeforeComma .ArriveAirport}}</strong>{{with googleMapsSearchURL 0 0 .ArriveAirport}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open arrive airport in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings .ArriveAt}}</small></div></div>
-                      {{if .BookingConfirmation}}
-                      <div><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Confirmation</small></div></div>
+                      {{$route := flightRouteIATALine .}}
+                      {{if $route}}
+                      <div class="full flight-iata-summary" style="grid-column:1/-1">
+                        <p class="flight-iata-route"><strong>{{$route}}</strong></p>
+                      </div>
                       {{end}}
-                      {{if .DocumentPath}}
-                      <div><span class="material-symbols-outlined" aria-hidden="true">description</span><div><a class="flight-doc-link" href="{{.DocumentPath}}" target="_blank" rel="noreferrer" title="Open flight attachment in a new tab" aria-label="Open flight attachment for {{if .FlightName}}{{.FlightName}}{{else}}this flight{{end}}">Open Attachment</a><small>View Attachment</small></div></div>
-                      {{end}}
-                      {{if .Notes}}
-                      <div class="flight-meta-notes"><span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span><div><strong>{{.Notes}}</strong><small>Notes</small></div></div>
-                      {{end}}
+                      <div><span class="material-symbols-outlined" aria-hidden="true">flight_takeoff</span><div class="flight-airport-col"><div class="flight-airport-line"><strong>{{flightAirportHeadline .DepartAirport .DepartAirportIATA $.AirportByIATA}}</strong>{{with googleMapsSearchURL 0 0 .DepartAirport}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open depart airport in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings .DepartAt}}</small></div></div>
+                      <div><span class="material-symbols-outlined" aria-hidden="true">flight_land</span><div class="flight-airport-col"><div class="flight-airport-line"><strong>{{flightAirportHeadline .ArriveAirport .ArriveAirportIATA $.AirportByIATA}}</strong>{{with googleMapsSearchURL 0 0 .ArriveAirport}} <a class="itinerary-inline-map-link" href="{{.}}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open arrive airport in Google Maps"><span class="gmaps-pin-icon" aria-hidden="true"></span></a>{{end}}</div><small>{{formatTripDateTime $.Details.Trip $.Settings .ArriveAt}}</small></div></div>
+                      <div class="remi-flight-booking-meta-grid">
+                        <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--status"><span class="material-symbols-outlined" aria-hidden="true">task_alt</span><div><strong>{{bookingStatusLabel .BookingStatus}}</strong><small>Booking status</small></div></div>
+                        {{if .BookingConfirmation}}
+                        <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--ref"><span class="material-symbols-outlined" aria-hidden="true">confirmation_number</span><div><strong>{{.BookingConfirmation}}</strong><small>Booking Confirmation</small></div></div>
+                        {{end}}
+                        {{if .DocumentPath}}
+                        <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--attach"><span class="material-symbols-outlined" aria-hidden="true">description</span><div><a class="flight-doc-link" href="{{.DocumentPath}}" target="_blank" rel="noreferrer" title="Open flight attachment in a new tab" aria-label="Open flight attachment for {{if .FlightName}}{{.FlightName}}{{else}}this flight{{end}}">Open Attachment</a><small>View Attachment</small></div></div>
+                        {{end}}
+                        {{if .Notes}}
+                        <div class="remi-flight-booking-meta-cell remi-flight-booking-meta-cell--notes flight-meta-notes"><span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span><div><strong>{{.Notes}}</strong><small>Notes</small></div></div>
+                        {{end}}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -163,16 +175,18 @@
                 <div class="full flight-section-head flight-edit-form-head">
                   <div class="flight-section-icon" aria-hidden="true"><span class="material-symbols-outlined">edit_square</span></div>
                   <div class="flight-section-head-text">
-                    <h3>Edit Flight</h3>
                     <p class="flight-edit-subtitle muted">Update details and they will sync with your itinerary and expenses.</p>
                   </div>
                 </div>
-                <label class="full">Airline<input type="text" name="flight_name" value="{{.FlightName}}" placeholder="e.g. Philippine Airlines" required></label>
+                <label class="full">Airline<input type="text" name="flight_name" value="{{.FlightName}}" placeholder="Search airline name or IATA code" required data-flight-airline-autocomplete autocomplete="off"></label>
                 <label class="full">Flight Number<input type="text" name="flight_number" value="{{.FlightNumber}}" placeholder="e.g. PR 2781"></label>
-                <label class="full">Departure Airport<input type="text" name="depart_airport" value="{{.DepartAirport}}" placeholder="e.g. MNL - NAIA Terminal 2" required data-location-autocomplete></label>
+                <label class="full">Departure Airport<input type="text" name="depart_airport" value="{{flightAirportHeadline .DepartAirport .DepartAirportIATA $.AirportByIATA}}" placeholder="Search by city or IATA code" required data-flight-airport-autocomplete autocomplete="off"></label>
+                <input type="hidden" name="depart_airport_iata" value="{{.DepartAirportIATA}}">
                 <label class="full">Departure Date & Time{{template "remiDateTimeField" (dict "name" "depart_at" "value" .DepartAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
-                <label class="full">Arrival Airport<input type="text" name="arrive_airport" value="{{.ArriveAirport}}" placeholder="e.g. CEB - Mactan Cebu" required data-location-autocomplete></label>
+                <label class="full">Arrival Airport<input type="text" name="arrive_airport" value="{{flightAirportHeadline .ArriveAirport .ArriveAirportIATA $.AirportByIATA}}" placeholder="Search by city or IATA code" required data-flight-airport-autocomplete autocomplete="off"></label>
+                <input type="hidden" name="arrive_airport_iata" value="{{.ArriveAirportIATA}}">
                 <label class="full">Arrival Date & Time{{template "remiDateTimeField" (dict "name" "arrive_at" "value" .ArriveAt "min" (printf "%sT00:00" $.Details.Trip.StartDate) "max" (printf "%sT23:59" $.Details.Trip.EndDate) "mdy" (effectiveUIDateIsMDY $.Details.Trip $.Settings) "time24h" (effectiveUITimeIs24h $.Details.Trip) "required" true)}}</label>
+                {{template "remiBookingStatusField" (dict "name" "booking_status" "value" .BookingStatus)}}
                 <label class="full">Booking Reference<input type="text" name="booking_confirmation" value="{{.BookingConfirmation}}" placeholder="e.g. FLT-1234"></label>
                 <label class="full">Total Cost<input type="number" step="0.01" min="0" name="cost" value="{{printf "%.2f" .Cost}}" placeholder="0.00"></label>
                 <input type="hidden" name="current_document_path" value="{{.DocumentPath}}">

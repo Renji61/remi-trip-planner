@@ -385,7 +385,11 @@ func (s *Service) syncApplyItinerary(ctx context.Context, tripID string, oper st
 		} else {
 			SetItineraryEstCostFloat(&item, p.EstCost)
 		}
-		return s.AddItineraryItem(ctx, item)
+		if err := s.AddItineraryItem(ctx, item); err != nil {
+			return err
+		}
+		s.ScheduleStopWeatherPrefetchForNewPlainStop(tripID, id, p.DayNumber)
+		return nil
 	case "update":
 		id := strings.TrimSpace(op.EntityID)
 		if id == "" {

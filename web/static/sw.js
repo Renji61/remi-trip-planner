@@ -1,4 +1,4 @@
-const CACHE = "remi-trip-planner-v18";
+const CACHE = "remi-trip-planner-v26";
 // Do not precache "/" — HTML must always come from the network so UI updates (templates) are not stuck on an old install snapshot.
 const CORE_ASSETS = [
   "/static/app.css",
@@ -61,6 +61,22 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(() => caches.match(event.request))
     );
+    return;
+  }
+
+  // Live autocomplete / geodata: never cache-first — stale empty JSON was breaking airport & location picks.
+  if (
+    reqURL.pathname.startsWith("/api/location/") ||
+    reqURL.pathname.startsWith("/api/flight-airports/") ||
+    reqURL.pathname.startsWith("/api/flight-airlines/")
+  ) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  // Stop weather JSON must always be fresh (3h server cache); avoid SW caching stale responses.
+  if (/\/itinerary\/[^/]+\/weather$/.test(reqURL.pathname)) {
+    event.respondWith(fetch(event.request));
     return;
   }
 
