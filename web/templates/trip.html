@@ -188,7 +188,6 @@
                   {{if not $.Details.Trip.IsArchived}}
                   <span class="day-label-inline-controls">
                     <input type="text" name="day_label" form="day-label-form-{{$group.DayNumber}}" value="{{$group.DayDescription}}" placeholder="Add day description..." class="day-label-inline-input" data-day-label-input data-day-summary-control autocomplete="off">
-                    <button type="submit" form="day-label-form-{{$group.DayNumber}}" class="day-label-inline-save-btn" data-day-summary-control>Save</button>
                   </span>
                   {{else if $group.DayDescription}}
                   <em class="day-group-summary-note">{{$group.DayDescription}}</em>

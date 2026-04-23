@@ -10,6 +10,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Richer conflict handling for sync clients beyond optimistic locking on selected entities.
 
+## [1.50.4] - 2026-04-23
+
+### Added
+
+- **OpenWeatherMap key UX:** Site Settings now shows a masked saved-key row with a one-click **copy to clipboard** action for faster credential rotation across environments.
+
+### Changed
+
+- **Itinerary day labels:** inline day-description edits now **auto-save** (debounced while typing, immediate on blur/Enter), and the legacy inline **Save** button is removed from the trip day header flow.
+- **Trip calendar (week view):** all-day accommodation and rental entries now render as **continuous multi-day spans** instead of repeated daily chips, with drop targets preserved per day.
+- **Trip layout polish:** refined itinerary header alignment and booking-card text wrapping on smaller widths to keep timeline controls and booking metadata readable.
+
+### Notes for self-hosters
+
+- **Update notification:** publish GitHub Release **`v1.50.4`** (and the **GHCR** image tag **`v1.50.4`** when CI builds) so **About** and **`GET /api/about/update-check`** report an update for installs on **1.50.3** or older.
+
 ## [1.50.3] - 2026-04-23
 
 ### Added
@@ -460,7 +476,8 @@ First public release: self-hosted trip planner with SQLite, SSR UI, optional Doc
 - No authentication layer in this release — deploy behind a private network, VPN, or reverse proxy auth if exposed to the internet.
 - Do not commit `.env` files or production databases; `data/` and uploads are gitignored by default.
 
-[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.3...HEAD
+[Unreleased]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.4...HEAD
+[1.50.4]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.3...v1.50.4
 [1.50.3]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.2...v1.50.3
 [1.50.2]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.1...v1.50.2
 [1.50.1]: https://github.com/Renji61/remi-trip-planner/compare/v1.50.0...v1.50.1

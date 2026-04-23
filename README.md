@@ -60,7 +60,8 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 - **Day-grouped** stops with titles, locations, notes, optional cost and times; draft trips without a valid start/end window can still plan by calendar date.
 - **Commute / travel legs** between two itinerary items on the **same day** (`item_kind=commute`): transport mode, ordering, sidebar + timeline + calendar, **ICS** feed entries, and optional **Google Maps directions** when both endpoints have coordinates (`POST /trips/{id}/itinerary/commute`).
 - **Day header map shortcut:** open all non-commute places for a day as a single Google Maps route/search in itinerary order.
-- **Per-day descriptions** (labels) editable inline on the trip page.
+- **Per-day descriptions** (labels) editable inline on the trip page with debounce + blur auto-save (no separate Save click required).
+- **Week calendar all-day bands:** consecutive stay/renting all-day entries render as continuous spans instead of repeated single-day chips, while remaining drag/drop aware.
 - **Stop weather (optional):** with an **OpenWeatherMap** API key in site settings, plain itinerary stops with coordinates can show a compact **same-day forecast** on the trip page when the day is within the forecast window.
 - **Interactive map** (Leaflet + OpenStreetMap by default, or **Google Maps** when an API key is set) with markers, optional **day filters**, and travel hints between stops; editing a stop **updates stored coordinates** and map pins after save.
 - **Search** across itinerary text from the trip header.
@@ -116,7 +117,7 @@ A **self-hosted** trip planner: one binary (or container), **SQLite** storage, a
 ### App-wide settings
 
 - App title, default currency, **default map location** (place search with short name stored; Tokyo fallback), map zoom, theme (light / dark / system), location lookup, dashboard presentation options — via **Settings** and quick theme POST from the trip shell.
-- Optional **AirLabs** and **OpenWeatherMap** API keys (same key-edit UX as the Google Maps key) — stored **encrypted** when `REMI_SETTINGS_ENCRYPTION_KEY` is set on the server.
+- Optional **AirLabs** and **OpenWeatherMap** API keys (same key-edit UX as the Google Maps key, including masked display + quick copy for saved keys) — stored **encrypted** when `REMI_SETTINGS_ENCRYPTION_KEY` is set on the server.
 - **Desktop:** shared **account** dropdown (profile initial, **Profile**, **App settings**, **Log out**) on trip topbars and other app-shell pages for consistent navigation.
 
 ### Account export & privacy
@@ -234,7 +235,7 @@ go test ./...
 ## Docker & self-hosting
 
 **Official image (public):** `ghcr.io/renji61/remi-trip-planner:latest`  
-Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.3` (and other SemVer tags published by CI).
+Version pins: `ghcr.io/renji61/remi-trip-planner:v1.50.4` (and other SemVer tags published by CI).
 
 ### Quick start — homelab (no `.env`, no git)
 

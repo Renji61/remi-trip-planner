@@ -2957,7 +2957,9 @@ const initSiteSettingsOpenWeatherKeySection = (mapForm) => {
   const textInput = section.querySelector("[data-openweather-key-input]");
   const submitHidden = section.querySelector("[data-openweather-key-submit]");
   const clearCheckbox = section.querySelector("[data-openweather-clear-checkbox]");
-  const maskEl = section.querySelector("[data-openweather-key-masked]");
+  const maskEl =
+    section.querySelector("[data-openweather-key-mask]") ||
+    section.querySelector("[data-openweather-key-masked]");
   const validationEl = section.querySelector("[data-openweather-key-validation]");
   const hasSavedCardEl = savedCard instanceof HTMLElement;
 
@@ -3101,6 +3103,22 @@ const initSiteSettingsOpenWeatherKeySection = (mapForm) => {
       if (deleteBtn && section.contains(deleteBtn)) {
         e.preventDefault();
         openDeleteConfirm();
+        return;
+      }
+      const copyBtn = t.closest("[data-openweather-key-copy]");
+      if (copyBtn && section.contains(copyBtn)) {
+        e.preventDefault();
+        const toCopy = savedKeyForCopy.trim();
+        if (!toCopy) return;
+        void (async () => {
+          const toast = typeof window.remiShowToast === "function" ? window.remiShowToast : null;
+          const ok = await copyTextToClipboard(toCopy);
+          if (ok) {
+            toast?.("OpenWeatherMap API key copied.");
+          } else {
+            toast?.("Could not copy to clipboard.");
+          }
+        })();
       }
     },
     true
@@ -4416,8 +4434,20 @@ window.addEventListener("load", () => {
             // Secondary leg is rendered through the primary card as a spanning duration.
             return null;
           }
+          let calTitle = title;
+          if (category === "flight" && form) {
+            const iata3 = (s) => {
+              const t = String(s || "").trim().toUpperCase();
+              return /^[A-Z0-9]{3}$/.test(t) ? t : "";
+            };
+            const depI = iata3(form.querySelector("input[name='depart_airport_iata']")?.value);
+            const arrI = iata3(form.querySelector("input[name='arrive_airport_iata']")?.value);
+            if (depI && arrI) calTitle = `Flight from ${depI} to ${arrI}`;
+            else if (depI) calTitle = `Flight from ${depI}`;
+            else if (arrI) calTitle = `Flight to ${arrI}`;
+          }
           return {
-            itemID, date, startMin, endMin, form, category, markerKind, title,
+            itemID, date, startMin, endMin, form, category, markerKind, title: calTitle,
             role, row,
             pairedSpan: Boolean(bookingWindow),
             pairedStartField: bookingWindow?.startField || "",
@@ -4428,12 +4458,171 @@ window.addEventListener("load", () => {
         }).filter((e) => e && e.itemID && e.date && e.form);
       const expandRenderableEntries = (baseEntries) => {
         const out = [];
+        const accPropertyNameFromForm = (f) => {
+          const n = f?.querySelector("input[name='name']")?.value;
+          return String(n || "").trim() || "Accommodation";
+        };
         baseEntries.forEach((e) => {
           if (!e.pairedSpan || !e.pairedStartAt || !e.pairedEndAt) {
             out.push({ ...e, sourceItemID: e.itemID, segmentStartAt: new Date(`${e.date}T${toTime(e.startMin)}`) });
             return;
           }
-          /* Overnight flights and multi-day stays/rentals: one calendar block per local day (00:00–24:00 clip). */
+          /* Accommodation: all-day "Stay" per night + explicit 1h check-in / check-out blocks (Today / Week calendar). */
+          if (e.category === "accommodation" && e.role === "checkin") {
+            const prop = accPropertyNameFromForm(e.form);
+            const clipStart = new Date(Math.max(e.pairedStartAt.getTime(), startDate.getTime()));
+            const clipEnd = new Date(Math.min(e.pairedEndAt.getTime(), endDate.getTime() + 24 * 60 * 60000));
+            const firstStayDay = fmtDate(clipStart);
+            const lastStayDay = fmtDate(clipEnd);
+            const walk = new Date(`${firstStayDay}T00:00:00`);
+            const walkEnd = new Date(`${lastStayDay}T00:00:00`);
+            while (walk <= walkEnd) {
+              const key = fmtDate(walk);
+              if (key >= tripStartRaw && key <= tripEndRaw) {
+                out.push({
+                  ...e,
+                  itemID: `${e.itemID}::stay::${key}`,
+                  sourceItemID: e.itemID,
+                  date: key,
+                  startMin: 0,
+                  endMin: DAY_MINUTES,
+                  title: `Stay: ${prop}`,
+                  pairedSpan: false,
+                  pairedStartAt: null,
+                  pairedEndAt: null,
+                  pairedStartField: "",
+                  pairedEndField: "",
+                  calAccLeg: "stay",
+                  segmentStartAt: new Date(walk)
+                });
+              }
+              walk.setDate(walk.getDate() + 1);
+            }
+            const cinDay = fmtDate(e.pairedStartAt);
+            if (cinDay >= tripStartRaw && cinDay <= tripEndRaw) {
+              const sm = e.pairedStartAt.getHours() * 60 + e.pairedStartAt.getMinutes();
+              const em = Math.min(DAY_MINUTES, sm + 60);
+              out.push({
+                ...e,
+                itemID: `${e.itemID}::cal-checkin`,
+                sourceItemID: e.itemID,
+                date: cinDay,
+                startMin: sm,
+                endMin: Math.max(sm + 15, em),
+                title: `Check-in: ${prop}`,
+                pairedSpan: false,
+                pairedStartAt: null,
+                pairedEndAt: null,
+                pairedStartField: "",
+                pairedEndField: "",
+                calAccLeg: "checkin",
+                segmentStartAt: new Date(e.pairedStartAt)
+              });
+            }
+            const coutDay = fmtDate(e.pairedEndAt);
+            if (coutDay >= tripStartRaw && coutDay <= tripEndRaw) {
+              const endM = e.pairedEndAt.getHours() * 60 + e.pairedEndAt.getMinutes();
+              const sm = Math.max(0, endM - 60);
+              out.push({
+                ...e,
+                itemID: `${e.itemID}::cal-checkout`,
+                sourceItemID: e.itemID,
+                date: coutDay,
+                startMin: sm,
+                endMin: Math.max(sm + 15, endM),
+                title: `Check-out: ${prop}`,
+                pairedSpan: false,
+                pairedStartAt: null,
+                pairedEndAt: null,
+                pairedStartField: "",
+                pairedEndField: "",
+                calAccLeg: "checkout",
+                segmentStartAt: new Date(`${coutDay}T${toTime(sm)}`)
+              });
+            }
+            return;
+          }
+          /* Vehicle rental: 1h pick-up / drop-off; all-day "Renting" only when pick-up and drop-off fall on different calendar days. */
+          if (e.category === "vehicle" && e.role === "pickup") {
+            const veh = String(e.form?.querySelector("input[name='vehicle_detail']")?.value || "").trim() || "Vehicle rental";
+            const clipStart = new Date(Math.max(e.pairedStartAt.getTime(), startDate.getTime()));
+            const clipEnd = new Date(Math.min(e.pairedEndAt.getTime(), endDate.getTime() + 24 * 60 * 60000));
+            const pickupDay = fmtDate(e.pairedStartAt);
+            const dropoffDay = fmtDate(e.pairedEndAt);
+            const multiCalendarDay = pickupDay !== dropoffDay;
+            if (multiCalendarDay) {
+              const firstR = fmtDate(clipStart);
+              const lastR = fmtDate(clipEnd);
+              const walk = new Date(`${firstR}T00:00:00`);
+              const walkEnd = new Date(`${lastR}T00:00:00`);
+              while (walk <= walkEnd) {
+                const key = fmtDate(walk);
+                if (key >= tripStartRaw && key <= tripEndRaw) {
+                  out.push({
+                    ...e,
+                    itemID: `${e.itemID}::renting::${key}`,
+                    sourceItemID: e.itemID,
+                    date: key,
+                    startMin: 0,
+                    endMin: DAY_MINUTES,
+                    title: `Renting: ${veh}`,
+                    pairedSpan: false,
+                    pairedStartAt: null,
+                    pairedEndAt: null,
+                    pairedStartField: "",
+                    pairedEndField: "",
+                    calVehLeg: "renting",
+                    segmentStartAt: new Date(walk)
+                  });
+                }
+                walk.setDate(walk.getDate() + 1);
+              }
+            }
+            const puDay = fmtDate(e.pairedStartAt);
+            if (puDay >= tripStartRaw && puDay <= tripEndRaw) {
+              const sm = e.pairedStartAt.getHours() * 60 + e.pairedStartAt.getMinutes();
+              const em = Math.min(DAY_MINUTES, sm + 60);
+              out.push({
+                ...e,
+                itemID: `${e.itemID}::cal-pickup`,
+                sourceItemID: e.itemID,
+                date: puDay,
+                startMin: sm,
+                endMin: Math.max(sm + 15, em),
+                title: `Pick-up: ${veh}`,
+                pairedSpan: false,
+                pairedStartAt: null,
+                pairedEndAt: null,
+                pairedStartField: "",
+                pairedEndField: "",
+                calVehLeg: "pickup",
+                segmentStartAt: new Date(e.pairedStartAt)
+              });
+            }
+            const doDay = fmtDate(e.pairedEndAt);
+            if (doDay >= tripStartRaw && doDay <= tripEndRaw) {
+              const endM = e.pairedEndAt.getHours() * 60 + e.pairedEndAt.getMinutes();
+              const sm = Math.max(0, endM - 60);
+              out.push({
+                ...e,
+                itemID: `${e.itemID}::cal-dropoff`,
+                sourceItemID: e.itemID,
+                date: doDay,
+                startMin: sm,
+                endMin: Math.max(sm + 15, endM),
+                title: `Drop-off: ${veh}`,
+                pairedSpan: false,
+                pairedStartAt: null,
+                pairedEndAt: null,
+                pairedStartField: "",
+                pairedEndField: "",
+                calVehLeg: "dropoff",
+                segmentStartAt: new Date(`${doDay}T${toTime(sm)}`)
+              });
+            }
+            return;
+          }
+          /* Overnight flights: one calendar block per local day (00:00–24:00 clip). */
           const clipStart = new Date(Math.max(e.pairedStartAt.getTime(), startDate.getTime()));
           const clipEnd = new Date(Math.min(e.pairedEndAt.getTime(), endDate.getTime() + 24 * 60 * 60000));
           const cur = new Date(`${fmtDate(clipStart)}T00:00:00`);
@@ -4465,6 +4654,18 @@ window.addEventListener("load", () => {
         return out;
       };
       const pairedSpanResizeFlags = (e) => {
+        if (e.calVehLeg === "renting") {
+          return { allowResizeStart: false, allowResizeEnd: false };
+        }
+        if (e.calVehLeg === "pickup" || e.calVehLeg === "dropoff") {
+          return { allowResizeStart: true, allowResizeEnd: true };
+        }
+        if (e.calAccLeg === "stay") {
+          return { allowResizeStart: false, allowResizeEnd: false };
+        }
+        if (e.calAccLeg === "checkin" || e.calAccLeg === "checkout") {
+          return { allowResizeStart: true, allowResizeEnd: true };
+        }
         if (!e.pairedSpan || !e.pairedStartAt || !e.pairedEndAt) {
           return { allowResizeStart: true, allowResizeEnd: true };
         }
@@ -4495,6 +4696,8 @@ window.addEventListener("load", () => {
           (e.endMin >= DAY_MINUTES - 1 || e.endMin === DAY_MINUTES);
         const alldayDragMovable = (e) => {
           if (!e) return false;
+          if (e.calVehLeg === "renting") return false;
+          if (e.calAccLeg === "stay") return false;
           if (!isAllDayEvent(e)) return false;
           if (e.category === "stop" || e.category === "commute") {
             if (e.pairedSpan) return false;
@@ -4582,6 +4785,40 @@ window.addEventListener("load", () => {
         return "";
       };
       const applyResizeToForm = (entry, nextDate, nextStart, nextEnd, edge) => {
+        if (entry.calVehLeg === "renting") {
+          return;
+        }
+        if (entry.calVehLeg === "pickup") {
+          const startDT = new Date(`${nextDate}T${toTime(nextStart)}`);
+          if (!Number.isNaN(startDT.getTime())) {
+            setField(entry.form, "pick_up_at", toDateTimeLocal(startDT));
+          }
+          return;
+        }
+        if (entry.calVehLeg === "dropoff") {
+          const endDT = new Date(`${nextDate}T${toTime(nextEnd)}`);
+          if (!Number.isNaN(endDT.getTime())) {
+            setField(entry.form, "drop_off_at", toDateTimeLocal(endDT));
+          }
+          return;
+        }
+        if (entry.calAccLeg === "stay") {
+          return;
+        }
+        if (entry.calAccLeg === "checkin") {
+          const startDT = new Date(`${nextDate}T${toTime(nextStart)}`);
+          if (!Number.isNaN(startDT.getTime())) {
+            setField(entry.form, "check_in_at", toDateTimeLocal(startDT));
+          }
+          return;
+        }
+        if (entry.calAccLeg === "checkout") {
+          const endDT = new Date(`${nextDate}T${toTime(nextEnd)}`);
+          if (!Number.isNaN(endDT.getTime())) {
+            setField(entry.form, "check_out_at", toDateTimeLocal(endDT));
+          }
+          return;
+        }
         if (entry.category === "stop" || entry.category === "commute") {
           const startAtEl = entry.form.querySelector("input.remi-datetime-iso[name='start_at']");
           if (startAtEl instanceof HTMLInputElement) {
@@ -4900,10 +5137,13 @@ window.addEventListener("load", () => {
             .replace(/"/g, "&quot;")
             .replace(/</g, "&lt;")
             .replace(/\n/g, " ");
-        /** Calendar-only labels (Today / Week): shorten booking leg prefixes for card space. */
+        /** Calendar-only labels (Today / Week): shorten some booking prefixes; keep IATA flight lines and stay/check-in/out as authored. */
         const calendarEntryDisplayTitle = (raw) => {
           let t = String(raw || "").trim();
           if (!t) return t;
+          if (/^flight from\s+/i.test(t) || /^flight to\s+/i.test(t)) return t;
+          if (/^stay:\s*/i.test(t) || /^check-in:\s*/i.test(t) || /^check-out:\s*/i.test(t)) return t;
+          if (/^renting:\s*/i.test(t) || /^pick-up:\s*/i.test(t) || /^drop-off:\s*/i.test(t)) return t;
           const rep = (re, to) => {
             t = t.replace(re, to);
           };
@@ -4911,8 +5151,6 @@ window.addEventListener("load", () => {
           rep(/^Arrival:\s*/i, "Flight: ");
           rep(/^Pick Up:\s*/i, "Vehicle Rental: ");
           rep(/^Drop Off:\s*/i, "Vehicle Rental: ");
-          rep(/^Check-in:\s*/i, "Accommodation: ");
-          rep(/^Check-out:\s*/i, "Accommodation: ");
           return t.trim();
         };
         const calEntryIcon = (e) =>
@@ -4996,16 +5234,118 @@ window.addEventListener("load", () => {
         const timeTicks = Array.from({ length: 24 }, (_, h) =>
           `<span style="top:${h * 60 * pxm}px">${pad2(h)}:00</span>`
         ).join("");
-        const alldayCells = wDates
-          .map((d) => {
-            const key = fmtDate(d);
-            const dayEntries = entries.filter((e) => e.date === key);
-            const allday = dayEntries.filter((e) => isAllDayEvent(e));
-            const raw = renderAlldayChips(allday);
-            const has = Boolean(raw);
-            return `<div class="trip-itinerary-allday-cell${has ? " trip-itinerary-allday-cell--has" : ""}" data-itinerary-allday-date="${key}">${raw || '<span class="trip-itinerary-allday-empty" aria-hidden="true"></span>'}</div>`;
-          })
-          .join("");
+        const weekDateKeySet = new Set(wDates.map((d) => fmtDate(d)));
+        const buildWeekAlldayRowInner = () => {
+          const weekAllday = entries.filter((e) => isAllDayEvent(e) && weekDateKeySet.has(e.date));
+          const mergeKeyOf = (e) => {
+            if (e.calAccLeg === "stay") return `stay|${String(e.sourceItemID || e.itemID || "").trim()}`;
+            if (e.calVehLeg === "renting") return `rent|${String(e.sourceItemID || e.itemID || "").trim()}`;
+            return "";
+          };
+          const groups = new Map();
+          const solos = [];
+          weekAllday.forEach((e) => {
+            const mk = mergeKeyOf(e);
+            if (!mk) {
+              solos.push(e);
+              return;
+            }
+            if (!groups.has(mk)) groups.set(mk, []);
+            groups.get(mk).push(e);
+          });
+          const segments = [];
+          const pushSeg = (startIdx, endIdx, rep) => {
+            if (
+              typeof startIdx !== "number" ||
+              typeof endIdx !== "number" ||
+              startIdx < 0 ||
+              endIdx < 0 ||
+              startIdx >= visibleCols ||
+              endIdx >= visibleCols ||
+              startIdx > endIdx
+            ) {
+              return;
+            }
+            segments.push({ startIdx, endIdx, rep });
+          };
+          groups.forEach((list) => {
+            const byDate = new Map(list.map((ev) => [ev.date, ev]));
+            const days = [...byDate.keys()].sort();
+            let i = 0;
+            while (i < days.length) {
+              const startIso = days[i];
+              let j = i;
+              while (j + 1 < days.length) {
+                const a = toDate(days[j]);
+                const b = toDate(days[j + 1]);
+                if (!a || !b) break;
+                if (Math.round((b.getTime() - a.getTime()) / 86400000) !== 1) break;
+                j++;
+              }
+              const endIso = days[j];
+              const si = wDates.findIndex((d) => fmtDate(d) === startIso);
+              const ei = wDates.findIndex((d) => fmtDate(d) === endIso);
+              pushSeg(si, ei, byDate.get(startIso));
+              i = j + 1;
+            }
+          });
+          solos.forEach((e) => {
+            const si = wDates.findIndex((d) => fmtDate(d) === e.date);
+            pushSeg(si, si, e);
+          });
+          const segs = segments.filter((s) => s.rep);
+          segs.sort((a, b) => a.startIdx - b.startIdx || b.endIdx - b.startIdx - (a.endIdx - a.startIdx));
+          segs.forEach((seg) => {
+            let t = 0;
+            while (
+              segs.some(
+                (o) =>
+                  o !== seg &&
+                  typeof o.track === "number" &&
+                  o.track === t &&
+                  seg.startIdx <= o.endIdx &&
+                  o.startIdx <= seg.endIdx
+              )
+            ) {
+              t++;
+            }
+            seg.track = t;
+          });
+          const maxTrack = segs.reduce((m, s) => Math.max(m, typeof s.track === "number" ? s.track : 0), 0);
+          const BAR_H = 30;
+          const GAP = 5;
+          const TOP_PAD = 6;
+          const N = Math.max(1, visibleCols);
+          const colsHtml = wDates
+            .map((d) => {
+              const key = fmtDate(d);
+              return `<div class="trip-itinerary-allday-week-col" data-itinerary-allday-date="${key}"></div>`;
+            })
+            .join("");
+          const chipHtmlFor = (e) => {
+            const titlePlain = calendarEntryDisplayTitle(e.title);
+            const t = escapeCalEntryTitleHtml(titlePlain);
+            const tAttr = escapeCalEntryTitleAttr(titlePlain);
+            const dnd = alldayDragMovable(e) ? ' draggable="true" data-itinerary-allday-dnd="1"' : "";
+            return `<div class="trip-itinerary-allday-chip"${dnd} data-itinerary-drag-item="${e.itemID}" data-itinerary-allday-from="${e.date}" data-kind="${e.markerKind}" title="${tAttr}"><div class="trip-itinerary-allday-chip__stack"><div class="trip-itinerary-allday-chip__row"><span class="material-symbols-outlined trip-itinerary-allday-chip__ico" aria-hidden="true">${calEntryIcon(
+              e
+            )}</span><span class="trip-itinerary-allday-chip__text">${t}</span></div></div></div>`;
+          };
+          const barsHtml = segs
+            .map((seg) => {
+              const span = seg.endIdx - seg.startIdx + 1;
+              const leftPct = (seg.startIdx / N) * 100;
+              const widthPct = (span / N) * 100;
+              const topPx = TOP_PAD + seg.track * (BAR_H + GAP);
+              return `<div class="trip-itinerary-allday-week-bar" style="left:${leftPct}%;width:${widthPct}%;top:${topPx}px;height:${BAR_H}px">${chipHtmlFor(seg.rep)}</div>`;
+            })
+            .join("");
+          const stageMinH = TOP_PAD + (maxTrack + 1) * (BAR_H + GAP) + 4;
+          return `<div class="trip-itinerary-allday-week-stage trip-itinerary-allday-cell--has" style="grid-column:2 / span ${N};min-height:${stageMinH}px">
+            <div class="trip-itinerary-allday-week-cols">${colsHtml}</div>
+            <div class="trip-itinerary-allday-week-bars">${barsHtml}</div>
+          </div>`;
+        };
         const hasAnyAllday = wDates.some((d) => {
           const key = fmtDate(d);
           return entries.some((e) => e.date === key && isAllDayEvent(e));
@@ -5022,7 +5362,7 @@ window.addEventListener("load", () => {
         const alldayRow = hasAnyAllday
           ? `<div class="trip-itinerary-allday-row" style="grid-template-columns:56px repeat(${visibleCols}, ${colDef})" data-itinerary-allday-row>
             <div class="trip-itinerary-allday-gutter" role="rowheader">All day</div>
-            ${alldayCells}
+            ${buildWeekAlldayRowInner()}
           </div>`
           : "";
         weekView.innerHTML = `<section class="trip-itinerary-calendar-grid${compactCols ? " is-compact-cols" : ""}${hasAnyAllday ? " has-allday-row" : ""}">
@@ -5403,11 +5743,15 @@ window.addEventListener("load", () => {
         tripCalendarRoot.addEventListener("pointerup", (e) => finishPointerDrop(e, false), { passive: false });
         tripCalendarRoot.addEventListener("pointercancel", (e) => finishPointerDrop(e, true), { passive: true });
         const alldayDropTargetFromEvent = (e) =>
-          e?.target?.closest?.(".trip-itinerary-allday-cell, .trip-itinerary-day-allday[data-itinerary-allday-date]");
+          e?.target?.closest?.(
+            ".trip-itinerary-allday-cell, .trip-itinerary-allday-week-col[data-itinerary-allday-date], .trip-itinerary-day-allday[data-itinerary-allday-date]"
+          );
         const clearAlldayDropHighlights = () => {
           if (!tripCalendarRoot) return;
           tripCalendarRoot
-            .querySelectorAll(".trip-itinerary-allday-cell.is-drop-target, .trip-itinerary-day-allday.is-drop-target")
+            .querySelectorAll(
+              ".trip-itinerary-allday-cell.is-drop-target, .trip-itinerary-allday-week-col.is-drop-target, .trip-itinerary-day-allday.is-drop-target"
+            )
             .forEach((c) => c.classList.remove("is-drop-target"));
         };
         tripCalendarRoot.addEventListener("dragstart", (e) => {
@@ -5568,13 +5912,30 @@ window.addEventListener("load", () => {
           calendarQuickEditUiAbort = new AbortController();
           const quickEditUiSignal = calendarQuickEditUiAbort.signal;
 
-          if (quickEditTitle) quickEditTitle.textContent = entry.title ? ` ${entry.title}` : "";
+          const bookingId = row?.getAttribute("data-itinerary-booking-id") || "";
+          const mk = row?.getAttribute("data-marker-kind") || "";
+          const rawEntryTitle = String(entry.title || "").trim();
+          let modalTitle = rawEntryTitle;
+          if (mk === "stay") {
+            modalTitle =
+              rawEntryTitle
+                .replace(/^Stay:\s*/i, "")
+                .replace(/^Check-in:\s*/i, "")
+                .replace(/^Check-out:\s*/i, "")
+                .trim() || rawEntryTitle;
+          } else if (mk === "vehicle") {
+            modalTitle =
+              rawEntryTitle
+                .replace(/^Renting:\s*/i, "")
+                .replace(/^Pick-up:\s*/i, "")
+                .replace(/^Drop-off:\s*/i, "")
+                .trim() || rawEntryTitle;
+          }
+          if (quickEditTitle) quickEditTitle.textContent = modalTitle ? ` ${modalTitle}` : "";
           quickEditPreview.innerHTML = "";
           quickEditFormWrap.classList.add("hidden");
           quickEditPreview.classList.remove("hidden");
 
-          const bookingId = row?.getAttribute("data-itinerary-booking-id") || "";
-          const mk = row?.getAttribute("data-marker-kind") || "";
           const useCombinedPreview =
             Boolean(listPanel) &&
             bookingId &&
@@ -5583,217 +5944,16 @@ window.addEventListener("load", () => {
             const peers = Array.from(
               listPanel.querySelectorAll(`[data-itinerary-booking-id="${escapeAttrSelector(bookingId)}"]`)
             ).filter((r) => (r.getAttribute("data-marker-kind") || "") === mk);
+            /* Each leg row renders the full booking card; cloning every peer duplicates the UI. */
             if (peers.length > 1) {
               peers.sort((a, b) => legSortKey(a) - legSortKey(b));
-              const wrap = document.createElement("div");
-              wrap.className = "trip-itinerary-quick-edit__preview-combined";
-              const fieldLabelLc = (el) =>
-                el?.querySelector(".itinerary-label")?.textContent?.trim().toLowerCase() || "";
-              const takeField = (root, labelLc) => {
-                for (const f of root.querySelectorAll(".itinerary-field")) {
-                  if (fieldLabelLc(f) === labelLc) return f.cloneNode(true);
-                }
-                return null;
-              };
-              const mkLabeledField = (label, valueText) => {
-                const f = document.createElement("div");
-                f.className = "itinerary-field";
-                const lab = document.createElement("span");
-                lab.className = "itinerary-label";
-                lab.textContent = label;
-                const val = document.createElement("span");
-                val.className = "itinerary-value";
-                const t = (valueText || "").trim();
-                val.textContent = t || "—";
-                f.append(lab, val);
-                return f;
-              };
-              if (mk === "flight") {
-                const departRoot = peers[0]?.querySelector(".itinerary-item-view");
-                const arriveRoot = peers[1]?.querySelector(".itinerary-item-view");
-                const mainDepart = departRoot?.querySelector(".itinerary-vehicle-main");
-                const mainArrive = arriveRoot?.querySelector(".itinerary-vehicle-main");
-                if (departRoot && arriveRoot && mainDepart && mainArrive) {
-                  const merged = document.createElement("div");
-                  merged.className =
-                    "item-view itinerary-item-view itinerary-booking-view trip-itinerary-quick-edit__preview-flight-merged";
-                  const main = document.createElement("div");
-                  main.className = "itinerary-vehicle-main";
-                  let depTitle = mainDepart.querySelector(":scope > strong");
-                  if (!depTitle) {
-                    const h4 = mainDepart.querySelector(".itinerary-flight-card .flight-main-head h4");
-                    if (h4?.textContent?.trim()) {
-                      depTitle = document.createElement("strong");
-                      depTitle.textContent = h4.textContent.trim();
-                    }
-                  }
-                  if (depTitle) main.appendChild(depTitle.cloneNode(true));
-                  ["airline", "flight number", "booking reference", "departure airport", "flight departure"].forEach(
-                    (lab) => {
-                      const n = takeField(mainDepart, lab);
-                      if (n) main.appendChild(n);
-                    }
-                  );
-                  ["arrival airport", "flight arrival"].forEach((lab) => {
-                    const n = takeField(mainArrive, lab);
-                    if (n) main.appendChild(n);
-                  });
-                  ["total cost", "notes"].forEach((lab) => {
-                    const n = takeField(mainDepart, lab);
-                    if (n) main.appendChild(n);
-                  });
-                  const mediaFlight =
-                    departRoot.querySelector(".itinerary-entry-media-row") ||
-                    departRoot.querySelector(".itinerary-flight-card .vehicle-media");
-                  if (mediaFlight) main.appendChild(mediaFlight.cloneNode(true));
-                  const hint = mainDepart.querySelector(".itinerary-hint");
-                  if (hint) main.appendChild(hint.cloneNode(true));
-                  merged.appendChild(main);
-                  stripPreviewCloneIds(merged);
-                  wrap.appendChild(merged);
-                }
-              } else if (mk === "stay") {
-                const checkinRoot = peers[0]?.querySelector(".itinerary-item-view");
-                const checkoutRoot = peers[1]?.querySelector(".itinerary-item-view");
-                const checkinMain = checkinRoot?.querySelector(".itinerary-vehicle-main");
-                const checkoutMain = checkoutRoot?.querySelector(".itinerary-vehicle-main");
-                if (checkinRoot && checkoutRoot && checkinMain && checkoutMain) {
-                  const stripAccTitle = (t) =>
-                    String(t || "")
-                      .replace(/^Accommodation check-in:\s*/i, "")
-                      .replace(/^Accommodation check-out:\s*/i, "")
-                      .replace(/^Check-in:\s*/i, "")
-                      .replace(/^Check-out:\s*/i, "")
-                      .replace(/^Accommodation:\s*/i, "")
-                      .trim();
-                  const h4Stay = checkinMain.querySelector(".itinerary-lodging-card .vehicle-main-top h4");
-                  const rawStrong =
-                    checkinMain.querySelector(":scope > strong")?.textContent?.trim() ||
-                    h4Stay?.textContent?.trim() ||
-                    "";
-                  const hotelName = stripAccTitle(rawStrong) || stripAccTitle(entry.title || "");
-                  const merged = document.createElement("div");
-                  merged.className =
-                    "item-view itinerary-item-view itinerary-booking-view trip-itinerary-quick-edit__preview-flight-merged";
-                  const main = document.createElement("div");
-                  main.className = "itinerary-vehicle-main";
-                  const h = document.createElement("strong");
-                  h.textContent = hotelName ? `Accommodation: ${hotelName}` : rawStrong || "Accommodation";
-                  main.appendChild(h);
-                  const addr = takeField(checkinMain, "address");
-                  if (addr) main.appendChild(addr);
-                  const bookRef = takeField(checkinMain, "booking reference");
-                  if (bookRef) main.appendChild(bookRef);
-                  const cinDt = takeField(checkinMain, "check in date & time");
-                  if (cinDt) main.appendChild(cinDt);
-                  const coutDt = takeField(checkoutMain, "check out date & time");
-                  if (coutDt) main.appendChild(coutDt);
-                  const cost = takeField(checkinMain, "total cost");
-                  const notes = takeField(checkinMain, "notes");
-                  if (cost) main.appendChild(cost);
-                  if (notes) {
-                    if (cost) notes.classList.remove("itinerary-field--full");
-                    else notes.classList.add("itinerary-field--full");
-                    main.appendChild(notes);
-                  }
-                  const mediaStay =
-                    checkinRoot.querySelector(".itinerary-entry-media-row") ||
-                    checkinRoot.querySelector(".itinerary-lodging-card .vehicle-media");
-                  if (mediaStay) main.appendChild(mediaStay.cloneNode(true));
-                  const hint = checkinMain.querySelector(".itinerary-hint");
-                  if (hint) main.appendChild(hint.cloneNode(true));
-                  merged.appendChild(main);
-                  stripPreviewCloneIds(merged);
-                  wrap.appendChild(merged);
-                  if (quickEditTitle && hotelName) quickEditTitle.textContent = ` Accommodation: ${hotelName}`;
-                }
-              } else if (mk === "vehicle") {
-                const pickupRoot = peers[0]?.querySelector(".itinerary-item-view");
-                const dropoffRoot = peers[1]?.querySelector(".itinerary-item-view");
-                const pickupMain = pickupRoot?.querySelector(".itinerary-vehicle-main");
-                const dropoffMain = dropoffRoot?.querySelector(".itinerary-vehicle-main");
-                if (pickupRoot && dropoffRoot && pickupMain && dropoffMain) {
-                  const stripVehTitle = (t) =>
-                    String(t || "")
-                      .replace(/^Vehicle rental pick-up:\s*/i, "")
-                      .replace(/^Vehicle rental drop-off:\s*/i, "")
-                      .replace(/^Vehicle pick-up:\s*/i, "")
-                      .replace(/^Vehicle drop-off:\s*/i, "")
-                      .replace(/^Pick Up:\s*/i, "")
-                      .replace(/^Drop Off:\s*/i, "")
-                      .replace(/^Vehicle rental:\s*/i, "")
-                      .trim();
-                  const h4Veh = pickupMain.querySelector(".itinerary-vehicle-rental-card .vehicle-main-top h4");
-                  const rawStrong =
-                    pickupMain.querySelector(":scope > strong")?.textContent?.trim() ||
-                    h4Veh?.textContent?.trim() ||
-                    "";
-                  const vehicleName = stripVehTitle(rawStrong) || stripVehTitle(entry.title || "");
-                  const merged = document.createElement("div");
-                  merged.className =
-                    "item-view itinerary-item-view itinerary-booking-view trip-itinerary-quick-edit__preview-flight-merged";
-                  const main = document.createElement("div");
-                  main.className = "itinerary-vehicle-main";
-                  const h = document.createElement("strong");
-                  h.textContent = vehicleName ? `Vehicle rental: ${vehicleName}` : rawStrong || "Vehicle rental";
-                  main.appendChild(h);
-                  const bookRef = takeField(pickupMain, "booking reference");
-                  if (bookRef) main.appendChild(bookRef);
-                  let rental = takeField(pickupMain, "rental · insurance");
-                  if (!rental) rental = takeField(pickupMain, "rental");
-                  if (!rental) rental = takeField(pickupMain, "insurance");
-                  if (rental) main.appendChild(rental);
-                  const pickLoc = takeField(pickupMain, "pick up location");
-                  if (pickLoc) main.appendChild(pickLoc);
-                  const pickDt = takeField(pickupMain, "pick up date & time");
-                  if (pickDt) main.appendChild(pickDt);
-                  let dropLoc = takeField(dropoffMain, "drop off location");
-                  if (!dropLoc) dropLoc = takeField(dropoffMain, "pick up location");
-                  if (dropLoc) main.appendChild(dropLoc);
-                  const dropDt = takeField(dropoffMain, "drop off date & time");
-                  if (dropDt) main.appendChild(dropDt);
-                  const notesEl = takeField(pickupMain, "notes");
-                  if (notesEl) {
-                    const nVal = notesEl.querySelector(".itinerary-value")?.textContent?.trim() || "";
-                    const dupNote =
-                      vehicleName && nVal && nVal.toLowerCase() === vehicleName.toLowerCase();
-                    if (!dupNote) {
-                      notesEl.classList.add("itinerary-field--full");
-                      main.appendChild(notesEl);
-                    }
-                  }
-                  const mediaVeh =
-                    pickupRoot.querySelector(".itinerary-entry-media-row") ||
-                    pickupRoot.querySelector(".itinerary-vehicle-rental-card .vehicle-media");
-                  if (mediaVeh) main.appendChild(mediaVeh.cloneNode(true));
-                  const hint = pickupMain.querySelector(".itinerary-hint");
-                  if (hint) main.appendChild(hint.cloneNode(true));
-                  merged.appendChild(main);
-                  stripPreviewCloneIds(merged);
-                  wrap.appendChild(merged);
-                  if (quickEditTitle && vehicleName) quickEditTitle.textContent = ` Vehicle rental: ${vehicleName}`;
-                }
-              }
-              if (!wrap.firstChild) {
-                let bookingPreviewMediaShown = false;
-                peers.forEach((peer) => {
-                  const vr = peer.querySelector(".itinerary-item-view");
-                  if (!vr) return;
-                  const c = vr.cloneNode(true);
-                  stripPreviewCloneIds(c);
-                  const mediaRows = c.querySelectorAll(".itinerary-entry-media-row");
-                  if (mediaRows.length) {
-                    if (bookingPreviewMediaShown) {
-                      mediaRows.forEach((el) => el.remove());
-                    } else {
-                      bookingPreviewMediaShown = true;
-                    }
-                  }
-                  wrap.appendChild(c);
-                });
-              }
-              if (wrap.childNodes.length) {
-                quickEditPreview.appendChild(wrap);
+              for (const peer of peers) {
+                const vr = peer.querySelector(".itinerary-item-view");
+                if (!vr) continue;
+                const c = vr.cloneNode(true);
+                stripPreviewCloneIds(c);
+                quickEditPreview.appendChild(c);
+                break;
               }
             }
           }
@@ -10030,6 +10190,13 @@ window.addEventListener("load", () => {
         window.remiNotifyMobileSheetFormSaved?.(form);
       } catch (error) {
         optimisticMutation.rollback();
+        let dayLabelInput = form.querySelector("input[data-day-label-input]");
+        if (!dayLabelInput && form.id) {
+          dayLabelInput = document.querySelector(`input[data-day-label-input][form="${CSS.escape(form.id)}"]`);
+        }
+        if (dayLabelInput) {
+          delete dayLabelInput.dataset.lastSubmittedValue;
+        }
         const status = Number(error?.status || 0);
         const code = String(error?.code || "").toLowerCase();
         if (status === 409 || code === "conflict") {
@@ -10160,35 +10327,55 @@ window.addEventListener("load", () => {
     return input.closest("form");
   };
 
-  document.querySelectorAll(".day-label-inline-save-btn").forEach((btn) => {
-    btn.addEventListener("click", (event) => {
-      event.stopPropagation();
-    });
-  });
-
   document.querySelectorAll("input[data-day-label-input]").forEach((input) => {
     const form = formOwnerForField(input);
+    const AUTO_SAVE_DEBOUNCE_MS = 300;
+    let autoSaveTimer = 0;
+    const clearAutoSaveTimer = () => {
+      if (!autoSaveTimer) return;
+      window.clearTimeout(autoSaveTimer);
+      autoSaveTimer = 0;
+    };
+    const normalizedInitial = () => (input.dataset.initialValue || "").trim();
+    const normalizedCurrent = () => (input.value || "").trim();
     const setDirtyState = () => {
       if (!form) return;
-      const initial = (input.dataset.initialValue || "").trim();
-      const current = (input.value || "").trim();
-      form.classList.toggle("day-label-dirty", current !== initial);
+      form.classList.toggle("day-label-dirty", normalizedCurrent() !== normalizedInitial());
+    };
+    const submitIfDirty = () => {
+      if (!form) return;
+      const current = normalizedCurrent();
+      if (current === normalizedInitial()) return;
+      if (input.dataset.lastSubmittedValue === current) return;
+      input.dataset.lastSubmittedValue = current;
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+        return;
+      }
+      form.submit();
     };
     input.dataset.initialValue = input.value || "";
     setDirtyState();
-    input.addEventListener("input", setDirtyState);
+    input.addEventListener("input", () => {
+      setDirtyState();
+      clearAutoSaveTimer();
+      if (!form) return;
+      autoSaveTimer = window.setTimeout(() => {
+        submitIfDirty();
+      }, AUTO_SAVE_DEBOUNCE_MS);
+    });
+    input.addEventListener("blur", () => {
+      clearAutoSaveTimer();
+      submitIfDirty();
+    });
     input.addEventListener("keydown", (event) => {
       event.stopPropagation();
       const key = event.key || "";
       const isEnter = key === "Enter" || key === "NumpadEnter" || event.keyCode === 13 || event.which === 13;
       if (!isEnter) return;
       event.preventDefault();
-      if (!form) return;
-      if (typeof form.requestSubmit === "function") {
-        form.requestSubmit();
-        return;
-      }
-      form.submit();
+      clearAutoSaveTimer();
+      submitIfDirty();
     });
   });
 
@@ -10204,14 +10391,12 @@ window.addEventListener("load", () => {
   });
 
   // Prevent <details>/<summary> toggling when interacting with inline day-label controls.
-  // Do not preventDefault on the Save button — that would block form submit (button also has data-day-summary-control).
   // Only intercept click on <summary>: preventDefault stops <details> toggle. Do not use capture-phase
   // mousedown/keydown on summary when the target is the day-label input — that runs *before* the event
   // reaches the input and breaks typing (e.g. Space still toggling the section).
   document.querySelectorAll(".day-group > summary").forEach((summaryEl) => {
     summaryEl.addEventListener("click", (event) => {
       if (!(event.target instanceof Element)) return;
-      if (event.target.closest('button[type="submit"]')) return;
       if (event.target.closest("[data-day-summary-control]")) {
         event.preventDefault();
         event.stopPropagation();

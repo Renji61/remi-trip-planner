@@ -1228,12 +1228,12 @@ html.theme-dark a.brand:hover {
   width: 100%;
 }
 
-.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .nav-item a {
   display: flex;
   align-items: center;
   gap: var(--ds-space-2);
-  padding: var(--ds-space-3);
+  padding: 6px 10px;
   border-radius: var(--ds-radius-sm);
   color: var(--on-surface-variant);
   font-weight: 700;
@@ -3762,6 +3762,18 @@ html.theme-dark .timeline-connector-dropdown {
   flex: 1;
   min-width: 0;
 }
+/* Match .timeline-connector-option horizontal inset so the button lines up with mode icons */
+.timeline-connector-add-commute {
+  margin: 0 6px;
+  padding: 8px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.timeline-connector-add-commute-btn {
+  width: auto;
+  max-width: 100%;
+}
 .itinerary-booking-view,
 .itinerary-vehicle-view,
 .itinerary-stop-view,
@@ -3928,6 +3940,11 @@ html.theme-dark .timeline-connector-dropdown {
 }
 .itinerary-vehicle-main > strong {
   grid-column: 1 / -1;
+}
+/* ≥640px this wrapper is a 2-col grid; the card must span both or it sits in column 1 (~half width). */
+.itinerary-vehicle-main > .vehicle-card-content {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 .itinerary-vehicle-main > .stay-address-line {
   grid-column: 1 / -1;
@@ -4867,6 +4884,21 @@ html.theme-dark .mobile-sheet--trip-fab-flyout .vehicle-form-grid .vehicle-dropo
   grid-column: 2;
   grid-row: 2;
 }
+.trip-unified-booking-card .remi-flight-booking-meta-cell {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.trip-unified-booking-card .remi-flight-booking-meta-cell > div {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+}
+.trip-unified-booking-card .remi-flight-booking-meta-cell strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .remi-flight-booking-meta-cell--status strong {
   text-transform: none;
   letter-spacing: normal;
@@ -5491,31 +5523,60 @@ html.theme-dark .mobile-sheet--trip-fab-flyout .vehicle-form-grid .vehicle-dropo
   width: 100%;
   box-sizing: border-box;
 }
-/* Itinerary: middle column grows so trail stays at the row end. */
+/* Itinerary: one row — icon | title | day label (grows) | map + chevron. Grid avoids flex-wrap
+   sending .day-label-inline-controls and .day-group-summary-trail to separate lines. */
+.day-group summary.day-group-summary--itinerary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
+}
 .day-group summary.day-group-summary--itinerary .day-group-heading-icon {
-  flex-shrink: 0;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
 }
 .day-group summary.day-group-summary--itinerary .day-group-summary-title {
-  flex: 0 1 auto;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
+  align-self: center;
 }
-/* Let clicks on flex "gutter" pass through to <summary> so <details> toggles. */
-.day-group summary.day-group-summary--itinerary .day-label-inline-controls {
-  flex: 1 1 220px;
+/* Let clicks on the middle column’s empty flex gutter pass through to <summary>. */
+.day-group summary.day-group-summary--itinerary .day-label-inline-controls,
+.day-group summary.day-group-summary--itinerary .day-group-summary-note {
+  grid-column: 3;
+  grid-row: 1;
   min-width: 0;
   max-width: 100%;
+  justify-self: stretch;
+  align-self: center;
   pointer-events: none;
 }
-.day-group summary.day-group-summary--itinerary .day-group-summary-note {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.day-group summary.day-group-summary--itinerary .day-group-summary-trail {
-  margin-left: auto;
-  flex-shrink: 0;
+/* Fill the whole middle grid column so the gap before the map + chevron goes away. */
+.day-group summary.day-group-summary--itinerary .day-label-inline-controls {
+  display: flex;
+  width: 100%;
+  box-sizing: border-box;
 }
 .day-group summary.day-group-summary--itinerary .day-label-inline-controls .day-label-inline-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
   pointer-events: auto;
+}
+/* Never reserve itinerary header space for the legacy day-label Save button. */
+.day-group summary.day-group-summary--itinerary .day-label-inline-save-btn {
+  display: none !important;
+}
+.day-group summary.day-group-summary--itinerary .day-group-summary-trail {
+  grid-column: 4;
+  grid-row: 1;
+  margin-left: 0;
+  justify-self: end;
+  align-self: center;
 }
 .day-group-summary-title {
   min-width: 0;
@@ -5628,24 +5689,6 @@ html.theme-dark .mobile-sheet--trip-fab-flyout .vehicle-form-grid .vehicle-dropo
   height: 34px;
   padding: 6px 10px;
   border-radius: 10px;
-}
-.day-label-inline-save-btn {
-  flex: 0 0 64px;
-  width: 64px;
-  min-height: 34px;
-  height: 34px;
-  padding: 6px 12px;
-  border-radius: 10px;
-  font-size: 12px;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity 140ms ease;
-}
-.day-group summary.day-group-summary--itinerary:has(+ .day-label-inline-form.day-label-dirty) .day-label-inline-save-btn {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
 }
 /* Trip main column: Accommodation / Vehicle rental / Flights sections — title links to full page. */
 .trip-page-section-heading-link {
@@ -5879,6 +5922,52 @@ html.theme-dark .trip-page-summary-item {
 .trip-itinerary-allday-cell--has {
   background: color-mix(in srgb, var(--secondary) 5%, var(--surface));
 }
+/* Week view: one layer for day columns (drop targets) + spanning all-day bars (Stay / Renting merged across days). */
+.trip-itinerary-allday-week-stage {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--outline-variant);
+  box-sizing: border-box;
+}
+.trip-itinerary-allday-week-cols {
+  display: flex;
+  align-items: stretch;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+}
+.trip-itinerary-allday-week-col {
+  flex: 1 1 0;
+  min-width: 0;
+  border-left: 1px solid var(--outline-variant);
+  box-sizing: border-box;
+}
+.trip-itinerary-allday-week-col:first-child {
+  border-left: none;
+}
+.trip-itinerary-allday-week-bars {
+  position: relative;
+  z-index: 1;
+  min-height: 100%;
+  pointer-events: none;
+}
+.trip-itinerary-allday-week-bar {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 2px;
+  pointer-events: auto;
+}
+.trip-itinerary-allday-week-bar .trip-itinerary-allday-chip {
+  height: 100%;
+  min-height: 0;
+  border-radius: 8px;
+}
+.trip-itinerary-allday-week-bar .trip-itinerary-allday-chip__text {
+  -webkit-line-clamp: 2;
+}
 .trip-itinerary-allday-empty {
   display: block;
   min-height: 1px;
@@ -5961,6 +6050,7 @@ html.theme-dark .trip-page-summary-item {
   opacity: 0.55;
 }
 .trip-itinerary-allday-cell.is-drop-target,
+.trip-itinerary-allday-week-col.is-drop-target,
 .trip-itinerary-day-allday.is-drop-target {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary) 75%, transparent);
   border-radius: 6px;
@@ -5993,6 +6083,9 @@ html.theme-dark .trip-itinerary-allday-row {
   background: color-mix(in srgb, var(--primary) 8%, var(--surface));
 }
 html.theme-dark .trip-itinerary-allday-cell {
+  background: color-mix(in srgb, var(--surface) 96%, #000);
+}
+html.theme-dark .trip-itinerary-allday-week-stage.trip-itinerary-allday-cell--has {
   background: color-mix(in srgb, var(--surface) 96%, #000);
 }
 html.theme-dark .trip-itinerary-day-allday {
@@ -10206,27 +10299,24 @@ html.theme-dark .bottom-nav {
   .accommodation-form-panel {
     position: static;
   }
+  .trip-unified-booking-card .vehicle-card-content {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 920px) {
   .trip-grid:not(.trip-grid--list) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .day-label-inline-controls {
-    width: 100%;
-    margin-left: 0;
-    margin-top: 6px;
-  }
-  .day-label-inline-input {
+  .day-group summary.day-group-summary--itinerary .day-label-inline-input {
     min-width: 0;
     max-width: none;
     width: 100%;
   }
   .day-group summary.day-group-summary--itinerary .day-label-inline-controls {
-    flex: 1 1 100%;
-    width: 100%;
+    min-width: 0;
     max-width: none;
-    margin-top: 6px;
+    width: 100%;
   }
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }
@@ -10660,6 +10750,22 @@ html.theme-dark .bottom-nav {
     grid-column: 1;
     grid-row: auto;
   }
+  /* Itinerary + unified bookings: ref/notes column was content-width (flex auto basis) — use full text width. */
+  .remi-flight-booking-meta-cell {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .remi-flight-booking-meta-cell > div {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .remi-flight-booking-meta-cell strong {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
   .flight-edit-form {
     grid-template-columns: 1fr;
     padding: 16px;
@@ -10669,6 +10775,35 @@ html.theme-dark .bottom-nav {
   }
   .vehicle-meta-grid {
     grid-template-columns: 1fr;
+  }
+  /* Mobile trip itinerary cards: match Booking details field spacing/full-width usage. */
+  .trip-details-page .timeline-item .vehicle-meta-grid,
+  .trip-details-page .timeline-item .flight-meta-grid {
+    grid-template-columns: 1fr;
+    width: 100%;
+    min-width: 0;
+  }
+  .trip-details-page .timeline-item .vehicle-meta-grid > div,
+  .trip-details-page .timeline-item .flight-meta-grid > div,
+  .trip-details-page .timeline-item .remi-flight-booking-meta-cell {
+    width: 100%;
+    max-width: 100%;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    min-width: 0;
+  }
+  .trip-details-page .timeline-item .vehicle-meta-grid > div > div,
+  .trip-details-page .timeline-item .flight-meta-grid > div > div,
+  .trip-details-page .timeline-item .remi-flight-booking-meta-cell > div {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .trip-details-page .timeline-item .itinerary-vehicle-main,
+  .trip-details-page .timeline-item .itinerary-vehicle-main > .vehicle-card-content {
+    width: 100%;
+    min-width: 0;
   }
   .vehicle-edit-form {
     grid-template-columns: 1fr;
@@ -10729,11 +10864,6 @@ html.theme-dark .bottom-nav {
   }
   .travel-stats-inner {
     padding: 22px 18px 28px;
-  }
-  .day-label-inline-save-btn {
-    min-height: 32px !important;
-    height: 32px;
-    padding: 5px 10px;
   }
   .flight-card-actions .trip-inline-actions-buttons .item-action-btn,
   .flight-card .item-actions.flight-card-actions > .item-action-btn,
@@ -15940,7 +16070,8 @@ html.theme-dark .tab-page .tab-submit-btn:hover {
   padding: 12px 14px;
   border-radius: 14px;
   border: 1px solid var(--border, #e2e8f0);
-  background: var(--surface-muted, #f1f5f9);
+  /* `background` shorthand would reset background-repeat and tile the custom select chevron — use color only. */
+  background-color: var(--surface-muted, #f1f5f9);
   font: inherit;
   box-sizing: border-box;
   width: 100%;
@@ -15963,7 +16094,7 @@ html.theme-dark .flight-form-panel .flight-form-grid textarea,
 html.theme-dark .flight-edit-form.flight-form-grid input,
 html.theme-dark .flight-edit-form.flight-form-grid select,
 html.theme-dark .flight-edit-form.flight-form-grid textarea {
-  background: rgba(255, 255, 255, 0.06);
+  background-color: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.1);
   color: #f1f5f9;
 }
@@ -16134,6 +16265,9 @@ form select:not([multiple]):not([size]) {
 html.theme-dark form select:not([multiple]):not([size]) {
   background-image:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' stroke='%2394a3b8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 14px 14px;
 }
 html.theme-dark .remi-date-calendar-btn,
 html.theme-dark .remi-time-clock-btn {
@@ -17260,7 +17394,7 @@ html.theme-dark .remi-checklist-edit-form .expense-edit-actions .secondary-btn:h
   .flight-edit-form.flight-form-grid textarea {
     border-radius: var(--trip-resource-input-radius);
     padding: 14px 16px;
-    background: var(--trip-resource-input-bg);
+    background-color: var(--trip-resource-input-bg);
     border: 1px solid rgba(196, 198, 207, 0.28);
   }
 
@@ -17268,7 +17402,7 @@ html.theme-dark .remi-checklist-edit-form .expense-edit-actions .secondary-btn:h
   .vehicle-edit-form .vehicle-dropoff-fieldset {
     border-radius: var(--trip-resource-input-radius);
     border: 1px solid rgba(196, 198, 207, 0.28);
-    background: var(--trip-resource-input-bg);
+    background-color: var(--trip-resource-input-bg);
   }
 
   .vehicle-form-panel .vehicle-dropoff-legend,
@@ -17339,7 +17473,7 @@ html.theme-dark .remi-checklist-edit-form .expense-edit-actions .secondary-btn:h
   html.theme-dark .flight-edit-form.flight-form-grid textarea {
     border-radius: var(--trip-resource-input-radius);
     padding: 14px 16px;
-    background: var(--trip-resource-input-bg);
+    background-color: var(--trip-resource-input-bg);
     border-color: rgba(255, 255, 255, 0.1);
   }
 
@@ -17347,7 +17481,7 @@ html.theme-dark .remi-checklist-edit-form .expense-edit-actions .secondary-btn:h
   html.theme-dark .vehicle-edit-form .vehicle-dropoff-fieldset {
     border-radius: var(--trip-resource-input-radius);
     border-color: rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.06);
   }
 
   html.theme-dark .accommodation-edit-actions .secondary-btn,
@@ -20251,7 +20385,6 @@ html:not(.theme-dark) .trip-keep-details .trip-keep-form--tight .trip-keep-note-
 }
 
 .list,
-.nav-list,
 .trip-inline-actions-buttons,
 .trip-topbar-actions-buttons {
   gap: var(--ds-space-3);
@@ -21401,8 +21534,8 @@ html.theme-dark .trip-notes-import-row {
   box-sizing: border-box;
   padding: 0.45rem 0.65rem;
   border-radius: 10px;
-  border: 1px solid var(--remi-border-subtle, rgba(0, 0, 0, 0.12));
-  background: var(--remi-surface-2, #f7f8fa);
+  border: 1px solid var(--outline);
+  background: var(--surface-low);
   color: var(--on-surface);
   font: inherit;
   font-size: 0.875rem;
@@ -21423,9 +21556,10 @@ html.theme-dark .trip-notes-import-row {
   padding: 0.25rem 0;
   list-style: none;
   border-radius: 10px;
-  border: 1px solid var(--remi-border-subtle, rgba(0, 0, 0, 0.12));
-  background: var(--remi-surface, #fff);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--outline);
+  background: var(--surface);
+  color: var(--on-surface);
+  box-shadow: var(--shadow-mid);
 }
 .trip-unified-bookings-filter__menu li {
   display: flex;
@@ -21437,7 +21571,7 @@ html.theme-dark .trip-notes-import-row {
 }
 .trip-unified-bookings-filter__menu li:hover,
 .trip-unified-bookings-filter__menu li.is-active {
-  background: var(--brand-navy, #1a2e4c);
+  background: var(--primary-container);
   color: #fff;
 }
 .trip-unified-bookings-filter__menu li.is-active .material-symbols-outlined,
@@ -21449,8 +21583,8 @@ html.theme-dark .trip-notes-import-row {
   align-items: center;
   border-radius: 999px;
   padding: 2px;
-  background: var(--remi-surface-2, #edf0f4);
-  border: 1px solid var(--remi-border-subtle, rgba(0, 0, 0, 0.08));
+  background: var(--surface-low);
+  border: 1px solid var(--outline);
   gap: 2px;
   box-sizing: border-box;
 }
@@ -21467,13 +21601,13 @@ html.theme-dark .trip-notes-import-row {
   font: inherit;
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--remi-text-muted, #555);
+  color: var(--on-surface-variant);
   cursor: pointer;
 }
 .trip-unified-bookings-segment__btn.is-active {
-  background: var(--brand-navy, #1a2e4c);
+  background: var(--primary-container);
   color: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-soft);
 }
 .trip-unified-bookings__list {
   display: flex;
@@ -21495,9 +21629,10 @@ html.theme-dark .trip-notes-import-row {
   position: relative;
   list-style: none;
   border-radius: 12px;
-  border: 1px solid var(--remi-border-subtle, rgba(0, 0, 0, 0.1));
-  background: var(--remi-surface, #fff);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--outline);
+  background: var(--surface);
+  color: var(--on-surface);
+  box-shadow: var(--shadow-soft);
   padding: 0.5rem 0.65rem 0.65rem;
   overflow: hidden;
 }
@@ -21507,7 +21642,7 @@ html.theme-dark .trip-notes-import-row {
 .trip-unified-booking-card {
   position: relative;
   padding-left: 0.35rem;
-  border-left: 4px solid var(--remi-border-subtle, #ccc);
+  border-left: 4px solid var(--outline);
 }
 .trip-unified-booking-card--lodging {
   border-left-color: #c75c5c;
@@ -21527,7 +21662,7 @@ html.theme-dark .trip-notes-import-row {
   gap: 0.4rem 0.75rem;
   margin: 0.2rem 0 0.45rem;
   font-size: 0.8rem;
-  color: var(--remi-text-muted, #666);
+  color: var(--on-surface-variant);
 }
 .trip-unified-booking-card__strip-left {
   justify-self: start;
@@ -21541,21 +21676,21 @@ html.theme-dark .trip-notes-import-row {
 }
 .trip-unified-booking-card__strip-mid {
   text-align: center;
-  color: var(--remi-text-muted, #666);
+  color: var(--on-surface-variant);
   font-size: 0.75rem;
 }
 .trip-unified-booking-card__strip-mid .material-symbols-outlined {
   display: block;
   margin: 0 auto 0.1rem;
   font-size: 1.25rem;
-  opacity: 0.8;
-  color: var(--brand-navy, #1a2e4c);
+  opacity: 0.9;
+  color: var(--primary);
 }
 .trip-unified-booking-card__strip-time,
 .trip-unified-booking-card__strip-apt {
   display: block;
   font-weight: 700;
-  color: var(--on-surface, #111);
+  color: var(--on-surface);
   font-size: 0.95rem;
 }
 /* Booking status in meta grid: keep sentence case (grid strong is otherwise all-caps). */
@@ -21588,7 +21723,7 @@ html.theme-dark .trip-notes-import-row {
     padding-left: 0;
     border-left: none;
     padding-top: 0.35rem;
-    border-top: 4px solid var(--remi-border-subtle, #ccc);
+    border-top: 4px solid var(--outline);
   }
   .trip-unified-booking-card--lodging {
     border-top-color: #c75c5c;

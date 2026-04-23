@@ -241,7 +241,12 @@
                   {{if ne (trimSpace .Settings.OpenWeatherAPIKey) ""}}
                   <div class="gmaps-key-saved-card" data-openweather-key-saved hidden>
                     <div class="gmaps-key-saved-card__label">OpenWeatherMap API key</div>
-                    <div class="gmaps-key-saved-card__value" data-openweather-key-masked>••••••••••••</div>
+                    <div class="gmaps-key-saved-card__row">
+                      <code class="gmaps-key-saved-card__mask" data-openweather-key-mask data-openweather-key-masked aria-hidden="true"></code>
+                      <button type="button" class="icon-btn gmaps-key-copy-btn" data-openweather-key-copy title="Copy key" aria-label="Copy OpenWeatherMap API key to clipboard">
+                        <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
+                      </button>
+                    </div>
                     <div class="gmaps-key-saved-card__actions">
                       <button type="button" class="btn gmaps-key-update-btn" data-openweather-key-update>
                         <span class="material-symbols-outlined" aria-hidden="true">sync</span>
